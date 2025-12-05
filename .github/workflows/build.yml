@@ -25,7 +25,7 @@ jobs:
       
       - name: Build Windows App
         run: |
-          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean main.py
+          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean --collect-all PyQt6 --collect-all PyQt6-WebEngine --hidden-import=PyQt6.sip main.py
       
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
