@@ -27,8 +27,20 @@ jobs:
 
       - name: Build Windows App
         run: |
-          # 使用更详细的打包参数
-          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean --collect-all PyQt6 --collect-all PyQt6-WebEngine --hidden-import=PyQt6.sip main.py
+          # 显式收集关键依赖
+          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
+            --collect-all PyQt6 ^
+            --collect-all PyQt6-WebEngine ^
+            --collect-all requests ^
+            --collect-all pymongo ^
+            --collect-all mongoengine ^
+            --collect-all dns ^
+            --collect-all certifi ^
+            --hidden-import=PyQt6.sip ^
+            --hidden-import=requests ^
+            --hidden-import=dns.resolver ^
+            --hidden-import=dns.rdatatype ^
+            main.py
 
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
