@@ -3,30 +3,30 @@ name: Build Apps
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:  # 手动触发
+      - "v*"
+  workflow_dispatch: # 手动触发
 
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      
+          python-version: "3.9"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-      
+
       - name: Build Windows App
         run: |
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean --collect-all PyQt6 --collect-all PyQt6-WebEngine --hidden-import=PyQt6.sip main.py
-      
+
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
         with:
@@ -34,26 +34,26 @@ jobs:
           path: dist/自动表单填写工具-Windows/
 
   build-macos-intel:
-    runs-on: macos-13  # Intel Mac
+    runs-on: macos-13 # Intel Mac
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      
+          python-version: "3.9"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
           pip install pyinstaller
-      
+
       - name: Build macOS Intel App
         run: |
           pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean --osx-bundle-identifier=com.autofill.app main.py
-      
+
       - name: Upload macOS Intel Build
         uses: actions/upload-artifact@v4
         with:
@@ -61,25 +61,25 @@ jobs:
           path: dist/自动表单填写工具-Intel.app/
 
   build-macos-arm:
-    runs-on: macos-14  # Apple Silicon Mac
+    runs-on: macos-14 # Apple Silicon Mac
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      
+          python-version: "3.9"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-      
+
       - name: Build macOS ARM App
         run: |
           pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean --osx-bundle-identifier=com.autofill.app main.py
-      
+
       - name: Upload macOS ARM Build
         uses: actions/upload-artifact@v4
         with:
