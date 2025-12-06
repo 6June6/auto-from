@@ -4,167 +4,341 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QLineEdit, QFrame, QAbstractItemView, 
-    QGraphicsDropShadowEffect, QDialog, QScrollArea, QGridLayout
+    QLabel, QMessageBox, QLineEdit, QFrame, 
+    QGraphicsDropShadowEffect, QDialog, QScrollArea
 )
-from PyQt6.QtCore import Qt, QSize, QDateTime
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from database import DatabaseManager, Card, User, CardEditRequest
-from gui.styles import COLORS
 from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget,
+    BaseListHeader, BaseRowWidget, BaseListWidget, create_action_button
+)
 import datetime
 import json
 from gui.card_manager import CardEditDialog  # For reference
 
-# 扩展颜色系统 - 复用 admin_user_manager 的风格
-PREMIUM_COLORS = {
-    **COLORS,
-    # 渐变色组
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    
-    # 玻璃效果
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'glass_shadow': 'rgba(31, 38, 135, 0.07)',
-    
-    # 深色点缀
-    'dark_accent': '#1a1a2e',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    
-    # 功能色
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'lavender': '#a29bfe',
-    'sky': '#74b9ff',
+
+# ========== 名片列表自定义组件 ==========
+
+# 列宽配置
+CARD_LIST_COLUMNS = {
+    'name': 180,
+    'user': 120,
+    'category': 100,
+    'configs': 80,
+    'created': 130,
+    'updated': 130,
+    'actions': 160,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    
-    def __init__(self, parent=None, opacity=0.9, radius=24, hover_effect=False):
-        super().__init__(parent)
-        self.opacity = opacity
-        self.radius = radius
-        self.hover_effect = hover_effect
-        self._setup_style()
-    
-    def _setup_style(self):
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: {self.radius}px;
-            }}
-            GlassFrame:hover {{
-                background: rgba(255, 255, 255, {min(1.0, self.opacity + 0.05)});
-                border-color: rgba(255, 255, 255, 1.0);
-            }}
-        """ if self.hover_effect else f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: {self.radius}px;
-            }}
-        """)
-        
-        # 添加高级阴影效果
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(31, 38, 135, 15))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class GradientButton(QPushButton):
-    """渐变按钮"""
+class CardListHeader(QFrame):
+    """名片列表表头"""
     
-    def __init__(self, text, start_color, end_color, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                color: white;
+            CardListHeader {{
+                background: {PREMIUM_COLORS['background']};
                 border: none;
-                border-radius: 22px;
-                font-weight: 600;
-                font-size: 14px;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {end_color}, stop:1 {start_color});
-            }}
-            QPushButton:pressed {{
-                padding-top: 2px;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
             }}
         """)
-
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
-        super().__init__(parent)
-        self.value = value
-        self._setup_ui(title, icon, color_start, color_end)
-        
-    def _setup_ui(self, title, icon, color_start, color_end):
-        self.setFixedSize(140, 50)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
         
-        # 背景样式
+        headers = [
+            ('名片名称', CARD_LIST_COLUMNS['name']),
+            ('所属用户', CARD_LIST_COLUMNS['user']),
+            ('分类', CARD_LIST_COLUMNS['category']),
+            ('配置项', CARD_LIST_COLUMNS['configs']),
+            ('创建时间', CARD_LIST_COLUMNS['created']),
+            ('更新时间', CARD_LIST_COLUMNS['updated']),
+            ('操作', CARD_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class CardRowWidget(QFrame):
+    """名片行组件"""
+    
+    view_clicked = pyqtSignal(object)
+    edit_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
+    
+    def __init__(self, card, parent=None):
+        super().__init__(parent)
+        self.card = card
+        self.setFixedHeight(64)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            CardRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            CardRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
         
-        # 图标
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
-            color: white;
-            border-radius: 8px;
-            font-size: 16px;
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 名片名称
+        self._add_name(layout)
+        # 2. 所属用户
+        self._add_user(layout)
+        # 3. 分类
+        self._add_category(layout)
+        # 4. 配置项数
+        self._add_configs(layout)
+        # 5. 创建时间
+        self._add_created(layout)
+        # 6. 更新时间
+        self._add_updated(layout)
+        # 7. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_name(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['name'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setSpacing(10)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        icon_lbl = QLabel("📇")
+        icon_lbl.setStyleSheet("font-size: 18px;")
+        
+        name_box = QVBoxLayout()
+        name_box.setSpacing(2)
+        name_box.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        name_lbl = QLabel(self.card.name)
+        name_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        
+        desc_lbl = QLabel(self.card.description[:20] + "..." if self.card.description and len(self.card.description) > 20 else (self.card.description or "无描述"))
+        desc_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 11px;")
+        
+        name_box.addWidget(name_lbl)
+        name_box.addWidget(desc_lbl)
+        
+        c_layout.addWidget(icon_lbl)
+        c_layout.addLayout(name_box)
+        layout.addWidget(container)
+    
+    def _add_user(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['user'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        if self.card.user:
+            avatar = QLabel(self.card.user.username[0].upper())
+            avatar.setFixedSize(24, 24)
+            avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            avatar.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['gradient_blue_start']};
+                color: white;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+            
+            name_lbl = QLabel(self.card.user.username)
+            name_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
+            
+            c_layout.addWidget(avatar)
+            c_layout.addWidget(name_lbl)
+        else:
+            lbl = QLabel("未知用户")
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 13px;")
+            c_layout.addWidget(lbl)
+        
+        layout.addWidget(container)
+    
+    def _add_category(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['category'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        cat_lbl = QLabel(self.card.category or "默认分类")
+        cat_lbl.setStyleSheet(f"""
+            background: {PREMIUM_COLORS['text_hint']}15;
+            color: {PREMIUM_COLORS['text_body']};
+            border: 1px solid {PREMIUM_COLORS['text_hint']}40;
+            border-radius: 11px;
+            padding: 2px 10px;
+            font-size: 11px;
+            font-weight: 500;
         """)
-        layout.addWidget(icon_lbl)
+        c_layout.addWidget(cat_lbl)
+        layout.addWidget(container)
+    
+    def _add_configs(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['configs'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # 文本
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        count_lbl = QLabel(str(len(self.card.configs)))
+        count_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px; font-weight: 600;")
+        c_layout.addWidget(count_lbl)
+        layout.addWidget(container)
+    
+    def _add_created(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['created'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.value_lbl = QLabel(str(self.value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
+        created_str = self.card.created_at.strftime('%Y-%m-%d %H:%M') if self.card.created_at else '-'
+        lbl = QLabel(created_str)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_updated(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['updated'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
+        updated_str = self.card.updated_at.strftime('%Y-%m-%d %H:%M') if self.card.updated_at else '-'
+        lbl = QLabel(updated_str)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(CARD_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        layout.addLayout(text_layout)
+        # 查看按钮
+        btn_view = create_action_button("查看", PREMIUM_COLORS['gradient_blue_start'])
+        btn_view.clicked.connect(lambda: self.view_clicked.emit(self.card))
+        c_layout.addWidget(btn_view)
         
-    def update_value(self, value):
-        self.value = value
-        self.value_lbl.setText(str(value))
+        # 编辑按钮
+        btn_edit = create_action_button("编辑", PREMIUM_COLORS['gradient_orange_start'])
+        btn_edit.clicked.connect(lambda: self.edit_clicked.emit(self.card))
+        c_layout.addWidget(btn_edit)
+        
+        # 删除按钮
+        btn_del = create_action_button("删除", PREMIUM_COLORS['coral'])
+        btn_del.clicked.connect(lambda: self.delete_clicked.emit(self.card))
+        c_layout.addWidget(btn_del)
+        
+        layout.addWidget(container)
+
+
+class CardListWidget(QWidget):
+    """名片列表组件"""
+    
+    view_card = pyqtSignal(object)
+    edit_card = pyqtSignal(object)
+    delete_card = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = CardListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
+        
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_cards(self, cards):
+        # 清空现有行
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        if not cards:
+            empty_label = QLabel("暂无名片数据")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
+        
+        for card in cards:
+            row = CardRowWidget(card)
+            row.view_clicked.connect(self.view_card.emit)
+            row.edit_clicked.connect(self.edit_card.emit)
+            row.delete_clicked.connect(self.delete_card.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class AdminCardViewDialog(QDialog):
     """管理员名片查看对话框 - 重新设计版"""
@@ -810,7 +984,7 @@ class AdminCardManager(QWidget):
         layout.addLayout(header_layout)
         
     def _create_main_card(self, layout):
-        """创建主内容卡片：工具栏 + 表格 + 分页"""
+        """创建主内容卡片：工具栏 + 名片列表 + 分页"""
         card = GlassFrame(opacity=1.0, radius=16)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(0, 0, 0, 0)
@@ -864,58 +1038,13 @@ class AdminCardManager(QWidget):
         
         card_layout.addWidget(toolbar)
         
-        # 2. 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['名片名称', '所属用户', '分类', '配置项数', '创建时间', '更新时间', '操作'])
+        # 2. 自定义名片列表
+        self.card_list = CardListWidget()
+        self.card_list.view_card.connect(self.view_card)
+        self.card_list.edit_card.connect(self.edit_card)
+        self.card_list.delete_card.connect(self.delete_card)
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 80)
-        self.table.setColumnWidth(4, 140)
-        self.table.setColumnWidth(5, 140)
-        self.table.setColumnWidth(6, 220)
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{
-                background: transparent;
-                border: none;
-            }}
-            QTableWidget::item {{
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                padding: 0px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PREMIUM_COLORS['primary']}08;
-            }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)
+        card_layout.addWidget(self.card_list, 1)
         
         # 3. 分页
         pagination = QFrame()
@@ -1039,7 +1168,7 @@ class AdminCardManager(QWidget):
         end_idx = start_idx + self.page_size
         cards = all_cards[start_idx:end_idx]
         
-        self.update_table(cards)
+        self.card_list.set_cards(cards)
         self.update_pagination()
         
     def update_pagination(self):
@@ -1055,178 +1184,6 @@ class AdminCardManager(QWidget):
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
         
-    def update_table(self, cards):
-        self.table.setRowCount(len(cards))
-        
-        for row, card in enumerate(cards):
-            self.table.setRowHeight(row, 60)
-            
-            # 1. 名片名称 (带图标)
-            name_widget = QWidget()
-            name_layout = QHBoxLayout(name_widget)
-            name_layout.setContentsMargins(12, 0, 4, 0)
-            name_layout.setSpacing(10)
-            name_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            icon_lbl = QLabel("📇")
-            icon_lbl.setStyleSheet("font-size: 18px;")
-            
-            name_vbox = QVBoxLayout()
-            name_vbox.setSpacing(2)
-            name_vbox.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            name_lbl = QLabel(card.name)
-            name_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-            
-            desc_lbl = QLabel(card.description or "无描述")
-            desc_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 11px;")
-            desc_lbl.setMaximumWidth(150)
-            
-            name_vbox.addWidget(name_lbl)
-            name_vbox.addWidget(desc_lbl)
-            
-            name_layout.addWidget(icon_lbl)
-            name_layout.addLayout(name_vbox)
-            self.table.setCellWidget(row, 0, name_widget)
-            
-            # 2. 所属用户
-            user_widget = QWidget()
-            user_layout = QHBoxLayout(user_widget)
-            user_layout.setContentsMargins(8, 0, 8, 0)
-            user_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            if card.user:
-                user_avatar = QLabel(card.user.username[0].upper())
-                user_avatar.setFixedSize(24, 24)
-                user_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                user_avatar.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['gradient_blue_start']};
-                    color: white;
-                    border-radius: 12px;
-                    font-size: 11px;
-                    font-weight: 600;
-                """)
-                
-                user_name = QLabel(card.user.username)
-                user_name.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
-                
-                user_layout.addWidget(user_avatar)
-                user_layout.addWidget(user_name)
-            else:
-                user_lbl = QLabel("未知用户")
-                user_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 13px;")
-                user_layout.addWidget(user_lbl)
-            self.table.setCellWidget(row, 1, user_widget)
-            
-            # 3. 分类
-            cat_widget = QWidget()
-            cat_layout = QHBoxLayout(cat_widget)
-            cat_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            cat_lbl = QLabel(card.category or "默认分类")
-            cat_lbl.setStyleSheet(f"""
-                background: {PREMIUM_COLORS['text_hint']}15;
-                color: {PREMIUM_COLORS['text_body']};
-                border: 1px solid {PREMIUM_COLORS['text_hint']}40;
-                border-radius: 11px;
-                padding: 2px 10px;
-                font-size: 11px;
-                font-weight: 500;
-            """)
-            cat_layout.addWidget(cat_lbl)
-            self.table.setCellWidget(row, 2, cat_widget)
-            
-            # 4. 配置项数
-            count_item = QTableWidgetItem(str(len(card.configs)))
-            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 3, count_item)
-            
-            # 5. 创建时间
-            created_str = card.created_at.strftime('%Y-%m-%d %H:%M') if card.created_at else '-'
-            time_item = QTableWidgetItem(created_str)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            time_item.setForeground(QBrush(QColor(PREMIUM_COLORS['text_body'])))
-            self.table.setItem(row, 4, time_item)
-            
-            # 6. 更新时间
-            updated_str = card.updated_at.strftime('%Y-%m-%d %H:%M') if card.updated_at else '-'
-            up_time_item = QTableWidgetItem(updated_str)
-            up_time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            up_time_item.setForeground(QBrush(QColor(PREMIUM_COLORS['text_hint'])))
-            self.table.setItem(row, 5, up_time_item)
-            
-            # 7. 操作
-            ops_widget = QWidget()
-            ops_layout = QHBoxLayout(ops_widget)
-            ops_layout.setContentsMargins(4, 0, 4, 0)
-            ops_layout.setSpacing(6)
-            ops_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 查看按钮
-            btn_view = QPushButton("查看")
-            btn_view.setFixedSize(44, 24)
-            btn_view.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_view.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['gradient_blue_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['gradient_blue_start']}10;
-                    border-color: {PREMIUM_COLORS['gradient_blue_start']};
-                }}
-            """)
-            btn_view.clicked.connect(lambda _, c=card: self.view_card(c))
-            ops_layout.addWidget(btn_view)
-            
-            # 编辑按钮
-            btn_edit = QPushButton("编辑")
-            btn_edit.setFixedSize(44, 24)
-            btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_edit.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['gradient_orange_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_orange_start']}40;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['gradient_orange_start']}10;
-                    border-color: {PREMIUM_COLORS['gradient_orange_start']};
-                }}
-            """)
-            btn_edit.clicked.connect(lambda _, c=card: self.edit_card(c))
-            ops_layout.addWidget(btn_edit)
-            
-            # 删除按钮
-            btn_del = QPushButton("删除")
-            btn_del.setFixedSize(44, 24)
-            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_del.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['coral']};
-                    border: 1px solid {PREMIUM_COLORS['coral']}40;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['coral']}10;
-                    border-color: {PREMIUM_COLORS['coral']};
-                }}
-            """)
-            btn_del.clicked.connect(lambda _, c=card: self.delete_card(c))
-            ops_layout.addWidget(btn_del)
-            
-            self.table.setCellWidget(row, 6, ops_widget)
-            
     def view_card(self, card):
         """查看名片详情"""
         dialog = AdminCardViewDialog(card, self)

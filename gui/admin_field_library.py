@@ -5,148 +5,314 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QLineEdit, QFrame, QAbstractItemView, 
+    QLabel, QMessageBox, QLineEdit, QFrame, 
     QGraphicsDropShadowEffect, QDialog, QComboBox, QScrollArea, QListWidget, QListWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QColor
 from database import DatabaseManager, FieldLibrary, User
-from gui.styles import COLORS
-from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget, create_action_button
+)
 
-# 扩展颜色系统
-PREMIUM_COLORS = {
-    **COLORS,
-    # 渐变色组
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    
-    # 玻璃效果
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'glass_shadow': 'rgba(31, 38, 135, 0.07)',
-    
-    # 深色点缀
-    'dark_accent': '#1a1a2e',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    
-    # 功能色
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'lavender': '#a29bfe',
-    'sky': '#74b9ff',
-    
-    'border_light': '#e2e8f0',
-    'background': '#f8fafc',
-    'surface': '#ffffff',
+
+# ========== 字段库列表自定义组件 ==========
+
+# 列宽配置
+FIELD_LIST_COLUMNS = {
+    'name': 180,
+    'category': 100,
+    'desc': 160,
+    'default': 120,
+    'order': 60,
+    'status': 80,
+    'actions': 180,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    def __init__(self, parent=None, opacity=1.0, radius=16):
-        super().__init__(parent)
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {opacity});
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: {radius}px;
-            }}
-        """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(24)
-        shadow.setColor(QColor(0, 0, 0, 12))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class GradientButton(QPushButton):
-    """渐变按钮"""
-    def __init__(self, text, start_color, end_color, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(40)
+class FieldListHeader(QFrame):
+    """字段库列表表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                color: white;
+            FieldListHeader {{
+                background: {PREMIUM_COLORS['background']};
                 border: none;
-                border-radius: 20px;
-                font-weight: 600;
-                font-size: 13px;
-                padding: 0 20px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {end_color}, stop:1 {start_color});
-            }}
-            QPushButton:pressed {{
-                padding-top: 2px;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
             }}
         """)
-
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
-        super().__init__(parent)
-        self.value = value
-        self._setup_ui(title, icon, color_start, color_end)
-        
-    def _setup_ui(self, title, icon, color_start, color_end):
-        self.setFixedSize(140, 50)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
         
-        # 背景样式
+        headers = [
+            ('字段名称', FIELD_LIST_COLUMNS['name']),
+            ('分类', FIELD_LIST_COLUMNS['category']),
+            ('说明', FIELD_LIST_COLUMNS['desc']),
+            ('默认值', FIELD_LIST_COLUMNS['default']),
+            ('排序', FIELD_LIST_COLUMNS['order']),
+            ('状态', FIELD_LIST_COLUMNS['status']),
+            ('操作', FIELD_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class FieldRowWidget(QFrame):
+    """字段行组件"""
+    
+    push_clicked = pyqtSignal(object)
+    edit_clicked = pyqtSignal(object)
+    toggle_clicked = pyqtSignal(object)
+    
+    def __init__(self, field, parent=None):
+        super().__init__(parent)
+        self.field = field
+        self.setFixedHeight(64)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            FieldRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            FieldRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
         
-        # 图标
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
-            color: white;
-            border-radius: 8px;
-            font-size: 16px;
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 字段名称
+        self._add_name(layout)
+        # 2. 分类
+        self._add_category(layout)
+        # 3. 说明
+        self._add_desc(layout)
+        # 4. 默认值
+        self._add_default(layout)
+        # 5. 排序
+        self._add_order(layout)
+        # 6. 状态
+        self._add_status(layout)
+        # 7. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_name(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['name'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        name_lbl = QLabel(self.field.name)
+        name_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        name_lbl.setWordWrap(True)
+        c_layout.addWidget(name_lbl)
+        layout.addWidget(container)
+    
+    def _add_category(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['category'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        cat_lbl = QLabel(self.field.category or '通用')
+        cat_lbl.setStyleSheet(f"""
+            background: {PREMIUM_COLORS['text_hint']}15;
+            color: {PREMIUM_COLORS['text_body']};
+            border-radius: 10px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 500;
         """)
-        layout.addWidget(icon_lbl)
+        c_layout.addWidget(cat_lbl)
+        layout.addWidget(container)
+    
+    def _add_desc(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['desc'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        # 文本
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        desc = self.field.description or '-'
+        if len(desc) > 15:
+            desc = desc[:15] + '...'
+        lbl = QLabel(desc)
+        lbl.setToolTip(self.field.description or '')
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_default(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['default'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        self.value_lbl = QLabel(str(self.value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
+        default_val = self.field.default_value or '-'
+        if len(default_val) > 12:
+            default_val = default_val[:12] + '...'
+        lbl = QLabel(default_val)
+        lbl.setToolTip(self.field.default_value or '')
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_order(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['order'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
+        lbl = QLabel(str(self.field.order))
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_status(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['status'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        layout.addLayout(text_layout)
+        status_lbl = QLabel()
+        if self.field.is_active:
+            status_lbl.setText("✅ 启用")
+            status_lbl.setStyleSheet("color: #059669; background: #ecfdf5; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;")
+        else:
+            status_lbl.setText("⛔ 禁用")
+            status_lbl.setStyleSheet("color: #dc2626; background: #fef2f2; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;")
         
-    def update_value(self, value):
-        self.value = value
-        self.value_lbl.setText(str(value))
+        c_layout.addWidget(status_lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(FIELD_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # 推送按钮
+        btn_push = create_action_button("推送", PREMIUM_COLORS['gradient_orange_start'])
+        btn_push.clicked.connect(lambda: self.push_clicked.emit(self.field))
+        c_layout.addWidget(btn_push)
+        
+        # 编辑按钮
+        btn_edit = create_action_button("编辑", PREMIUM_COLORS['gradient_blue_start'])
+        btn_edit.clicked.connect(lambda: self.edit_clicked.emit(self.field))
+        c_layout.addWidget(btn_edit)
+        
+        # 禁用/启用按钮
+        if self.field.is_active:
+            btn_toggle = create_action_button("禁用", PREMIUM_COLORS['coral'])
+        else:
+            btn_toggle = create_action_button("启用", PREMIUM_COLORS['gradient_green_start'])
+        btn_toggle.clicked.connect(lambda: self.toggle_clicked.emit(self.field))
+        c_layout.addWidget(btn_toggle)
+        
+        layout.addWidget(container)
+
+
+class FieldListWidget(QWidget):
+    """字段库列表组件"""
+    
+    push_field = pyqtSignal(object)
+    edit_field = pyqtSignal(object)
+    toggle_field = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = FieldListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
+        
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_fields(self, fields):
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        if not fields:
+            empty_label = QLabel("暂无字段数据")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
+        
+        for field in fields:
+            row = FieldRowWidget(field)
+            row.push_clicked.connect(self.push_field.emit)
+            row.edit_clicked.connect(self.edit_field.emit)
+            row.toggle_clicked.connect(self.toggle_field.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class PushToUserDialog(QDialog):
     """推送字段给用户对话框"""
@@ -633,53 +799,13 @@ class AdminFieldLibraryManager(QWidget):
         
         card_layout.addWidget(toolbar)
         
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['字段名称', '分类', '说明', '默认值', '排序', '状态', '操作'])
+        # 自定义字段列表
+        self.field_list = FieldListWidget()
+        self.field_list.push_field.connect(self.push_to_user)
+        self.field_list.edit_field.connect(self.edit_field)
+        self.field_list.toggle_field.connect(self.toggle_field_status)
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) # Name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)   # Category
-        self.table.setColumnWidth(1, 100)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Desc
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)   # Default
-        self.table.setColumnWidth(3, 120)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)   # Order
-        self.table.setColumnWidth(4, 60)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)   # Status
-        self.table.setColumnWidth(5, 80)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)   # Actions
-        self.table.setColumnWidth(6, 220) # 增加宽度以容纳"推送"按钮
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{ background: transparent; border: none; }}
-            QTableWidget::item {{ 
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']}; 
-                padding: 0 10px; 
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PREMIUM_COLORS['gradient_blue_start']}08;
-            }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)
+        card_layout.addWidget(self.field_list, 1)
         
         # Pagination
         pagination = QFrame()
@@ -824,147 +950,26 @@ class AdminFieldLibraryManager(QWidget):
         end_idx = start_idx + self.page_size
         fields = all_fields[start_idx:end_idx]
         
-        self.update_table(fields)
+        self.field_list.set_fields(fields)
         self.update_pagination()
-        
-    def update_table(self, fields):
-        self.table.setRowCount(len(fields))
-        
-        for row, field in enumerate(fields):
-            self.table.setRowHeight(row, 60)
+    
+    def push_to_user(self, field):
+        """推送字段到用户 - 行组件信号处理"""
+        current_user = None
+        parent = self.window()
+        if hasattr(parent, 'current_user'):
+            current_user = parent.current_user
             
-            # 1. Name
-            name_item = QTableWidgetItem(field.name)
-            name_item.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-            name_item.setForeground(QColor(PREMIUM_COLORS['text_heading']))
-            self.table.setItem(row, 0, name_item)
-            
-            # 2. Category
-            cat_widget = QWidget()
-            cat_layout = QHBoxLayout(cat_widget)
-            cat_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cat_layout.setContentsMargins(0,0,0,0)
-            
-            cat_lbl = QLabel(field.category or '通用')
-            cat_lbl.setStyleSheet(f"""
-                background: {PREMIUM_COLORS['text_hint']}15;
-                color: {PREMIUM_COLORS['text_body']};
-                border-radius: 10px;
-                padding: 4px 8px;
-                font-size: 12px;
-                font-weight: 500;
-            """)
-            cat_layout.addWidget(cat_lbl)
-            self.table.setCellWidget(row, 1, cat_widget)
-            
-            # 3. Desc
-            desc = field.description or '-'
-            if len(desc) > 20: desc = desc[:20] + '...'
-            self.table.setItem(row, 2, QTableWidgetItem(desc))
-            
-            # 4. Default
-            default_val = field.default_value or '-'
-            if len(default_val) > 15: default_val = default_val[:15] + '...'
-            self.table.setItem(row, 3, QTableWidgetItem(default_val))
-            
-            # 5. Order
-            order_item = QTableWidgetItem(str(field.order))
-            order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 4, order_item)
-            
-            # 6. Status Widget
-            status_widget = QWidget()
-            sl = QHBoxLayout(status_widget)
-            sl.setContentsMargins(0,0,0,0)
-            sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            status_lbl = QLabel()
-            if field.is_active:
-                status_lbl.setText("✅ 启用")
-                status_lbl.setStyleSheet("color: #059669; background: #ecfdf5; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;")
-            else:
-                status_lbl.setText("⛔ 禁用")
-                status_lbl.setStyleSheet("color: #dc2626; background: #fef2f2; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;")
-            sl.addWidget(status_lbl)
-            self.table.setCellWidget(row, 5, status_widget)
-            
-            # 7. Actions
-            action_widget = QWidget()
-            al = QHBoxLayout(action_widget)
-            al.setContentsMargins(0,0,0,0)
-            al.setSpacing(8)
-            al.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # Push Button
-            push_btn = QPushButton("推送")
-            push_btn.setFixedSize(50, 28)
-            push_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            push_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: white;
-                    color: {PREMIUM_COLORS['gradient_orange_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_orange_start']}40;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    font-size: 12px;
-                }}
-                QPushButton:hover {{ 
-                    background: {PREMIUM_COLORS['gradient_orange_start']}10; 
-                    border-color: {PREMIUM_COLORS['gradient_orange_start']};
-                }}
-            """)
-            push_btn.clicked.connect(lambda _, f=field: self.show_push_dialog(f))
-            al.addWidget(push_btn)
-            
-            edit_btn = QPushButton("编辑")
-            edit_btn.setFixedSize(50, 28)
-            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            edit_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: white;
-                    color: {PREMIUM_COLORS['gradient_blue_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    font-size: 12px;
-                }}
-                QPushButton:hover {{ 
-                    background: {PREMIUM_COLORS['gradient_blue_start']}10; 
-                    border-color: {PREMIUM_COLORS['gradient_blue_start']};
-                }}
-            """)
-            edit_btn.clicked.connect(lambda _, f=field: self.show_add_dialog(f))
-            al.addWidget(edit_btn)
-            
-            toggle_btn = QPushButton("禁用" if field.is_active else "启用")
-            toggle_btn.setFixedSize(50, 28)
-            toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            
-            if field.is_active:
-                color = PREMIUM_COLORS['coral']
-                bg_hover = f"{PREMIUM_COLORS['coral']}10"
-            else:
-                color = PREMIUM_COLORS['gradient_green_start']
-                bg_hover = f"{PREMIUM_COLORS['gradient_green_start']}10"
-                
-            toggle_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: white;
-                    color: {color};
-                    border: 1px solid {color}40;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    font-size: 12px;
-                }}
-                QPushButton:hover {{ 
-                    background: {bg_hover}; 
-                    border-color: {color};
-                }}
-            """)
-            toggle_btn.clicked.connect(lambda _, f=field: self.toggle_status(f))
-            al.addWidget(toggle_btn)
-            
-            self.table.setCellWidget(row, 6, action_widget)
+        dialog = PushToUserDialog(field, self.db_manager, current_user, self)
+        dialog.exec()
+    
+    def edit_field(self, field):
+        """编辑字段 - 行组件信号处理"""
+        self.show_add_dialog(field)
+    
+    def toggle_field_status(self, field):
+        """切换字段状态 - 行组件信号处理"""
+        self.toggle_status(field)
             
     def show_add_dialog(self, field=None):
         # 获取当前主窗口的用户信息

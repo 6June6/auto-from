@@ -24,6 +24,268 @@ import config
 from collections import defaultdict
 from database.models import SystemConfig
 
+# 首页记录列表列宽配置
+HOME_RECORD_COLUMNS = {
+    'time': 140,
+    'card': 160,
+    'link': 220,
+    'total': 70,
+    'success': 70,
+    'status': 70
+}
+
+
+class HomeRecordListHeader(QFrame):
+    """首页记录列表表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(48)
+        self.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: none;
+                border-bottom: 2px solid #F5F5F7;
+            }
+        """)
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(12)
+        
+        columns = [
+            ('时间', HOME_RECORD_COLUMNS['time']),
+            ('名片', HOME_RECORD_COLUMNS['card']),
+            ('链接', HOME_RECORD_COLUMNS['link']),
+            ('填写字段', HOME_RECORD_COLUMNS['total']),
+            ('成功数', HOME_RECORD_COLUMNS['success']),
+            ('状态', HOME_RECORD_COLUMNS['status'])
+        ]
+        
+        for name, width in columns:
+            label = QLabel(name)
+            label.setFixedWidth(width)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setStyleSheet("""
+                font-weight: 700;
+                color: #86868B;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            """)
+            layout.addWidget(label)
+        
+        layout.addStretch()
+
+
+class HomeRecordRowWidget(QFrame):
+    """首页记录行组件"""
+    
+    def __init__(self, record, parent=None):
+        super().__init__(parent)
+        self.record = record
+        self.setFixedHeight(56)
+        self.setStyleSheet("""
+            HomeRecordRowWidget {
+                background: white;
+                border: none;
+                border-bottom: 1px solid #FAFAFA;
+            }
+            HomeRecordRowWidget:hover {
+                background: #F9FAFB;
+            }
+        """)
+        self._setup_content()
+        
+    def _setup_content(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(12)
+        
+        # 1. 时间
+        time_text = self.record.created_at.strftime("%Y-%m-%d %H:%M")
+        time_label = QLabel(time_text)
+        time_label.setFixedWidth(HOME_RECORD_COLUMNS['time'])
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_label.setStyleSheet("color: #86868B; font-size: 13px;")
+        layout.addWidget(time_label)
+        
+        # 2. 名片
+        card_name = "未知名片"
+        try:
+            if self.record.card:
+                card_name = self.record.card.name
+        except Exception:
+            card_name = "名片已删除"
+        
+        card_label = QLabel(card_name)
+        card_label.setFixedWidth(HOME_RECORD_COLUMNS['card'])
+        card_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_label.setStyleSheet("color: #1D1D1F; font-size: 13px; font-weight: 500;")
+        card_label.setToolTip(card_name)
+        # 文本截断
+        font_metrics = card_label.fontMetrics()
+        elided = font_metrics.elidedText(card_name, Qt.TextElideMode.ElideRight, HOME_RECORD_COLUMNS['card'] - 10)
+        card_label.setText(elided)
+        layout.addWidget(card_label)
+        
+        # 3. 链接
+        link_name = "未知链接"
+        try:
+            if self.record.link:
+                link_name = self.record.link.name
+        except Exception:
+            link_name = "链接已删除"
+        
+        link_label = QLabel(link_name)
+        link_label.setFixedWidth(HOME_RECORD_COLUMNS['link'])
+        link_label.setStyleSheet("color: #007AFF; font-size: 13px;")
+        link_label.setToolTip(link_name)
+        # 文本截断
+        elided = font_metrics.elidedText(link_name, Qt.TextElideMode.ElideRight, HOME_RECORD_COLUMNS['link'] - 10)
+        link_label.setText(elided)
+        layout.addWidget(link_label)
+        
+        # 4. 填写字段
+        total_label = QLabel(str(self.record.total_count))
+        total_label.setFixedWidth(HOME_RECORD_COLUMNS['total'])
+        total_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        total_label.setStyleSheet("color: #1D1D1F; font-size: 13px;")
+        layout.addWidget(total_label)
+        
+        # 5. 成功数
+        success_label = QLabel(str(self.record.fill_count))
+        success_label.setFixedWidth(HOME_RECORD_COLUMNS['success'])
+        success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        success_label.setStyleSheet("color: #1D1D1F; font-size: 13px;")
+        layout.addWidget(success_label)
+        
+        # 6. 状态
+        status_container = QWidget()
+        status_container.setFixedWidth(HOME_RECORD_COLUMNS['status'])
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        status_label = QLabel()
+        if self.record.success:
+            status_label.setText("✅ 成功")
+            status_label.setStyleSheet("""
+                color: #059669; 
+                background: #ecfdf5; 
+                padding: 4px 10px; 
+                border-radius: 12px; 
+                font-size: 12px; 
+                font-weight: 600;
+            """)
+        else:
+            status_label.setText("❌ 失败")
+            status_label.setStyleSheet("""
+                color: #dc2626; 
+                background: #fef2f2; 
+                padding: 4px 10px; 
+                border-radius: 12px; 
+                font-size: 12px; 
+                font-weight: 600;
+            """)
+        status_layout.addWidget(status_label)
+        layout.addWidget(status_container)
+        
+        layout.addStretch()
+
+
+class HomeRecordListWidget(QWidget):
+    """首页记录列表组件"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 表头
+        self.header = HomeRecordListHeader()
+        layout.addWidget(self.header)
+        
+        # 滚动区域
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background: white;
+                border: none;
+            }
+            QScrollBar:vertical {
+                width: 6px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                background: #E5E5EA;
+                border-radius: 3px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # 行容器
+        self.rows_container = QWidget()
+        self.rows_container.setStyleSheet("background: white;")
+        self.rows_layout = QVBoxLayout(self.rows_container)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.setSpacing(0)
+        self.rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        scroll.setWidget(self.rows_container)
+        layout.addWidget(scroll, 1)
+        
+        # 空状态标签
+        self.empty_label = None
+        
+    def clear_rows(self):
+        """清空所有行"""
+        while self.rows_layout.count():
+            item = self.rows_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if self.empty_label:
+            self.empty_label.deleteLater()
+            self.empty_label = None
+            
+    def _show_empty_state(self, message="暂无数据"):
+        """显示空状态"""
+        self.empty_label = QLabel(message)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setStyleSheet("""
+            color: #86868B;
+            font-size: 14px;
+            padding: 60px;
+        """)
+        self.rows_layout.addWidget(self.empty_label)
+        
+    def set_records(self, records):
+        """设置记录列表"""
+        self.clear_rows()
+        
+        if not records:
+            self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            return
+            
+        for record in records:
+            row = HomeRecordRowWidget(record)
+            self.rows_layout.addWidget(row)
+        
+        # 添加弹性空间
+        self.rows_layout.addStretch()
+
 
 class MultiCardFillWindow(QMainWindow):
     """多名片填充窗口 - 多对多关系"""
@@ -3772,69 +4034,9 @@ class MainWindow(QMainWindow):
         table_header.addWidget(view_all_btn)
         table_layout.addLayout(table_header)
         
-        # 表格本身
-        self.records_table = QTableWidget()
-        self.records_table.setColumnCount(6)
-        self.records_table.setHorizontalHeaderLabels([
-            "时间", "名片", "链接", "填写字段", "成功数", "状态"
-        ])
-        
-        # 设置列宽模式
-        header = self.records_table.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)  # 表头默认居中
-        
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # 时间固定
-        self.records_table.setColumnWidth(0, 140)
-        
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # 名片可调整
-        self.records_table.setColumnWidth(1, 180)  # 增加宽度以完整显示名片名称
-        
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # 链接自适应拉伸
-        
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # 字段数适应内容
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # 成功数适应内容
-        
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)  # 状态固定
-        self.records_table.setColumnWidth(5, 90)
-
-        self.records_table.verticalHeader().setVisible(False)
-        self.records_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.records_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.records_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.records_table.setShowGrid(False)
-        self.records_table.setFrameShape(QFrame.Shape.NoFrame)
-        
-        # 表格样式优化 - 更加通透
-        self.records_table.setStyleSheet("""
-            QTableWidget {
-                background: white;
-                selection-background-color: #F2F8FF;
-                selection-color: #1D1D1F;
-                border: none;
-            }
-            QHeaderView::section {
-                background: white;
-                padding: 16px 0px;
-                border: none;
-                border-bottom: 2px solid #F5F5F7;
-                font-weight: 700;
-                color: #86868B;
-                font-size: 13px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-            QTableWidget::item {
-                padding: 16px 0px;
-                border-bottom: 1px solid #FAFAFA;
-                color: #1D1D1F;
-                font-size: 14px;
-            }
-            QTableWidget::item:selected {
-                background-color: #F2F8FF;
-            }
-        """)
-        
-        table_layout.addWidget(self.records_table)
+        # 使用自定义记录列表组件
+        self.records_list = HomeRecordListWidget()
+        table_layout.addWidget(self.records_list, 1)
         
         layout.addWidget(table_container, 1)
         
@@ -4288,81 +4490,9 @@ class MainWindow(QMainWindow):
         # 刷新链接列表
         self.refresh_links_list()
         
-        # 刷新记录表格（按当前用户筛选）
+        # 刷新记录列表（使用自定义组件）
         records = self.db_manager.get_fill_records(limit=20, user=self.current_user)
-        
-        # 移除旧的空状态占位组件（如果有）
-        if hasattr(self, 'records_empty_widget') and self.records_empty_widget:
-            self.records_empty_widget.setParent(None)
-            self.records_empty_widget.deleteLater()
-            self.records_empty_widget = None
-        
-        # 如果没有记录，显示空状态
-        if not records:
-            self.records_table.setRowCount(0)
-            self.records_table.hide()
-            self.records_empty_widget = self.create_empty_state(
-                icon="fa5s.chart-bar",
-                title="暂无填写记录",
-                subtitle="选择名片和链接后开始自动填写，记录将在这里显示",
-                color="#5856D6"
-            )
-            # 将空状态添加到表格的父容器中
-            parent_layout = self.records_table.parent().layout()
-            if parent_layout:
-                parent_layout.addWidget(self.records_empty_widget)
-            return
-        
-        # 有记录时显示表格
-        self.records_table.show()
-        self.records_table.setRowCount(len(records))
-        
-        for i, record in enumerate(records):
-            item_time = QTableWidgetItem(record.created_at.strftime("%Y-%m-%d %H:%M"))
-            item_time.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.records_table.setItem(i, 0, item_time)
-            
-            # Safe access for card
-            card_name = "未知名片"
-            try:
-                if record.card:
-                    card_name = record.card.name
-            except Exception:
-                card_name = "名片已删除"
-            
-            item_card = QTableWidgetItem(card_name)
-            item_card.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.records_table.setItem(i, 1, item_card)
-            
-            # Safe access for link
-            link_name = "未知链接"
-            try:
-                if record.link:
-                    link_name = record.link.name
-            except Exception:
-                link_name = "链接已删除"
-            
-            item_link = QTableWidgetItem(link_name)
-            # 链接通常较长，保持左对齐可能更易读，但如果用户要求对齐，这里也设为居中或保持左对齐
-            # 根据截图，时间及名片居中比较美观
-            # item_link.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
-            self.records_table.setItem(i, 2, item_link)
-            
-            # 填写字段数
-            item_total = QTableWidgetItem(str(record.total_count))
-            item_total.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.records_table.setItem(i, 3, item_total)
-            
-            # 成功数
-            item_success = QTableWidgetItem(str(record.fill_count))
-            item_success.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.records_table.setItem(i, 4, item_success)
-            
-            # 状态
-            status_item = QTableWidgetItem("✅ 成功" if record.success else "❌ 失败")
-            status_item.setForeground(Qt.GlobalColor.green if record.success else Qt.GlobalColor.red)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.records_table.setItem(i, 5, status_item)
+        self.records_list.set_records(records)
     
     def refresh_cards_list(self):
         """刷新名片列表 - 按分类显示，支持拖拽排序"""

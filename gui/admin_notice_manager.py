@@ -13,138 +13,291 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDateTime, QDate
 from PyQt6.QtGui import QFont, QColor, QIcon, QPainter, QLinearGradient, QPen, QBrush
 from database import DatabaseManager
-from gui.styles import COLORS
 from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget, create_action_button
+)
 from datetime import datetime
 
-# 扩展颜色系统
-PREMIUM_COLORS = {
-    **COLORS,
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'dark_accent': '#1a1a2e',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'lavender': '#a29bfe',
-    'sky': '#74b9ff',
+
+# ========== 通告列表自定义组件 ==========
+
+# 列宽配置
+NOTICE_LIST_COLUMNS = {
+    'title': 200,
+    'platform': 80,
+    'category': 80,
+    'brand': 100,
+    'date': 100,
+    'status': 80,
+    'actions': 100,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    def __init__(self, parent=None, opacity=0.9, radius=24, hover_effect=False):
-        super().__init__(parent)
-        self.opacity = opacity
-        self.radius = radius
-        self.hover_effect = hover_effect
-        self._setup_style()
-    
-    def _setup_style(self):
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: {self.radius}px;
-            }}
-            GlassFrame:hover {{
-                background: rgba(255, 255, 255, {min(1.0, self.opacity + 0.05)});
-                border-color: rgba(255, 255, 255, 1.0);
-            }}
-        """ if self.hover_effect else f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: {self.radius}px;
-            }}
-        """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(31, 38, 135, 15))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class GradientButton(QPushButton):
-    """渐变按钮"""
-    def __init__(self, text, start_color, end_color, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+class NoticeListHeader(QFrame):
+    """通告列表表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                color: white;
+            NoticeListHeader {{
+                background: {PREMIUM_COLORS['background']};
                 border: none;
-                border-radius: 22px;
-                font-weight: 600;
-                font-size: 14px;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {end_color}, stop:1 {start_color});
-            }}
-            QPushButton:pressed {{
-                padding-top: 2px;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
             }}
         """)
-
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
-        super().__init__(parent)
-        self.value = value
-        self._setup_ui(title, icon, color_start, color_end)
-        
-    def _setup_ui(self, title, icon, color_start, color_end):
-        self.setFixedSize(140, 50)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
+        
+        headers = [
+            ('标题', NOTICE_LIST_COLUMNS['title']),
+            ('平台', NOTICE_LIST_COLUMNS['platform']),
+            ('类目', NOTICE_LIST_COLUMNS['category']),
+            ('品牌', NOTICE_LIST_COLUMNS['brand']),
+            ('发布时间', NOTICE_LIST_COLUMNS['date']),
+            ('状态', NOTICE_LIST_COLUMNS['status']),
+            ('操作', NOTICE_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class NoticeRowWidget(QFrame):
+    """通告行组件"""
+    
+    edit_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
+    
+    def __init__(self, notice, parent=None):
+        super().__init__(parent)
+        self.notice = notice
+        self.setFixedHeight(60)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            NoticeRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            NoticeRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
-            color: white;
-            border-radius: 8px;
-            font-size: 16px;
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 标题
+        self._add_title(layout)
+        # 2. 平台
+        self._add_platform(layout)
+        # 3. 类目
+        self._add_category(layout)
+        # 4. 品牌
+        self._add_brand(layout)
+        # 5. 发布时间
+        self._add_date(layout)
+        # 6. 状态
+        self._add_status(layout)
+        # 7. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_title(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['title'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        title_lbl = QLabel(self.notice.title)
+        title_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        title_lbl.setToolTip(self.notice.title)
+        c_layout.addWidget(title_lbl)
+        layout.addWidget(container)
+    
+    def _add_platform(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['platform'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        plat_lbl = QLabel(self.notice.platform)
+        plat_lbl.setStyleSheet(f"""
+            background: {PREMIUM_COLORS['primary']}15;
+            color: {PREMIUM_COLORS['primary']};
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 600;
         """)
-        layout.addWidget(icon_lbl)
+        c_layout.addWidget(plat_lbl)
+        layout.addWidget(container)
+    
+    def _add_category(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['category'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.value_lbl = QLabel(str(self.value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
-        layout.addLayout(text_layout)
+        lbl = QLabel(self.notice.category)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_brand(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['brand'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-    def update_value(self, value):
-        self.value = value
-        self.value_lbl.setText(str(value))
+        lbl = QLabel(self.notice.brand)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_date(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['date'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        date_str = self.notice.publish_date.strftime('%Y-%m-%d') if self.notice.publish_date else ""
+        lbl = QLabel(date_str)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_status(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['status'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        status_map = {
+            'active': ('进行中', PREMIUM_COLORS['mint']),
+            'expired': ('已过期', PREMIUM_COLORS['text_hint']),
+            'closed': ('已关闭', PREMIUM_COLORS['coral'])
+        }
+        text, color = status_map.get(self.notice.status, (self.notice.status, PREMIUM_COLORS['text_body']))
+        
+        status_lbl = QLabel(text)
+        status_lbl.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 12px;")
+        c_layout.addWidget(status_lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        btn_edit = create_action_button("编辑", PREMIUM_COLORS['gradient_blue_start'])
+        btn_edit.clicked.connect(lambda: self.edit_clicked.emit(self.notice))
+        c_layout.addWidget(btn_edit)
+        
+        btn_del = create_action_button("删除", PREMIUM_COLORS['coral'])
+        btn_del.clicked.connect(lambda: self.delete_clicked.emit(self.notice))
+        c_layout.addWidget(btn_del)
+        
+        layout.addWidget(container)
+
+
+class NoticeListWidget(QWidget):
+    """通告列表组件"""
+    
+    edit_notice = pyqtSignal(object)
+    delete_notice = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = NoticeListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
+        
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_notices(self, notices):
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        if not notices:
+            empty_label = QLabel("暂无通告数据")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
+        
+        for notice in notices:
+            row = NoticeRowWidget(notice)
+            row.edit_clicked.connect(self.edit_notice.emit)
+            row.delete_clicked.connect(self.delete_notice.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class BaseDialog(QDialog):
     """基础弹框样式"""
@@ -647,24 +800,163 @@ class ModernBaseManager(QWidget):
 class NoticeManager(ModernBaseManager):
     ITEM_NAME = "通告"
     
-    def setup_table(self):
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["标题", "平台", "类目", "品牌", "发布时间", "状态", "操作"])
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+    def _create_main_card(self, layout):
+        """重写主卡片创建方法，使用自定义列表组件"""
+        card = GlassFrame(opacity=1.0, radius=16)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
         
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 80)
-        self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 100)
-        self.table.setColumnWidth(5, 80)
-        self.table.setColumnWidth(6, 120)
+        # 工具栏
+        toolbar = QFrame()
+        toolbar.setFixedHeight(56)
+        toolbar.setStyleSheet(f"border-bottom: 1px solid {PREMIUM_COLORS['border_light']}; background: transparent;")
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(16, 0, 16, 0)
+        
+        # 搜索框
+        search_container = QFrame()
+        search_container.setFixedSize(260, 36)
+        search_container.setStyleSheet(f"""
+            QFrame {{
+                background: {PREMIUM_COLORS['background']};
+                border-radius: 8px;
+                border: 1px solid transparent;
+            }}
+            QFrame:hover {{
+                background: white;
+                border-color: {PREMIUM_COLORS['border']};
+            }}
+        """)
+        search_layout = QHBoxLayout(search_container)
+        search_layout.setContentsMargins(10, 0, 10, 0)
+        search_layout.setSpacing(8)
+        
+        search_icon = QLabel("🔍")
+        search_icon.setStyleSheet("font-size: 14px; color: #a0aec0; border: none; background: transparent;")
+        search_layout.addWidget(search_icon)
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(f"搜索{self.ITEM_NAME}...")
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: none;
+                background: transparent;
+                font-size: 13px;
+                color: {PREMIUM_COLORS['text_heading']};
+                padding: 0;
+            }}
+        """)
+        self.search_input.textChanged.connect(self.on_search)
+        search_layout.addWidget(self.search_input)
+        toolbar_layout.addWidget(search_container)
+        
+        toolbar_layout.addStretch()
+        
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setIcon(Icons.refresh())
+        refresh_btn.setFixedSize(80, 36)
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+                border-color: {PREMIUM_COLORS['gradient_blue_start']};
+            }}
+        """)
+        refresh_btn.clicked.connect(self.load_data)
+        toolbar_layout.addWidget(refresh_btn)
+        
+        card_layout.addWidget(toolbar)
+        
+        # 自定义通告列表（替代表格）
+        self.notice_list = NoticeListWidget()
+        self.notice_list.edit_notice.connect(self.edit_item)
+        self.notice_list.delete_notice.connect(self.delete_item)
+        card_layout.addWidget(self.notice_list, 1)
+        
+        # 分页
+        pagination = QFrame()
+        pagination.setFixedHeight(50)
+        pagination.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-top: 1px solid {PREMIUM_COLORS['border_light']};
+                border-bottom-left-radius: 16px;
+                border-bottom-right-radius: 16px;
+            }}
+        """)
+        pagination_layout = QHBoxLayout(pagination)
+        pagination_layout.setContentsMargins(16, 0, 16, 0)
+        
+        self.page_info_label = QLabel()
+        self.page_info_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+        pagination_layout.addWidget(self.page_info_label)
+        
+        pagination_layout.addStretch()
+        
+        page_btns = QHBoxLayout()
+        page_btns.setSpacing(8)
+        
+        self.prev_btn = QPushButton("‹")
+        self.next_btn = QPushButton("›")
+        
+        btn_style = f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['surface']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 14px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-size: 16px;
+                font-weight: bold;
+                padding-bottom: 2px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['primary']}15;
+                color: {PREMIUM_COLORS['primary']};
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+            QPushButton:disabled {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['border']};
+                border-color: {PREMIUM_COLORS['border_light']};
+            }}
+        """
+        
+        for btn in [self.prev_btn, self.next_btn]:
+            btn.setFixedSize(28, 28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(btn_style)
+            btn.clicked.connect(self.change_page)
+            
+        page_btns.addWidget(self.prev_btn)
+        
+        self.page_num_label = QLabel("1 / 1")
+        self.page_num_label.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['text_heading']}; 
+            font-weight: 600;
+            font-size: 12px;
+            padding: 0 8px;
+        """)
+        page_btns.addWidget(self.page_num_label)
+        page_btns.addWidget(self.next_btn)
+        
+        pagination_layout.addLayout(page_btns)
+        card_layout.addWidget(pagination)
+        
+        layout.addWidget(card)
+    
+    def setup_table(self):
+        # 不再需要，已在 _create_main_card 中直接创建自定义列表
+        pass
         
     def get_stats_config(self):
         return [
@@ -696,84 +988,8 @@ class NoticeManager(ModernBaseManager):
         start = (self.current_page - 1) * self.page_size
         current_notices = notices[start:start + self.page_size]
         
-        self.table.setRowCount(len(current_notices))
-        for i, n in enumerate(current_notices):
-            self.table.setRowHeight(i, 60)
-            
-            # 标题
-            title_widget = QWidget()
-            title_layout = QHBoxLayout(title_widget)
-            title_layout.setContentsMargins(12, 0, 4, 0)
-            title_lbl = QLabel(n.title)
-            title_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-            title_layout.addWidget(title_lbl)
-            self.table.setCellWidget(i, 0, title_widget)
-            
-            # 平台
-            plat_lbl = QLabel(n.platform)
-            plat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            plat_lbl.setStyleSheet(f"""
-                background: {PREMIUM_COLORS['primary']}15;
-                color: {PREMIUM_COLORS['primary']};
-                border-radius: 4px;
-                padding: 4px;
-                font-size: 12px;
-                font-weight: 600;
-            """)
-            # 居中容器
-            plat_widget = QWidget()
-            plat_layout = QHBoxLayout(plat_widget)
-            plat_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            plat_layout.addWidget(plat_lbl)
-            self.table.setCellWidget(i, 1, plat_widget)
-            
-            # 类目
-            cat_item = QTableWidgetItem(n.category)
-            cat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 2, cat_item)
-            
-            # 品牌
-            brand_item = QTableWidgetItem(n.brand)
-            brand_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 3, brand_item)
-            
-            # 时间
-            date_str = n.publish_date.strftime('%Y-%m-%d') if n.publish_date else ""
-            time_item = QTableWidgetItem(date_str)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 4, time_item)
-            
-            # 状态
-            status_widget = QWidget()
-            status_layout = QHBoxLayout(status_widget)
-            status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            status_map = {
-                'active': ('进行中', PREMIUM_COLORS['mint']),
-                'expired': ('已过期', PREMIUM_COLORS['text_hint']),
-                'closed': ('已关闭', PREMIUM_COLORS['coral'])
-            }
-            text, color = status_map.get(n.status, (n.status, PREMIUM_COLORS['text_body']))
-            
-            status_lbl = QLabel(text)
-            status_lbl.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 12px;")
-            status_layout.addWidget(status_lbl)
-            self.table.setCellWidget(i, 5, status_widget)
-            
-            # 操作
-            ops_widget = QWidget()
-            ops_layout = QHBoxLayout(ops_widget)
-            ops_layout.setContentsMargins(4, 0, 4, 0)
-            ops_layout.setSpacing(8)
-            ops_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            btn_edit = self.create_op_btn("编辑", PREMIUM_COLORS['gradient_blue_start'], lambda _, item=n: self.edit_item(item))
-            btn_del = self.create_op_btn("删除", PREMIUM_COLORS['coral'], lambda _, item=n: self.delete_item(item))
-            
-            ops_layout.addWidget(btn_edit)
-            ops_layout.addWidget(btn_del)
-            self.table.setCellWidget(i, 6, ops_widget)
-            
+        # 使用自定义列表组件显示数据
+        self.notice_list.set_notices(current_notices)
         self.update_pagination()
 
     def add_item(self):

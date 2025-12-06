@@ -732,6 +732,607 @@ class CompactStatWidget(QFrame):
         self.value_lbl.setText(str(value))
 
 
+# ========== 自定义用户列表组件 ==========
+
+# 列宽配置 (固定宽度，确保对齐)
+USER_LIST_COLUMNS = {
+    'avatar': 50,
+    'user': 160,
+    'role': 80,
+    'device': 70,
+    'usage': 100,
+    'expire': 110,
+    'status': 80,
+    'activity': 110,
+    'actions': 180,
+}
+
+
+class UserListHeader(QFrame):
+    """用户列表表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(44)
+        self.setStyleSheet(f"""
+            UserListHeader {{
+                background: {PREMIUM_COLORS['background']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
+        
+        headers = [
+            ('', USER_LIST_COLUMNS['avatar']),
+            ('用户', USER_LIST_COLUMNS['user']),
+            ('角色', USER_LIST_COLUMNS['role']),
+            ('设备', USER_LIST_COLUMNS['device']),
+            ('额度', USER_LIST_COLUMNS['usage']),
+            ('有效期', USER_LIST_COLUMNS['expire']),
+            ('状态', USER_LIST_COLUMNS['status']),
+            ('最近活动', USER_LIST_COLUMNS['activity']),
+            ('操作', USER_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class UserRowWidget(QFrame):
+    """单行用户数据组件"""
+    
+    # 定义信号
+    edit_clicked = pyqtSignal(object)
+    device_clicked = pyqtSignal(object)
+    enter_clicked = pyqtSignal(object)
+    toggle_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
+    
+    def __init__(self, user, device_count, parent=None):
+        super().__init__(parent)
+        self.user = user
+        self.device_count = device_count
+        self.setFixedHeight(64)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._is_hovered = False
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        self.setStyleSheet(f"""
+            UserRowWidget {{
+                background: white;
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            UserRowWidget:hover {{
+                background: #fafbfc;
+            }}
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 头像
+        self._add_avatar(layout)
+        
+        # 2. 用户信息
+        self._add_user_info(layout)
+        
+        # 3. 角色
+        self._add_role(layout)
+        
+        # 4. 设备
+        self._add_device(layout)
+        
+        # 5. 使用额度
+        self._add_usage(layout)
+        
+        # 6. 有效期
+        self._add_expire(layout)
+        
+        # 7. 状态
+        self._add_status(layout)
+        
+        # 8. 最近活动
+        self._add_activity(layout)
+        
+        # 9. 操作按钮
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_avatar(self, layout):
+        """添加头像"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['avatar'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        avatar = QLabel(self.user.username[0].upper())
+        avatar.setFixedSize(36, 36)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # 智能颜色生成
+        if self.user.role == 'admin':
+            bg_gradient = f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {PREMIUM_COLORS['gradient_blue_start']}, stop:1 {PREMIUM_COLORS['gradient_blue_end']})"
+        else:
+            colors = [
+                (PREMIUM_COLORS['gradient_green_start'], PREMIUM_COLORS['gradient_green_end']),
+                (PREMIUM_COLORS['gradient_orange_start'], PREMIUM_COLORS['gradient_orange_end']),
+                (PREMIUM_COLORS['gradient_purple_start'], PREMIUM_COLORS['gradient_purple_end']),
+            ]
+            c_start, c_end = colors[sum(ord(c) for c in self.user.username) % len(colors)]
+            bg_gradient = f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c_start}, stop:1 {c_end})"
+        
+        avatar.setStyleSheet(f"""
+            background: {bg_gradient};
+            color: white;
+            border-radius: 18px;
+            font-size: 15px;
+            font-weight: 700;
+        """)
+        
+        c_layout.addWidget(avatar)
+        layout.addWidget(container)
+    
+    def _add_user_info(self, layout):
+        """添加用户信息"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['user'])
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(4, 0, 4, 0)
+        c_layout.setSpacing(2)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        name_label = QLabel(self.user.username)
+        name_label.setStyleSheet(f"""
+            font-size: 14px;
+            font-weight: 600;
+            color: {PREMIUM_COLORS['text_heading']};
+        """)
+        c_layout.addWidget(name_label)
+        
+        created_str = self.user.created_at.strftime('%Y-%m-%d') if self.user.created_at else '未知'
+        created_label = QLabel(f"加入: {created_str}")
+        created_label.setStyleSheet(f"""
+            font-size: 11px;
+            color: {PREMIUM_COLORS['text_hint']};
+        """)
+        c_layout.addWidget(created_label)
+        
+        layout.addWidget(container)
+    
+    def _add_role(self, layout):
+        """添加角色"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['role'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        role_label = QLabel("管理员" if self.user.role == 'admin' else "用户")
+        role_label.setFixedHeight(24)
+        
+        if self.user.role == 'admin':
+            role_label.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['gradient_blue_start']}18;
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+                border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
+                border-radius: 12px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+        else:
+            role_label.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['text_hint']}15;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['text_hint']}35;
+                border-radius: 12px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 500;
+            """)
+        
+        c_layout.addWidget(role_label)
+        layout.addWidget(container)
+    
+    def _add_device(self, layout):
+        """添加设备数"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['device'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setSpacing(4)
+        
+        d_icon = QLabel("💻")
+        d_icon.setStyleSheet("font-size: 14px;")
+        d_text = QLabel(str(self.device_count))
+        d_text.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        
+        c_layout.addWidget(d_icon)
+        c_layout.addWidget(d_text)
+        layout.addWidget(container)
+    
+    def _add_usage(self, layout):
+        """添加使用额度"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['usage'])
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setSpacing(4)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        usage_count = self.user.usage_count or 0
+        max_count = self.user.max_usage_count if self.user.max_usage_count is not None else -1
+        
+        if max_count == -1:
+            progress_percent = 0
+            text = f"∞ ({usage_count})"
+        else:
+            progress_percent = min(100, int(usage_count / max_count * 100)) if max_count > 0 else 0
+            text = f"{usage_count} / {max_count}"
+        
+        label = QLabel(text)
+        label.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_body']}; font-weight: 500;")
+        c_layout.addWidget(label)
+        
+        if max_count != -1:
+            # 进度条背景
+            prog_bg = QFrame()
+            prog_bg.setFixedSize(80, 4)
+            prog_bg.setStyleSheet(f"background: {PREMIUM_COLORS['background']}; border-radius: 2px;")
+            
+            # 进度填充
+            fill = QFrame(prog_bg)
+            fill.setFixedHeight(4)
+            width = int(80 * progress_percent / 100)
+            fill.setFixedWidth(max(4, width))
+            fill.move(0, 0)
+            
+            if progress_percent > 90:
+                color = PREMIUM_COLORS['coral']
+            elif progress_percent > 70:
+                color = PREMIUM_COLORS['gradient_gold_start']
+            else:
+                color = PREMIUM_COLORS['gradient_green_start']
+            
+            fill.setStyleSheet(f"background: {color}; border-radius: 2px;")
+            c_layout.addWidget(prog_bg)
+        
+        layout.addWidget(container)
+    
+    def _add_expire(self, layout):
+        """添加有效期"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['expire'])
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setSpacing(2)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        if self.user.expire_time:
+            days = (self.user.expire_time - datetime.datetime.now()).days
+            date_str = self.user.expire_time.strftime('%Y-%m-%d')
+            
+            date_lbl = QLabel(date_str)
+            date_lbl.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_heading']}; font-weight: 500;")
+            
+            status_lbl = QLabel()
+            if days < 0:
+                status_lbl.setText("已过期")
+                status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['coral']}; font-size: 10px; font-weight: 600;")
+            elif days <= 7:
+                status_lbl.setText(f"剩 {days} 天")
+                status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['gradient_gold_start']}; font-size: 10px; font-weight: 600;")
+            else:
+                status_lbl.setText(f"剩 {days} 天")
+                status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 10px;")
+            
+            c_layout.addWidget(date_lbl)
+            c_layout.addWidget(status_lbl)
+        else:
+            lbl = QLabel("永久有效")
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['mint']}; font-weight: 600; font-size: 12px;")
+            c_layout.addWidget(lbl)
+        
+        layout.addWidget(container)
+    
+    def _add_status(self, layout):
+        """添加状态"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['status'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        status_badge = QLabel("正常" if self.user.is_active else "禁用")
+        if self.user.is_active:
+            status_badge.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['gradient_green_start']}15;
+                color: {PREMIUM_COLORS['gradient_green_start']};
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+        else:
+            status_badge.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['coral']}15;
+                color: {PREMIUM_COLORS['coral']};
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+        
+        c_layout.addWidget(status_badge)
+        layout.addWidget(container)
+    
+    def _add_activity(self, layout):
+        """添加最近活动"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['activity'])
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        if self.user.last_login:
+            t_str = self.user.last_login.strftime('%m-%d %H:%M')
+            l1 = QLabel(t_str)
+            l1.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+            c_layout.addWidget(l1)
+        else:
+            l = QLabel("从未登录")
+            l.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+            c_layout.addWidget(l)
+        
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        """添加操作按钮"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # 辅助函数创建操作按钮
+        def create_op_btn(text, color):
+            btn = QPushButton(text)
+            btn.setFixedSize(44, 26)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {color};
+                    border: 1px solid {color}40;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background: {color}12;
+                    border-color: {color};
+                }}
+            """)
+            return btn
+        
+        # 进入用户端
+        btn_enter = create_op_btn("进入", PREMIUM_COLORS['mint'])
+        btn_enter.clicked.connect(lambda: self.enter_clicked.emit(self.user))
+        c_layout.addWidget(btn_enter)
+        
+        # 设备
+        btn_dev = create_op_btn("设备", PREMIUM_COLORS['text_body'])
+        btn_dev.clicked.connect(lambda: self.device_clicked.emit(self.user))
+        c_layout.addWidget(btn_dev)
+        
+        # 编辑
+        btn_edit = create_op_btn("编辑", PREMIUM_COLORS['gradient_blue_start'])
+        btn_edit.clicked.connect(lambda: self.edit_clicked.emit(self.user))
+        c_layout.addWidget(btn_edit)
+        
+        # 更多
+        more_btn = QPushButton("•••")
+        more_btn.setFixedSize(26, 26)
+        more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        more_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {PREMIUM_COLORS['text_hint']};
+                border: none;
+                font-size: 12px;
+                font-weight: 900;
+                border-radius: 13px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['text_body']};
+            }}
+        """)
+        more_btn.clicked.connect(lambda: self._show_more_menu(more_btn))
+        c_layout.addWidget(more_btn)
+        
+        layout.addWidget(container)
+    
+    def _show_more_menu(self, button):
+        """显示更多操作菜单"""
+        from PyQt6.QtWidgets import QMenu
+        
+        menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: white;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 6px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QMenu::item:selected {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {PREMIUM_COLORS['border_light']};
+                margin: 4px 0;
+            }}
+        """)
+        
+        # 添加阴影
+        shadow = QGraphicsDropShadowEffect(menu)
+        shadow.setBlurRadius(16)
+        shadow.setColor(QColor(0, 0, 0, 25))
+        shadow.setOffset(0, 4)
+        menu.setGraphicsEffect(shadow)
+        
+        # 禁用/启用
+        toggle_action = menu.addAction("🚫 禁用账号" if self.user.is_active else "✅ 启用账号")
+        toggle_action.triggered.connect(lambda: self.toggle_clicked.emit(self.user))
+        
+        menu.addSeparator()
+        
+        # 删除
+        if self.user.username != 'admin':
+            delete_action = menu.addAction("🗑️ 删除用户")
+            delete_action.triggered.connect(lambda: self.delete_clicked.emit(self.user))
+        
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+
+class UserListWidget(QWidget):
+    """自定义用户列表组件 (替代 QTableWidget)"""
+    
+    # 定义信号，向外传递用户操作
+    edit_user = pyqtSignal(object)
+    device_user = pyqtSignal(object)
+    enter_user = pyqtSignal(object)
+    toggle_user = pyqtSignal(object)
+    delete_user = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 表头
+        self.header = UserListHeader()
+        layout.addWidget(self.header)
+        
+        # 滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 8px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {PREMIUM_COLORS['border']};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {PREMIUM_COLORS['text_hint']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: transparent;
+            }}
+        """)
+        
+        # 内容容器
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_users(self, users, device_counts):
+        """设置用户列表数据"""
+        # 清空现有行
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        # 显示空状态
+        if not users:
+            empty_label = QLabel("暂无用户数据")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
+        
+        # 添加用户行
+        for user in users:
+            device_count = device_counts.get(str(user.id), 0)
+            row = UserRowWidget(user, device_count)
+            
+            # 连接信号
+            row.edit_clicked.connect(self.edit_user.emit)
+            row.device_clicked.connect(self.device_user.emit)
+            row.enter_clicked.connect(self.enter_user.emit)
+            row.toggle_clicked.connect(self.toggle_user.emit)
+            row.delete_clicked.connect(self.delete_user.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
+
+
 class UserManagementWidget(QWidget):
     """用户管理页面组件 - 极简布局版"""
     
@@ -820,7 +1421,7 @@ class UserManagementWidget(QWidget):
         layout.addLayout(header_layout)
         
     def _create_main_card(self, layout):
-        """创建主内容卡片：工具栏 + 表格 + 分页"""
+        """创建主内容卡片：工具栏 + 用户列表 + 分页"""
         card = GlassFrame(opacity=1.0, radius=16)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(0, 0, 0, 0)
@@ -897,56 +1498,17 @@ class UserManagementWidget(QWidget):
         
         card_layout.addWidget(toolbar)
         
-        # 2. 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(9)
-        self.table.setHorizontalHeaderLabels(['', '用户', '角色', '设备', '额度', '有效期', '状态', '最近活动', '操作'])
+        # 2. 自定义用户列表 (替代 QTableWidget)
+        self.user_list = UserListWidget()
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        # 连接用户列表的信号
+        self.user_list.edit_user.connect(self.show_edit_dialog)
+        self.user_list.device_user.connect(self.show_device_list)
+        self.user_list.enter_user.connect(self.enter_user_client)
+        self.user_list.toggle_user.connect(self.toggle_user_status)
+        self.user_list.delete_user.connect(self.delete_user)
         
-        self.table.setColumnWidth(0, 60)
-        self.table.setColumnWidth(2, 80)
-        self.table.setColumnWidth(3, 60)
-        self.table.setColumnWidth(4, 100)
-        self.table.setColumnWidth(5, 100)
-        self.table.setColumnWidth(6, 80)
-        self.table.setColumnWidth(7, 120)
-        self.table.setColumnWidth(8, 180)
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{
-                background: transparent;
-                border: none;
-            }}
-            QTableWidget::item {{
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                padding: 0px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PREMIUM_COLORS['primary']}08;
-            }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)  # Stretch factor 1 ensures it takes available space
+        card_layout.addWidget(self.user_list, 1)
         
         # 3. 分页
         pagination = QFrame()
@@ -1066,7 +1628,7 @@ class UserManagementWidget(QWidget):
         end_idx = start_idx + self.page_size
         users = all_users[start_idx:end_idx]
         
-        self.update_table(users)
+        self.update_user_list(users)
         self.update_pagination()
         
     def update_pagination(self):
@@ -1082,355 +1644,15 @@ class UserManagementWidget(QWidget):
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
         
-    def update_table(self, users):
-        self.table.setRowCount(len(users))
+    def update_user_list(self, users):
+        """更新用户列表显示"""
+        # 预先计算每个用户的设备数，避免在组件中逐个查询
+        device_counts = {}
+        for user in users:
+            device_counts[str(user.id)] = Device.objects(user=user).count()
         
-        for row, user in enumerate(users):
-            self.table.setRowHeight(row, 60)
-            device_count = Device.objects(user=user).count()
-            
-            # 0. 头像
-            avatar_widget = QWidget()
-            avatar_layout = QHBoxLayout(avatar_widget)
-            avatar_layout.setContentsMargins(12, 0, 4, 0)
-            avatar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            avatar = QLabel(user.username[0].upper())
-            avatar.setFixedSize(32, 32)
-            avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 智能颜色生成
-            if user.role == 'admin':
-                bg_gradient = f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {PREMIUM_COLORS['gradient_blue_start']}, stop:1 {PREMIUM_COLORS['gradient_blue_end']})"
-            else:
-                colors = [
-                    (PREMIUM_COLORS['gradient_green_start'], PREMIUM_COLORS['gradient_green_end']),
-                    (PREMIUM_COLORS['gradient_orange_start'], PREMIUM_COLORS['gradient_orange_end']),
-                    (PREMIUM_COLORS['gradient_purple_start'], PREMIUM_COLORS['gradient_purple_end']),
-                ]
-                c_start, c_end = colors[sum(ord(c) for c in user.username) % len(colors)]
-                bg_gradient = f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c_start}, stop:1 {c_end})"
-            
-            avatar.setStyleSheet(f"""
-                background: {bg_gradient};
-                color: white;
-                border-radius: 16px;
-                font-size: 14px;
-                font-weight: 700;
-            """)
-            
-            avatar_layout.addWidget(avatar)
-            self.table.setCellWidget(row, 0, avatar_widget)
-            
-            # 1. 用户概览
-            info_widget = QWidget()
-            info_layout = QVBoxLayout(info_widget)
-            info_layout.setContentsMargins(4, 0, 4, 0)
-            info_layout.setSpacing(2)
-            info_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            name_label = QLabel(user.username)
-            name_label.setStyleSheet(f"""
-                font-size: 14px;
-                font-weight: 700;
-                color: {PREMIUM_COLORS['text_heading']};
-            """)
-            info_layout.addWidget(name_label)
-            
-            created_str = user.created_at.strftime('%Y-%m-%d') if user.created_at else '未知'
-            created_label = QLabel(f"加入: {created_str}")
-            created_label.setStyleSheet(f"""
-                font-size: 11px;
-                color: {PREMIUM_COLORS['text_hint']};
-            """)
-            info_layout.addWidget(created_label)
-            self.table.setCellWidget(row, 1, info_widget)
-            
-            # 2. 角色权限
-            role_widget = QWidget()
-            role_layout = QHBoxLayout(role_widget)
-            role_layout.setContentsMargins(4, 0, 4, 0)
-            role_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            role_label = QLabel("管理员" if user.role == 'admin' else "用户")
-            role_label.setFixedHeight(22)
-            if user.role == 'admin':
-                role_label.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['gradient_blue_start']}15;
-                    color: {PREMIUM_COLORS['gradient_blue_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
-                    border-radius: 11px;
-                    padding: 0 10px;
-                    font-size: 11px;
-                    font-weight: 600;
-                """)
-            else:
-                role_label.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['text_hint']}15;
-                    color: {PREMIUM_COLORS['text_body']};
-                    border: 1px solid {PREMIUM_COLORS['text_hint']}40;
-                    border-radius: 11px;
-                    padding: 0 10px;
-                    font-size: 11px;
-                    font-weight: 500;
-                """)
-            role_layout.addWidget(role_label)
-            self.table.setCellWidget(row, 2, role_widget)
-            
-            # 3. 设备
-            device_widget = QWidget()
-            device_layout = QHBoxLayout(device_widget)
-            device_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            device_layout.setSpacing(4)
-            
-            d_icon = QLabel("💻")
-            d_icon.setStyleSheet("font-size: 14px;")
-            d_text = QLabel(str(device_count))
-            d_text.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-            
-            device_layout.addWidget(d_icon)
-            device_layout.addWidget(d_text)
-            self.table.setCellWidget(row, 3, device_widget)
-            
-            # 4. 使用额度
-            usage_widget = QWidget()
-            usage_layout = QVBoxLayout(usage_widget)
-            usage_layout.setContentsMargins(4, 0, 8, 0)
-            usage_layout.setSpacing(4)
-            usage_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            usage_count = user.usage_count or 0
-            max_count = user.max_usage_count or -1
-            
-            if max_count == -1:
-                progress_percent = 0
-                text = f"∞ ({usage_count})"
-            else:
-                progress_percent = min(100, int(usage_count / max_count * 100)) if max_count > 0 else 0
-                text = f"{usage_count} / {max_count}"
-                
-            label = QLabel(text)
-            label.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_body']}; font-weight: 500;")
-            usage_layout.addWidget(label)
-            
-            if max_count != -1:
-                # 进度条背景
-                prog_bg = QFrame()
-                prog_bg.setFixedHeight(4)
-                prog_bg.setStyleSheet(f"background: {PREMIUM_COLORS['background']}; border-radius: 2px;")
-                
-                # 进度填充
-                fill = QFrame(prog_bg)
-                fill.setFixedHeight(4)
-                width = int(80 * progress_percent / 100)
-                fill.setFixedWidth(max(4, width))
-                
-                if progress_percent > 90:
-                    color = PREMIUM_COLORS['coral']
-                elif progress_percent > 70:
-                    color = PREMIUM_COLORS['gradient_gold_start']
-                else:
-                    color = PREMIUM_COLORS['gradient_green_start']
-                    
-                fill.setStyleSheet(f"background: {color}; border-radius: 2px;")
-                usage_layout.addWidget(prog_bg)
-            
-            self.table.setCellWidget(row, 4, usage_widget)
-            
-            # 5. 有效期
-            expire_widget = QWidget()
-            expire_layout = QVBoxLayout(expire_widget)
-            expire_layout.setContentsMargins(4, 0, 4, 0)
-            expire_layout.setSpacing(2)
-            expire_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            if user.expire_time:
-                days = (user.expire_time - datetime.datetime.now()).days
-                date_str = user.expire_time.strftime('%Y-%m-%d')
-                
-                date_lbl = QLabel(date_str)
-                date_lbl.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_heading']}; font-weight: 500;")
-                
-                status_lbl = QLabel()
-                if days < 0:
-                    status_lbl.setText("已过期")
-                    status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['coral']}; font-size: 10px; font-weight: 600;")
-                elif days <= 7:
-                    status_lbl.setText(f"剩 {days} 天")
-                    status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['gradient_gold_start']}; font-size: 10px; font-weight: 600;")
-                else:
-                    status_lbl.setText(f"剩 {days} 天")
-                    status_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 10px;")
-                    
-                expire_layout.addWidget(date_lbl)
-                expire_layout.addWidget(status_lbl)
-            else:
-                lbl = QLabel("永久有效")
-                lbl.setStyleSheet(f"color: {PREMIUM_COLORS['mint']}; font-weight: 600; font-size: 12px;")
-                expire_layout.addWidget(lbl)
-                
-            self.table.setCellWidget(row, 5, expire_widget)
-            
-            # 6. 状态
-            status_widget = QWidget()
-            status_layout = QHBoxLayout(status_widget)
-            status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            status_badge = QLabel("正常" if user.is_active else "禁用")
-            if user.is_active:
-                status_badge.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['gradient_green_start']}15;
-                    color: {PREMIUM_COLORS['gradient_green_start']};
-                    padding: 2px 8px;
-                    border-radius: 8px;
-                    font-size: 11px;
-                    font-weight: 600;
-                """)
-            else:
-                status_badge.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['coral']}15;
-                    color: {PREMIUM_COLORS['coral']};
-                    padding: 2px 8px;
-                    border-radius: 8px;
-                    font-size: 11px;
-                    font-weight: 600;
-                """)
-            status_layout.addWidget(status_badge)
-            self.table.setCellWidget(row, 6, status_widget)
-            
-            # 7. 活动
-            act_widget = QWidget()
-            act_layout = QVBoxLayout(act_widget)
-            act_layout.setContentsMargins(8, 0, 8, 0)
-            act_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            if user.last_login:
-                t_str = user.last_login.strftime('%m-%d %H:%M')
-                l1 = QLabel(t_str)
-                l1.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
-                act_layout.addWidget(l1)
-            else:
-                l = QLabel("-")
-                l.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
-                act_layout.addWidget(l)
-            self.table.setCellWidget(row, 7, act_widget)
-            
-            # 8. 操作
-            ops_widget = QWidget()
-            ops_layout = QHBoxLayout(ops_widget)
-            ops_layout.setContentsMargins(4, 0, 4, 0)
-            ops_layout.setSpacing(6)
-            ops_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 辅助函数创建操作按钮
-            def create_op_btn(text, color, callback):
-                btn = QPushButton(text)
-                btn.setFixedSize(44, 24)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: transparent;
-                        color: {color};
-                        border: 1px solid {color}40;
-                        border-radius: 4px;
-                        font-size: 11px;
-                        font-weight: 600;
-                    }}
-                    QPushButton:hover {{
-                        background: {color}10;
-                        border-color: {color};
-                    }}
-                """)
-                btn.clicked.connect(callback)
-                return btn
-            
-            # 进入用户端
-            btn_enter = create_op_btn("进入", PREMIUM_COLORS['mint'], lambda _, u=user: self.enter_user_client(u))
-            ops_layout.addWidget(btn_enter)
-            
-            # 设备
-            btn_dev = create_op_btn("设备", PREMIUM_COLORS['text_body'], lambda _, u=user: self.show_device_list(u))
-            ops_layout.addWidget(btn_dev)
-            
-            # 编辑
-            btn_edit = create_op_btn("编辑", PREMIUM_COLORS['gradient_blue_start'], lambda _, u=user: self.show_edit_dialog(u))
-            ops_layout.addWidget(btn_edit)
-            
-            # 更多
-            more_btn = QPushButton("•••")
-            more_btn.setFixedSize(24, 24)
-            more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            more_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['text_hint']};
-                    border: none;
-                    font-size: 12px;
-                    font-weight: 900;
-                    border-radius: 12px;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['background']};
-                    color: {PREMIUM_COLORS['text_body']};
-                }}
-            """)
-            more_btn.clicked.connect(lambda checked, u=user, b=more_btn: self.show_more_menu(u, b))
-            ops_layout.addWidget(more_btn)
-            
-            self.table.setCellWidget(row, 8, ops_widget)
-
-    def show_more_menu(self, user, button):
-        """显示更多操作菜单"""
-        from PyQt6.QtWidgets import QMenu
-        
-        menu = QMenu(self)
-        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background: white;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
-                border-radius: 12px;
-                padding: 6px;
-            }}
-            QMenu::item {{
-                padding: 8px 24px;
-                border-radius: 6px;
-                color: {PREMIUM_COLORS['text_body']};
-                font-size: 13px;
-                font-weight: 500;
-            }}
-            QMenu::item:selected {{
-                background: {PREMIUM_COLORS['background']};
-                color: {PREMIUM_COLORS['gradient_blue_start']};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: {PREMIUM_COLORS['border_light']};
-                margin: 4px 0;
-            }}
-        """)
-        
-        # 添加阴影
-        shadow = QGraphicsDropShadowEffect(menu)
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 30))
-        shadow.setOffset(0, 4)
-        menu.setGraphicsEffect(shadow)
-        
-        # 禁用/启用
-        toggle_action = menu.addAction("🚫 禁用账号" if user.is_active else "✅ 启用账号")
-        toggle_action.triggered.connect(lambda: self.toggle_user_status(user))
-        
-        menu.addSeparator()
-        
-        # 删除
-        if user.username != 'admin':
-            delete_action = menu.addAction("🗑️ 删除用户")
-            delete_action.triggered.connect(lambda: self.delete_user(user))
-        
-        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+        # 调用用户列表组件的方法
+        self.user_list.set_users(users, device_counts)
 
     def show_device_list(self, user):
         dialog = DeviceListDialog(self, user)

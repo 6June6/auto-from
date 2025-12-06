@@ -4,164 +4,232 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QLineEdit, QDialog, QFrame,
-    QGraphicsDropShadowEffect, QAbstractItemView
+    QLabel, QMessageBox, QLineEdit, QDialog, QFrame,
+    QGraphicsDropShadowEffect, QScrollArea
 )
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QTimer, QRect
-from PyQt6.QtGui import QFont, QColor, QIcon, QPainter, QLinearGradient, QPen, QBrush, QPainterPath
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from database.models import SystemConfig
-from gui.styles import COLORS
 from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget, create_action_button
+)
 
-# 扩展颜色系统 - 与用户管理保持一致
-PREMIUM_COLORS = {
-    **COLORS,
-    # 渐变色组
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    
-    # 玻璃效果
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'glass_shadow': 'rgba(31, 38, 135, 0.07)',
-    
-    # 深色点缀
-    'dark_accent': '#1a1a2e',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    
-    # 功能色
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'lavender': '#a29bfe',
-    'sky': '#74b9ff',
+
+# ========== 字典列表自定义组件 ==========
+
+# 列宽配置
+DICT_LIST_COLUMNS = {
+    'key': 200,
+    'desc': 200,
+    'value': 200,
+    'actions': 80,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    
-    def __init__(self, parent=None, opacity=0.9, radius=24, hover_effect=False):
-        super().__init__(parent)
-        self.opacity = opacity
-        self.radius = radius
-        self.hover_effect = hover_effect
-        self._setup_style()
-    
-    def _setup_style(self):
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: {self.radius}px;
-            }}
-            GlassFrame:hover {{
-                background: rgba(255, 255, 255, {min(1.0, self.opacity + 0.05)});
-                border-color: rgba(255, 255, 255, 1.0);
-            }}
-        """ if self.hover_effect else f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: {self.radius}px;
-            }}
-        """)
-        
-        # 添加高级阴影效果
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(31, 38, 135, 15))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class GradientButton(QPushButton):
-    """渐变按钮"""
+class DictListHeader(QFrame):
+    """字典列表表头"""
     
-    def __init__(self, text, start_color, end_color, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                color: white;
+            DictListHeader {{
+                background: {PREMIUM_COLORS['background']};
                 border: none;
-                border-radius: 22px;
-                font-weight: 600;
-                font-size: 14px;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {end_color}, stop:1 {start_color});
-            }}
-            QPushButton:pressed {{
-                padding-top: 2px;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
             }}
         """)
-
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
-        super().__init__(parent)
-        self.value = value
-        self._setup_ui(title, icon, color_start, color_end)
-        
-    def _setup_ui(self, title, icon, color_start, color_end):
-        self.setFixedSize(140, 50)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
         
-        # 背景样式
+        headers = [
+            ('配置键', DICT_LIST_COLUMNS['key']),
+            ('说明', DICT_LIST_COLUMNS['desc']),
+            ('当前值', DICT_LIST_COLUMNS['value']),
+            ('操作', DICT_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class DictRowWidget(QFrame):
+    """字典行组件"""
+    
+    edit_clicked = pyqtSignal(object)
+    
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.setFixedHeight(60)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            DictRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            DictRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
         
-        # 图标
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
-            color: white;
-            border-radius: 8px;
-            font-size: 16px;
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 配置键
+        self._add_key(layout)
+        # 2. 说明
+        self._add_desc(layout)
+        # 3. 当前值
+        self._add_value(layout)
+        # 4. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_key(self, layout):
+        container = QWidget()
+        container.setFixedWidth(DICT_LIST_COLUMNS['key'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        lbl = QLabel(self.config.key)
+        lbl.setStyleSheet(f"font-weight: 700; color: {PREMIUM_COLORS['text_heading']}; font-family: monospace; font-size: 13px;")
+        lbl.setToolTip(self.config.key)
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_desc(self, layout):
+        container = QWidget()
+        container.setFixedWidth(DICT_LIST_COLUMNS['desc'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        desc = self.config.description or "-"
+        if len(desc) > 25:
+            desc = desc[:25] + "..."
+        lbl = QLabel(desc)
+        lbl.setToolTip(self.config.description or "")
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_value(self, layout):
+        container = QWidget()
+        container.setFixedWidth(DICT_LIST_COLUMNS['value'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        val = self.config.value or "-"
+        if len(val) > 25:
+            val = val[:25] + "..."
+        lbl = QLabel(val)
+        lbl.setToolTip(self.config.value or "")
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['gradient_purple_start']}; font-weight: 600; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(DICT_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        btn_edit = create_action_button("编辑", PREMIUM_COLORS['gradient_purple_start'])
+        btn_edit.clicked.connect(lambda: self.edit_clicked.emit(self.config))
+        c_layout.addWidget(btn_edit)
+        layout.addWidget(container)
+
+
+class DictListWidget(QWidget):
+    """字典列表组件"""
+    
+    edit_config = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = DictListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
-        layout.addWidget(icon_lbl)
         
-        # 文本
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        self.value_lbl = QLabel(str(self.value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_configs(self, configs):
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
         
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
+        if not configs:
+            empty_label = QLabel("暂无配置项")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
         
-        layout.addLayout(text_layout)
-        
-    def update_value(self, value):
-        self.value = value
-        self.value_lbl.setText(str(value))
+        for config in configs:
+            row = DictRowWidget(config)
+            row.edit_clicked.connect(self.edit_config.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class DictionaryEditDialog(QDialog):
     """字典编辑对话框 - 现代化风格"""
@@ -481,57 +549,16 @@ class AdminDictionaryManager(QWidget):
         
         card_layout.addWidget(toolbar)
         
-        # 2. 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['配置键', '说明', '当前值', '操作'])
+        # 2. 自定义字典列表
+        self.dict_list = DictListWidget()
+        self.dict_list.edit_config.connect(self.edit_config)
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        
-        self.table.setColumnWidth(0, 200)
-        self.table.setColumnWidth(3, 100)
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{
-                background: transparent;
-                border: none;
-            }}
-            QTableWidget::item {{
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                padding: 0px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PREMIUM_COLORS['primary']}08;
-            }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)
+        card_layout.addWidget(self.dict_list, 1)
         layout.addWidget(card, 1)
         
     def load_configs(self):
         """加载配置列表"""
         keyword = self.search_input.text().strip().lower()
-        self.table.setRowCount(0)
         
         try:
             configs = SystemConfig.objects.all().order_by('key')
@@ -539,73 +566,15 @@ class AdminDictionaryManager(QWidget):
             # 内存过滤 (数据量小)
             if keyword:
                 configs = [c for c in configs if keyword in c.key.lower() or keyword in (c.description or "").lower()]
+            else:
+                configs = list(configs)
             
             # 更新统计
             if "配置项总数" in self.stat_cards:
                 self.stat_cards["配置项总数"].update_value(len(configs))
             
-            self.table.setRowCount(len(configs))
-            
-            for row, config in enumerate(configs):
-                self.table.setRowHeight(row, 60)
-                
-                # 0. Key
-                key_widget = QWidget()
-                key_layout = QHBoxLayout(key_widget)
-                key_layout.setContentsMargins(12, 0, 4, 0)
-                key_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                
-                key_lbl = QLabel(config.key)
-                key_lbl.setStyleSheet(f"font-weight: 700; color: {PREMIUM_COLORS['text_heading']}; font-family: monospace;")
-                key_layout.addWidget(key_lbl)
-                self.table.setCellWidget(row, 0, key_widget)
-                
-                # 1. Description
-                desc_item = QTableWidgetItem(config.description or "-")
-                desc_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                desc_item.setForeground(QBrush(QColor(PREMIUM_COLORS['text_body'])))
-                self.table.setItem(row, 1, desc_item)
-                
-                # 2. Value
-                val_widget = QWidget()
-                val_layout = QHBoxLayout(val_widget)
-                val_layout.setContentsMargins(4, 0, 4, 0)
-                val_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                
-                val_lbl = QLabel(config.value)
-                val_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['gradient_purple_start']}; font-weight: 600;")
-                val_layout.addWidget(val_lbl)
-                self.table.setCellWidget(row, 2, val_widget)
-                
-                # 3. Action
-                action_widget = QWidget()
-                action_layout = QHBoxLayout(action_widget)
-                action_layout.setContentsMargins(0, 0, 0, 0)
-                action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-                edit_btn = QPushButton("编辑")
-                edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                edit_btn.setFixedSize(50, 28)
-                edit_btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {PREMIUM_COLORS['gradient_purple_start']}15;
-                        color: {PREMIUM_COLORS['gradient_purple_start']};
-                        border: 1px solid {PREMIUM_COLORS['gradient_purple_start']}40;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        font-weight: 600;
-                    }}
-                    QPushButton:hover {{
-                        background: {PREMIUM_COLORS['gradient_purple_start']};
-                        color: white;
-                        border-color: {PREMIUM_COLORS['gradient_purple_start']};
-                    }}
-                """)
-                # 使用闭包捕获当前的 config 对象
-                edit_btn.clicked.connect(lambda checked, c=config: self.edit_config(c))
-                
-                action_layout.addWidget(edit_btn)
-                self.table.setCellWidget(row, 3, action_widget)
+            # 使用自定义列表组件显示
+            self.dict_list.set_configs(configs)
                 
         except Exception as e:
             print(f"❌ 加载配置失败: {e}")

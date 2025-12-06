@@ -678,6 +678,54 @@ class SystemConfig(Document):
         config.save()
 
 
+class FixedTemplate(Document):
+    """固定模板模型（系统级，管理员维护）
+    
+    用于存储固定的字段名-字段值模板，用户填表时可以直接使用这些预设值。
+    与字段库不同的是，这里存储的是完整的字段名和对应的固定值。
+    """
+    field_name = StringField(required=True, max_length=200, verbose_name="字段名（支持别名，用顿号分隔）")
+    field_value = StringField(required=True, verbose_name="字段值")
+    category = StringField(default='通用', max_length=50, verbose_name="分类")
+    description = StringField(verbose_name="说明")
+    order = IntField(default=0, verbose_name="排序")
+    is_active = BooleanField(default=True, verbose_name="是否启用")
+    created_by = ReferenceField(User, verbose_name="创建人")
+    created_at = DateTimeField(default=datetime.now, verbose_name="创建时间")
+    updated_at = DateTimeField(default=datetime.now, verbose_name="更新时间")
+    
+    meta = {
+        'collection': 'fixed_templates',
+        'ordering': ['category', 'order', '-created_at'],
+        'auto_create_index': False,
+        'indexes': [
+            'category',
+            'is_active',
+            'order'
+        ]
+    }
+    
+    def save(self, *args, **kwargs):
+        """保存时更新时间"""
+        self.updated_at = datetime.now()
+        return super().save(*args, **kwargs)
+    
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            'id': str(self.id),
+            'field_name': self.field_name,
+            'field_value': self.field_value,
+            'category': self.category,
+            'description': self.description,
+            'order': self.order,
+            'is_active': self.is_active,
+            'created_by': self.created_by.username if self.created_by else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
 def create_default_data():
     """创建默认测试数据"""
     try:

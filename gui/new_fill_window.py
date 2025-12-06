@@ -49,7 +49,8 @@ class NewFillWindow(QDialog):
         """初始化UI"""
         self.setWindowTitle("开始填充")
         self.setWindowState(Qt.WindowState.WindowMaximized)
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        # ⚡️ 修复：使用 WindowModal 而不是 ApplicationModal，避免阻塞整个应用
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
         
         # 设置背景色
@@ -995,7 +996,16 @@ class NewFillWindow(QDialog):
         layout.addWidget(self.right_panel_stack, 6)
         
         # 加载数据
+        # ⚡️ 修复：临时阻塞信号，避免 load_categories() 触发 on_category_changed 导致 load_cards_list() 被调用两次
+        self.category_combo.blockSignals(True)
         self.load_categories()
+        self.category_combo.blockSignals(False)
+        
+        # 手动更新标签文字
+        if self.category_combo.count() > 0:
+            self.category_label.setText(self.category_combo.currentText())
+        
+        # 只调用一次 load_cards_list
         self.load_cards_list()
         
         return self.right_panel
@@ -2275,6 +2285,12 @@ class NewFillWindow(QDialog):
         # ⚡️ 智能重填逻辑：如果之前已经填充过（is_auto_fill_active=True），
         # 且页面重新加载了（可能是登录后跳转回来），则自动再次填充
         if web_view.property("is_auto_fill_active"):
+            # ⚡️ 报名工具特殊处理：如果已经渲染了自定义表单页面，不要重复触发填充
+            # 因为报名工具的 setHtml() 会触发 loadFinished，导致无限循环
+            if web_view.property("baoming_page_rendered"):
+                print(f"⚡️ 报名工具页面已渲染，跳过自动重填: {card_data.name}")
+                return  # 跳过，不触发填充
+            
             print(f"⚡️ 检测到页面刷新且填充模式已激活，准备自动重填: {card_data.name}")
             # 延迟2秒执行，给予页面充分的初始化时间（特别是登录后的重定向）
             QTimer.singleShot(2000, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
@@ -2340,8 +2356,14 @@ class NewFillWindow(QDialog):
             print(f"⚡️ 检测到自动填充被临时禁用，将在2秒后恢复能力（但不执行填充）")
             QTimer.singleShot(2000, lambda: web_view.setProperty("is_auto_fill_active", True))
 
-        # ⚡️ 智能重填逻辑：如果之前点击了“填充”，且页面重新加载了（可能是登录跳转回来），则自动再次填充
+        # ⚡️ 智能重填逻辑：如果之前点击了"填充"，且页面重新加载了（可能是登录跳转回来），则自动再次填充
         if web_view.property("is_auto_fill_active"):
+            # ⚡️ 报名工具特殊处理：如果已经渲染了自定义表单页面，不要重复触发填充
+            # 因为报名工具的 setHtml() 会触发 loadFinished，导致无限循环
+            if web_view.property("baoming_page_rendered"):
+                print(f"⚡️ 报名工具页面已渲染，跳过自动重填: {card_data.name}")
+                return  # 跳过，不触发填充
+            
             print(f"⚡️ 检测到页面刷新且填充模式已激活，准备自动重填: {card_data.name}")
             # 延迟2秒执行，给予页面充分的初始化时间（特别是登录后的重定向）
             QTimer.singleShot(2000, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
@@ -2710,7 +2732,7 @@ class NewFillWindow(QDialog):
         
         # 检测是否是报名工具
         if 'baominggongju.com' in link.url:
-            print(f"  🔄 报名工具刷新：重新获取二维码")
+            print(f"  🔄 [报名工具] 刷新：重新获取二维码，URL: {link.url}")
             
             # 1. 停止所有定时器并断开连接
             login_timer = web_view.property("login_timer")
@@ -2737,6 +2759,8 @@ class NewFillWindow(QDialog):
             web_view.setProperty("baoming_filler", None)
             web_view.setProperty("baoming_card_config", None)
             web_view.setProperty("baoming_filled_data", None)
+            # ⚡️ 清除页面渲染标记，允许重新初始化
+            web_view.setProperty("baoming_page_rendered", False)
             
             # 3. 显示加载中提示
             loading_html = """
@@ -2753,7 +2777,9 @@ class NewFillWindow(QDialog):
             web_view.setHtml(loading_html)
             
             # 4. 延迟重新初始化（确保资源释放）
-            QTimer.singleShot(800, lambda: self.init_baoming_tool_for_webview(web_view, link.url, card))
+            # ⚡️ 使用默认参数捕获当前值，避免闭包问题
+            print(f"  ⏳ [报名工具] 800ms后重新初始化...")
+            QTimer.singleShot(800, lambda wv=web_view, u=link.url, c=card: self.init_baoming_tool_for_webview(wv, u, c))
         else:
             # 普通页面直接刷新
             web_view.reload()
@@ -2833,21 +2859,30 @@ class NewFillWindow(QDialog):
         web_view.setProperty("baoming_card", card)
         # ⚡️ 标记目标表单类型，以便在 data URL 时能正确识别
         web_view.setProperty("target_form_type", "baominggongju")
+        # ⚡️ 清除页面渲染标记，开始新的初始化流程
+        web_view.setProperty("baoming_page_rendered", False)
         
         # 初始化
+        print(f"  🔧 [报名工具] 开始初始化: {url}")
         success, msg = filler.initialize(url)
         if not success:
+            print(f"  ❌ [报名工具] 初始化失败: {msg}")
             self.show_baoming_error_page(web_view, msg)
             return
+        print(f"  ✅ [报名工具] 初始化成功")
         
         # 获取二维码
+        print(f"  🔧 [报名工具] 获取二维码...")
         success, qr_data, code = filler.get_qr_code()
         if not success:
+            print(f"  ❌ [报名工具] 获取二维码失败: {qr_data}")
             self.show_baoming_error_page(web_view, qr_data)
             return
+        print(f"  ✅ [报名工具] 二维码获取成功")
         
         # 显示登录页面
         self.show_baoming_login_page(web_view, qr_data)
+        print(f"  📱 [报名工具] 登录页面已显示，开始轮询...")
         
         # 开始轮询登录状态
         self.start_baoming_login_polling(web_view, filler, card_config, card)
@@ -2913,6 +2948,8 @@ class NewFillWindow(QDialog):
         </body>
         </html>
         '''
+        # ⚡️ 标记报名工具页面已渲染，防止无限刷新
+        web_view.setProperty("baoming_page_rendered", True)
         web_view.setHtml(html)
     
     def show_baoming_login_page(self, web_view: QWebEngineView, qr_data: str):
@@ -2961,7 +2998,7 @@ class NewFillWindow(QDialog):
                     border-radius: 12px;
                     border: 1px solid #eee;
                     display: inline-block;
-                    margin-bottom: 24px;
+                    margin-bottom: 16px;
                     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
                 }}
                 .qr-container img {{
@@ -2969,6 +3006,26 @@ class NewFillWindow(QDialog):
                     height: 200px;
                     display: block;
                     border-radius: 4px;
+                }}
+                .refresh-btn {{
+                    background: #fff;
+                    border: 1px solid #ddd;
+                    color: #666;
+                    padding: 8px 20px;
+                    border-radius: 20px;
+                    font-size: 13px;
+                    cursor: pointer;
+                    margin-bottom: 16px;
+                    transition: all 0.2s;
+                }}
+                .refresh-btn:hover {{
+                    background: #f5f5f5;
+                    border-color: #1890ff;
+                    color: #1890ff;
+                }}
+                .refresh-btn:disabled {{
+                    opacity: 0.6;
+                    cursor: not-allowed;
                 }}
                 .status {{
                     font-size: 14px;
@@ -3003,13 +3060,53 @@ class NewFillWindow(QDialog):
                 <div class="title">📱 扫码登录</div>
                 <div class="subtitle">请使用微信扫描下方二维码登录报名工具</div>
                 <div class="qr-container">
-                    <img src="{qr_data}" alt="登录二维码">
+                    <img id="qrcode" src="{qr_data}" alt="登录二维码">
+                </div>
+                <div>
+                    <button class="refresh-btn" id="refreshBtn" onclick="refreshQrCode()">🔄 刷新二维码</button>
                 </div>
                 <div class="status waiting loading" id="status">等待扫码...</div>
             </div>
+            <script>
+                window.__refreshQrCode__ = false;
+                
+                function refreshQrCode() {{
+                    var btn = document.getElementById('refreshBtn');
+                    var status = document.getElementById('status');
+                    btn.disabled = true;
+                    btn.textContent = '正在刷新...';
+                    status.textContent = '正在获取新二维码...';
+                    status.className = 'status';
+                    window.__refreshQrCode__ = true;
+                }}
+                
+                function updateQrCode(newQrData) {{
+                    var img = document.getElementById('qrcode');
+                    var btn = document.getElementById('refreshBtn');
+                    var status = document.getElementById('status');
+                    img.src = newQrData;
+                    btn.disabled = false;
+                    btn.textContent = '🔄 刷新二维码';
+                    status.textContent = '等待扫码...';
+                    status.className = 'status waiting loading';
+                    window.__refreshQrCode__ = false;
+                }}
+                
+                function showRefreshError(msg) {{
+                    var btn = document.getElementById('refreshBtn');
+                    var status = document.getElementById('status');
+                    btn.disabled = false;
+                    btn.textContent = '🔄 刷新二维码';
+                    status.textContent = '❌ ' + msg;
+                    status.className = 'status error';
+                    window.__refreshQrCode__ = false;
+                }}
+            </script>
         </body>
         </html>
         '''
+        # ⚡️ 标记报名工具页面已渲染，防止无限刷新
+        web_view.setProperty("baoming_page_rendered", True)
         web_view.setHtml(html)
     
     def start_baoming_login_polling(self, web_view: QWebEngineView, filler, card_config: list, card):
@@ -3026,13 +3123,29 @@ class NewFillWindow(QDialog):
             poll_count = timer.property("poll_count") or 0
             timer.setProperty("poll_count", poll_count + 1)
             
-            # 最多轮询60次（2分钟）
-            if poll_count >= 60:
+            # 先检查是否需要刷新二维码
+            def handle_refresh_check(need_refresh):
+                if need_refresh:
+                    print(f"  🔄 [报名工具] 检测到刷新二维码请求")
+                    # 重置轮询计数
+                    timer.setProperty("poll_count", 0)
+                    # 调用API获取新二维码
+                    self.refresh_baoming_qrcode(web_view, filler)
+                else:
+                    # 继续正常的登录检查
+                    do_login_check()
+            
+            web_view.page().runJavaScript("window.__refreshQrCode__ === true", handle_refresh_check)
+        
+        def do_login_check():
+            poll_count = timer.property("poll_count") or 0
+            
+            # 最多轮询120次（4分钟）
+            if poll_count >= 120:
                 timer.stop()
                 web_view.page().runJavaScript(
-                    "document.getElementById('status').textContent = '登录超时，请刷新页面重试';"
-                    "document.getElementById('status').className = 'status';"
-                    "document.getElementById('status').style.color = '#ff6b6b';"
+                    "document.getElementById('status').textContent = '登录超时，请点击刷新二维码';"
+                    "document.getElementById('status').className = 'status error';"
                 )
                 return
             
@@ -3042,22 +3155,24 @@ class NewFillWindow(QDialog):
                 # 登录成功
                 timer.stop()
                 uname = user_info.get('uname', '用户') if user_info else '用户'
+                print(f"  ✅ [报名工具] 登录成功: {uname}")
                 web_view.page().runJavaScript(
                     f"document.getElementById('status').textContent = '✅ 登录成功: {uname}';"
-                    "document.getElementById('status').className = 'status';"
+                    "document.getElementById('status').className = 'status success';"
                 )
                 # 延迟加载表单
-                QTimer.singleShot(1000, lambda: self.load_baoming_form(web_view, filler, card_config, card))
+                print(f"  ⏳ [报名工具] 1秒后加载表单...")
+                # ⚡️ 使用默认参数捕获当前值，避免闭包问题
+                QTimer.singleShot(1000, lambda wv=web_view, f=filler, cc=card_config, c=card: self.load_baoming_form(wv, f, cc, c))
             elif status == -1:
-                # 等待中
+                # 等待中（不打印，避免日志过多）
                 pass
             else:
-                # 失败
-                timer.stop()
+                # 失败（可能是二维码过期等）
+                print(f"  ⚠️ [报名工具] 登录状态: {msg}")
                 web_view.page().runJavaScript(
-                    f"document.getElementById('status').textContent = '❌ 登录失败: {msg}';"
-                    "document.getElementById('status').className = 'status';"
-                    "document.getElementById('status').style.color = '#ff6b6b';"
+                    f"document.getElementById('status').textContent = '{msg}，请刷新二维码';"
+                    "document.getElementById('status').className = 'status error';"
                 )
         
         timer.timeout.connect(check_login)
@@ -3066,14 +3181,40 @@ class NewFillWindow(QDialog):
         # 保存定时器引用
         web_view.setProperty("login_timer", timer)
     
+    def refresh_baoming_qrcode(self, web_view: QWebEngineView, filler):
+        """刷新报名工具二维码"""
+        print(f"  🔄 [报名工具] 开始刷新二维码...")
+        
+        try:
+            # 调用API获取新二维码
+            success, qr_data, code = filler.get_qr_code()
+            
+            if success:
+                print(f"  ✅ [报名工具] 新二维码获取成功")
+                # 更新页面上的二维码
+                escaped_qr = qr_data.replace("'", "\\'")
+                web_view.page().runJavaScript(f"updateQrCode('{escaped_qr}');")
+            else:
+                print(f"  ❌ [报名工具] 获取二维码失败: {qr_data}")
+                escaped_msg = qr_data.replace("'", "\\'")
+                web_view.page().runJavaScript(f"showRefreshError('{escaped_msg}');")
+        except Exception as e:
+            print(f"  ❌ [报名工具] 刷新二维码异常: {e}")
+            web_view.page().runJavaScript(f"showRefreshError('刷新失败，请重试');")
+
+    
     def load_baoming_form(self, web_view: QWebEngineView, filler, card_config: list, card):
         """加载报名工具表单"""
+        print(f"  📋 [报名工具] 开始加载表单...")
+        
         # 获取表单数据
         success, msg = filler.load_form()
         if not success:
+            print(f"  ❌ [报名工具] 加载表单失败: {msg}")
             self.show_baoming_error_page(web_view, msg)
             return
         
+        print(f"  ✅ [报名工具] 表单加载成功，开始匹配填充...")
         # 自动匹配填充
         filled_data = filler.match_and_fill(card_config)
         
@@ -3264,9 +3405,14 @@ class NewFillWindow(QDialog):
                     var fields = document.querySelectorAll('input');
                     var data = [];
                     fields.forEach(function(input) {{
+                        var key = input.getAttribute('data-key');
+                        // 如果 field_key 是纯数字，转回整数类型（API 需要保持原始类型）
+                        if (/^\d+$/.test(key)) {{
+                            key = parseInt(key, 10);
+                        }}
                         data.push({{
                             field_name: input.getAttribute('data-name'),
-                            field_key: input.getAttribute('data-key'),
+                            field_key: key,
                             field_value: input.value,
                             ignore: 0
                         }});
@@ -3281,6 +3427,7 @@ class NewFillWindow(QDialog):
                     var btn = document.querySelector('.submit-btn');
                     result.textContent = message;
                     result.className = 'result ' + (success ? 'success' : 'error');
+                    result.style.display = 'block';
                     btn.disabled = false;
                     btn.textContent = '📤 立即提交表单';
                 }}
@@ -3288,6 +3435,8 @@ class NewFillWindow(QDialog):
         </body>
         </html>
         '''
+        # ⚡️ 标记报名工具页面已渲染，防止无限刷新
+        web_view.setProperty("baoming_page_rendered", True)
         web_view.setHtml(html)
         
         # 保存数据用于提交

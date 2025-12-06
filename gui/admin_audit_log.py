@@ -5,166 +5,287 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QLineEdit, QFrame, QAbstractItemView, 
+    QLabel, QMessageBox, QLineEdit, QFrame, 
     QGraphicsDropShadowEffect, QDialog, QScrollArea, QComboBox
 )
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from database import DatabaseManager, CardEditRequest
-from gui.styles import COLORS
-from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget, create_action_button
+)
 import datetime
 import json
 
-# 扩展颜色系统 - 与 admin_card_manager 保持一致
-PREMIUM_COLORS = {
-    **COLORS,
-    # 渐变色组
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    
-    # 玻璃效果
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'glass_shadow': 'rgba(31, 38, 135, 0.07)',
-    
-    # 深色点缀
-    'dark_accent': '#1a1a2e',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    
-    # 功能色
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'lavender': '#a29bfe',
-    'sky': '#74b9ff',
+
+# ========== 审核记录列表自定义组件 ==========
+
+# 列宽配置
+AUDIT_LIST_COLUMNS = {
+    'card': 180,
+    'user': 100,
+    'admin': 100,
+    'status': 100,
+    'created': 130,
+    'processed': 130,
+    'actions': 70,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    
-    def __init__(self, parent=None, opacity=0.9, radius=24, hover_effect=False):
-        super().__init__(parent)
-        self.opacity = opacity
-        self.radius = radius
-        self.hover_effect = hover_effect
-        self._setup_style()
-    
-    def _setup_style(self):
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: {self.radius}px;
-            }}
-            GlassFrame:hover {{
-                background: rgba(255, 255, 255, {min(1.0, self.opacity + 0.05)});
-                border-color: rgba(255, 255, 255, 1.0);
-            }}
-        """ if self.hover_effect else f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: {self.radius}px;
-            }}
-        """)
-        
-        # 添加高级阴影效果
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(31, 38, 135, 15))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class GradientButton(QPushButton):
-    """渐变按钮"""
+class AuditListHeader(QFrame):
+    """审核记录列表表头"""
     
-    def __init__(self, text, start_color, end_color, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                color: white;
+            AuditListHeader {{
+                background: {PREMIUM_COLORS['background']};
                 border: none;
-                border-radius: 22px;
-                font-weight: 600;
-                font-size: 14px;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {end_color}, stop:1 {start_color});
-            }}
-            QPushButton:pressed {{
-                padding-top: 2px;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
             }}
         """)
-
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
-        super().__init__(parent)
-        self.value = value
-        self._setup_ui(title, icon, color_start, color_end)
-        
-    def _setup_ui(self, title, icon, color_start, color_end):
-        self.setFixedSize(140, 50)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
         
-        # 背景样式
+        headers = [
+            ('目标名片', AUDIT_LIST_COLUMNS['card']),
+            ('所属用户', AUDIT_LIST_COLUMNS['user']),
+            ('申请人', AUDIT_LIST_COLUMNS['admin']),
+            ('状态', AUDIT_LIST_COLUMNS['status']),
+            ('提交时间', AUDIT_LIST_COLUMNS['created']),
+            ('处理时间', AUDIT_LIST_COLUMNS['processed']),
+            ('操作', AUDIT_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class AuditRowWidget(QFrame):
+    """审核记录行组件"""
+    
+    view_clicked = pyqtSignal(object)
+    
+    def __init__(self, req, parent=None):
+        super().__init__(parent)
+        self.req = req
+        self.setFixedHeight(60)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            AuditRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            AuditRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
         
-        # 图标
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
-            color: white;
-            border-radius: 8px;
-            font-size: 16px;
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 目标名片
+        self._add_card(layout)
+        # 2. 所属用户
+        self._add_user(layout)
+        # 3. 申请人
+        self._add_admin(layout)
+        # 4. 状态
+        self._add_status(layout)
+        # 5. 提交时间
+        self._add_created(layout)
+        # 6. 处理时间
+        self._add_processed(layout)
+        # 7. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_card(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['card'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        card_name = self.req.card.name if self.req.card else (self.req.original_name or "未知名片")
+        lbl = QLabel(card_name)
+        lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        lbl.setToolTip(card_name)
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_user(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['user'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        user_name = self.req.user.username if self.req.user else "未知"
+        lbl = QLabel(user_name)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_admin(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['admin'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        admin_name = self.req.admin.username if self.req.admin else "未知"
+        lbl = QLabel(admin_name)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_status(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['status'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        s_lbl = QLabel()
+        if self.req.status == 'pending':
+            s_lbl.setText("⏳ 待审批")
+            s_lbl.setStyleSheet("color: #d97706; background: #fff7ed; padding: 4px 10px; border-radius: 10px; font-size: 11px; font-weight: 600;")
+        elif self.req.status == 'approved':
+            s_lbl.setText("✅ 已通过")
+            s_lbl.setStyleSheet("color: #059669; background: #ecfdf5; padding: 4px 10px; border-radius: 10px; font-size: 11px; font-weight: 600;")
+        else:
+            s_lbl.setText("❌ 已拒绝")
+            s_lbl.setStyleSheet("color: #dc2626; background: #fef2f2; padding: 4px 10px; border-radius: 10px; font-size: 11px; font-weight: 600;")
+        
+        c_layout.addWidget(s_lbl)
+        layout.addWidget(container)
+    
+    def _add_created(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['created'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        c_time = self.req.created_at.strftime('%Y-%m-%d %H:%M') if self.req.created_at else "-"
+        lbl = QLabel(c_time)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_processed(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['processed'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        p_time = self.req.processed_at.strftime('%Y-%m-%d %H:%M') if self.req.processed_at else "-"
+        lbl = QLabel(p_time)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(AUDIT_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        btn_view = create_action_button("查看", PREMIUM_COLORS['gradient_blue_start'])
+        btn_view.clicked.connect(lambda: self.view_clicked.emit(self.req))
+        c_layout.addWidget(btn_view)
+        layout.addWidget(container)
+
+
+class AuditListWidget(QWidget):
+    """审核记录列表组件"""
+    
+    view_request = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = AuditListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
-        layout.addWidget(icon_lbl)
         
-        # 文本
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        self.value_lbl = QLabel(str(self.value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_requests(self, requests):
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
         
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
+        if not requests:
+            empty_label = QLabel("暂无审核记录")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
         
-        layout.addLayout(text_layout)
-        
-    def update_value(self, value):
-        self.value = value
-        self.value_lbl.setText(str(value))
+        for req in requests:
+            row = AuditRowWidget(req)
+            row.view_clicked.connect(self.view_request.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class AdminAuditLogDetailDialog(QDialog):
     """审核记录详情对话框"""
@@ -509,47 +630,10 @@ class AdminAuditLogManager(QWidget):
         toolbar_layout.addStretch()
         card_layout.addWidget(toolbar)
         
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['目标名片', '所属用户', '申请人', '状态', '提交时间', '处理时间', '操作'])
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 140)
-        self.table.setColumnWidth(5, 140)
-        self.table.setColumnWidth(6, 100)
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{ background: transparent; border: none; }}
-            QTableWidget::item {{ border-bottom: 1px solid {PREMIUM_COLORS['border_light']}; padding: 0px; }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)
+        # 自定义审核记录列表
+        self.audit_list = AuditListWidget()
+        self.audit_list.view_request.connect(self.view_detail)
+        card_layout.addWidget(self.audit_list, 1)
         
         # Pagination
         pagination = QFrame()
@@ -629,85 +713,11 @@ class AdminAuditLogManager(QWidget):
         start = (self.current_page - 1) * self.page_size
         page_data = requests[start:start+self.page_size]
         
-        self.update_table(page_data)
+        self.audit_list.set_requests(page_data)
         
         self.page_info.setText(f"显示 {start+1}-{min(start+self.page_size, self.total_records)} 条，共 {self.total_records} 条")
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
-        
-    def update_table(self, requests):
-        self.table.setRowCount(len(requests))
-        
-        for row, req in enumerate(requests):
-            self.table.setRowHeight(row, 60)
-            
-            # 1. Card Name
-            name_item = QTableWidgetItem(req.card.name if req.card else (req.original_name or "未知名片"))
-            name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            name_item.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-            self.table.setItem(row, 0, name_item)
-            
-            # 2. User
-            user_item = QTableWidgetItem(req.user.username if req.user else "未知")
-            user_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 1, user_item)
-            
-            # 3. Admin
-            admin_item = QTableWidgetItem(req.admin.username if req.admin else "未知")
-            admin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, admin_item)
-            
-            # 4. Status
-            status_widget = QWidget()
-            s_layout = QHBoxLayout(status_widget)
-            s_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            s_lbl = QLabel()
-            if req.status == 'pending':
-                s_lbl.setText("⏳ 待审批")
-                s_lbl.setStyleSheet("color: #d97706; background: #fff7ed; padding: 4px 12px; border-radius: 12px; font-weight: 600;")
-            elif req.status == 'approved':
-                s_lbl.setText("✅ 已通过")
-                s_lbl.setStyleSheet("color: #059669; background: #ecfdf5; padding: 4px 12px; border-radius: 12px; font-weight: 600;")
-            else:
-                s_lbl.setText("❌ 已拒绝")
-                s_lbl.setStyleSheet("color: #dc2626; background: #fef2f2; padding: 4px 12px; border-radius: 12px; font-weight: 600;")
-            
-            s_layout.addWidget(s_lbl)
-            self.table.setCellWidget(row, 3, status_widget)
-            
-            # 5. Created At
-            c_time = req.created_at.strftime('%Y-%m-%d %H:%M') if req.created_at else "-"
-            self.table.setItem(row, 4, QTableWidgetItem(c_time))
-            self.table.item(row, 4).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 6. Processed At
-            p_time = req.processed_at.strftime('%Y-%m-%d %H:%M') if req.processed_at else "-"
-            self.table.setItem(row, 5, QTableWidgetItem(p_time))
-            self.table.item(row, 5).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 7. Actions
-            btn = QPushButton("查看")
-            btn.setFixedSize(60, 28)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: white;
-                    border: 1px solid {PREMIUM_COLORS['primary']};
-                    color: {PREMIUM_COLORS['primary']};
-                    border-radius: 14px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{ background: {PREMIUM_COLORS['primary']}10; }}
-            """)
-            btn.clicked.connect(lambda _, r=req: self.view_detail(r))
-            
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.setContentsMargins(0,0,0,0)
-            layout.addWidget(btn)
-            self.table.setCellWidget(row, 6, container)
             
     def view_detail(self, req):
         dialog = AdminAuditLogDetailDialog(req, self)

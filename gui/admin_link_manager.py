@@ -4,108 +4,364 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QLineEdit, QFrame, QGraphicsDropShadowEffect, 
-    QAbstractItemView, QScrollArea, QMenu
+    QLabel, QMessageBox, QLineEdit, QFrame, 
+    QGraphicsDropShadowEffect, QScrollArea, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QBrush, QDesktopServices
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices
 from database import DatabaseManager
-from gui.styles import COLORS
 from gui.icons import Icons
+from gui.admin_base_components import (
+    PREMIUM_COLORS, GlassFrame, CompactStatWidget, create_action_button, create_more_button
+)
 import datetime
 
-# 扩展颜色系统
-PREMIUM_COLORS = {
-    **COLORS,
-    'gradient_blue_start': '#667eea',
-    'gradient_blue_end': '#764ba2',
-    'gradient_green_start': '#11998e',
-    'gradient_green_end': '#38ef7d',
-    'gradient_orange_start': '#f093fb',
-    'gradient_orange_end': '#f5576c',
-    'gradient_purple_start': '#4facfe',
-    'gradient_purple_end': '#00f2fe',
-    'gradient_gold_start': '#f7971e',
-    'gradient_gold_end': '#ffd200',
-    'glass_bg': 'rgba(255, 255, 255, 0.85)',
-    'glass_border': 'rgba(255, 255, 255, 0.6)',
-    'text_heading': '#2d3748',
-    'text_body': '#4a5568',
-    'text_hint': '#a0aec0',
-    'mint': '#00d9a6',
-    'coral': '#ff6b6b',
-    'background': '#f8fafc',
-    'border': '#e2e8f0',
-    'border_light': '#f1f5f9',
-    'primary': '#667eea',
-    'surface': '#ffffff',
-    'primary_light': '#8b9df0',
+
+# ========== 链接列表自定义组件 ==========
+
+# 列宽配置
+LINK_LIST_COLUMNS = {
+    'user': 140,
+    'link_info': 280,
+    'category': 100,
+    'status': 80,
+    'created': 130,
+    'actions': 100,
 }
 
-class GlassFrame(QFrame):
-    """玻璃拟态框架"""
-    def __init__(self, parent=None, opacity=0.9, radius=24):
-        super().__init__(parent)
-        self.opacity = opacity
-        self.radius = radius
-        self.setStyleSheet(f"""
-            GlassFrame {{
-                background: rgba(255, 255, 255, {self.opacity});
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: {self.radius}px;
-            }}
-        """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(31, 38, 135, 15))
-        shadow.setOffset(0, 8)
-        self.setGraphicsEffect(shadow)
 
-class CompactStatWidget(QFrame):
-    """紧凑型统计组件"""
-    def __init__(self, title, value, icon, color_start, color_end, parent=None):
+class LinkListHeader(QFrame):
+    """链接列表表头"""
+    
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(140, 50)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
-        
+        self.setFixedHeight(44)
         self.setStyleSheet(f"""
-            CompactStatWidget {{
+            LinkListHeader {{
+                background: {PREMIUM_COLORS['background']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
+        
+        headers = [
+            ('用户', LINK_LIST_COLUMNS['user']),
+            ('链接信息', LINK_LIST_COLUMNS['link_info']),
+            ('分类', LINK_LIST_COLUMNS['category']),
+            ('状态', LINK_LIST_COLUMNS['status']),
+            ('创建时间', LINK_LIST_COLUMNS['created']),
+            ('操作', LINK_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in headers:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                padding-left: 4px;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class LinkRowWidget(QFrame):
+    """链接行组件"""
+    
+    visit_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
+    
+    def __init__(self, link, parent=None):
+        super().__init__(parent)
+        self.link = link
+        self.setFixedHeight(64)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        self.setStyleSheet(f"""
+            LinkRowWidget {{
                 background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            LinkRowWidget:hover {{
+                background: #fafbfc;
             }}
         """)
         
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(32, 32)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {color_start}, stop:1 {color_end});
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 1. 用户
+        self._add_user(layout)
+        # 2. 链接信息
+        self._add_link_info(layout)
+        # 3. 分类
+        self._add_category(layout)
+        # 4. 状态
+        self._add_status(layout)
+        # 5. 创建时间
+        self._add_created(layout)
+        # 6. 操作
+        self._add_actions(layout)
+        
+        layout.addStretch()
+    
+    def _add_user(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['user'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setSpacing(8)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        user_name = self.link.user.username if self.link.user else "未知用户"
+        
+        avatar = QLabel(user_name[0].upper())
+        avatar.setFixedSize(32, 32)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        colors = [
+            (PREMIUM_COLORS['gradient_green_start'], PREMIUM_COLORS['gradient_green_end']),
+            (PREMIUM_COLORS['gradient_orange_start'], PREMIUM_COLORS['gradient_orange_end']),
+            (PREMIUM_COLORS['gradient_purple_start'], PREMIUM_COLORS['gradient_purple_end']),
+        ]
+        c_start, c_end = colors[sum(ord(c) for c in user_name) % len(colors)]
+        
+        avatar.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c_start}, stop:1 {c_end});
             color: white;
-            border-radius: 8px;
-            font-size: 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            font-weight: 700;
         """)
-        layout.addWidget(icon_lbl)
         
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        name_lbl = QLabel(user_name)
+        name_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
         
-        self.value_lbl = QLabel(str(value))
-        self.value_lbl.setStyleSheet(f"font-size: 16px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
-        text_layout.addWidget(self.value_lbl)
+        c_layout.addWidget(avatar)
+        c_layout.addWidget(name_lbl)
+        layout.addWidget(container)
+    
+    def _add_link_info(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['link_info'])
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setSpacing(2)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-size: 10px; color: {PREMIUM_COLORS['text_hint']};")
-        text_layout.addWidget(title_lbl)
+        name_lbl = QLabel(self.link.name)
+        name_lbl.setStyleSheet(f"font-size: 13px; color: {PREMIUM_COLORS['text_body']}; font-weight: 600;")
         
-        layout.addLayout(text_layout)
+        url_text = self.link.url[:40] + "..." if len(self.link.url) > 40 else self.link.url
+        url_lbl = QLabel(url_text)
+        url_lbl.setToolTip(self.link.url)
+        url_lbl.setStyleSheet(f"font-size: 11px; color: {PREMIUM_COLORS['text_hint']};")
         
-    def update_value(self, value):
-        self.value_lbl.setText(str(value))
+        c_layout.addWidget(name_lbl)
+        c_layout.addWidget(url_lbl)
+        layout.addWidget(container)
+    
+    def _add_category(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['category'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        cat_lbl = QLabel(self.link.category or "默认")
+        cat_lbl.setStyleSheet(f"""
+            background: {PREMIUM_COLORS['text_hint']}15;
+            color: {PREMIUM_COLORS['text_body']};
+            border-radius: 10px;
+            padding: 3px 10px;
+            font-size: 11px;
+            font-weight: 500;
+        """)
+        c_layout.addWidget(cat_lbl)
+        layout.addWidget(container)
+    
+    def _add_status(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['status'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        is_active = self.link.status == 'active'
+        status_text = "激活" if is_active else "归档"
+        status_lbl = QLabel(status_text)
+        
+        if is_active:
+            status_lbl.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['gradient_green_start']}15;
+                color: {PREMIUM_COLORS['gradient_green_start']};
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+        else:
+            status_lbl.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['text_hint']}15;
+                color: {PREMIUM_COLORS['text_hint']};
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+        
+        c_layout.addWidget(status_lbl)
+        layout.addWidget(container)
+    
+    def _add_created(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['created'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        time_str = self.link.created_at.strftime('%Y-%m-%d %H:%M')
+        lbl = QLabel(time_str)
+        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        c_layout.addWidget(lbl)
+        layout.addWidget(container)
+    
+    def _add_actions(self, layout):
+        container = QWidget()
+        container.setFixedWidth(LINK_LIST_COLUMNS['actions'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # 访问按钮
+        btn_visit = create_action_button("访问", PREMIUM_COLORS['gradient_blue_start'])
+        btn_visit.clicked.connect(lambda: self.visit_clicked.emit(self.link))
+        c_layout.addWidget(btn_visit)
+        
+        # 更多菜单
+        more_btn = create_more_button()
+        more_btn.clicked.connect(lambda: self._show_more_menu(more_btn))
+        c_layout.addWidget(more_btn)
+        
+        layout.addWidget(container)
+    
+    def _show_more_menu(self, button):
+        menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: white;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 6px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QMenu::item:selected {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+            }}
+        """)
+        
+        shadow = QGraphicsDropShadowEffect(menu)
+        shadow.setBlurRadius(16)
+        shadow.setColor(QColor(0, 0, 0, 25))
+        shadow.setOffset(0, 4)
+        menu.setGraphicsEffect(shadow)
+        
+        delete_action = menu.addAction("🗑️ 删除链接")
+        delete_action.triggered.connect(lambda: self.delete_clicked.emit(self.link))
+        
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+
+class LinkListWidget(QWidget):
+    """链接列表组件"""
+    
+    visit_link = pyqtSignal(object)
+    delete_link = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header = LinkListHeader()
+        layout.addWidget(self.header)
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
+        
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_links(self, links):
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        if not links:
+            empty_label = QLabel("暂无链接数据")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 14px;
+                padding: 60px;
+            """)
+            self.content_layout.addWidget(empty_label)
+            self.row_widgets.append(empty_label)
+            return
+        
+        for link in links:
+            row = LinkRowWidget(link)
+            row.visit_clicked.connect(self.visit_link.emit)
+            row.delete_clicked.connect(self.delete_link.emit)
+            
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
 
 class AdminLinkManager(QWidget):
     """管理员链接管理页面"""
@@ -244,55 +500,12 @@ class AdminLinkManager(QWidget):
         
         card_layout.addWidget(toolbar)
         
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(['用户', '链接信息', '分类', '状态', '创建时间', '操作'])
+        # 自定义链接列表
+        self.link_list = LinkListWidget()
+        self.link_list.visit_link.connect(self.visit_link)
+        self.link_list.delete_link.connect(self.delete_link)
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        
-        self.table.setColumnWidth(2, 100)
-        self.table.setColumnWidth(3, 80)
-        self.table.setColumnWidth(4, 140)
-        self.table.setColumnWidth(5, 120)
-        
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        self.table.setStyleSheet(f"""
-            QTableWidget {{
-                background: transparent;
-                border: none;
-            }}
-            QTableWidget::item {{
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                padding: 0px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PREMIUM_COLORS['primary']}08;
-            }}
-            QHeaderView::section {{
-                background: {PREMIUM_COLORS['background']}80;
-                color: {PREMIUM_COLORS['text_hint']};
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
-                font-weight: 700;
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-        """)
-        
-        card_layout.addWidget(self.table, 1)
+        card_layout.addWidget(self.link_list, 1)
         
         # Pagination
         pagination = QFrame()
@@ -403,7 +616,7 @@ class AdminLinkManager(QWidget):
         if self.current_page > self.total_pages:
             self.current_page = self.total_pages
             
-        self.update_table(result['links'])
+        self.link_list.set_links(result['links'])
         self.update_pagination()
         
     def update_pagination(self):
@@ -418,197 +631,10 @@ class AdminLinkManager(QWidget):
         self.page_num_label.setText(f"{self.current_page} / {self.total_pages}")
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
-        
-    def update_table(self, links):
-        self.table.setRowCount(len(links))
-        
-        for row, link in enumerate(links):
-            self.table.setRowHeight(row, 60)
-            
-            # 1. 用户
-            user_widget = QWidget()
-            user_layout = QHBoxLayout(user_widget)
-            user_layout.setContentsMargins(12, 0, 4, 0)
-            user_layout.setSpacing(10)
-            user_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            user_name = link.user.username if link.user else "未知用户"
-            avatar = QLabel(user_name[0].upper())
-            avatar.setFixedSize(32, 32)
-            avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            colors = [
-                (PREMIUM_COLORS['gradient_green_start'], PREMIUM_COLORS['gradient_green_end']),
-                (PREMIUM_COLORS['gradient_orange_start'], PREMIUM_COLORS['gradient_orange_end']),
-                (PREMIUM_COLORS['gradient_purple_start'], PREMIUM_COLORS['gradient_purple_end']),
-            ]
-            c_start, c_end = colors[sum(ord(c) for c in user_name) % len(colors)]
-            
-            avatar.setStyleSheet(f"""
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c_start}, stop:1 {c_end});
-                color: white;
-                border-radius: 16px;
-                font-size: 14px;
-                font-weight: 700;
-            """)
-            
-            name_lbl = QLabel(user_name)
-            name_lbl.setStyleSheet(f"font-weight: 700; color: {PREMIUM_COLORS['text_heading']};")
-            
-            user_layout.addWidget(avatar)
-            user_layout.addWidget(name_lbl)
-            self.table.setCellWidget(row, 0, user_widget)
-            
-            # 2. 链接信息
-            link_widget = QWidget()
-            link_layout = QVBoxLayout(link_widget)
-            link_layout.setContentsMargins(4, 0, 4, 0)
-            link_layout.setSpacing(2)
-            link_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            
-            link_name_lbl = QLabel(link.name)
-            link_name_lbl.setStyleSheet(f"font-size: 13px; color: {PREMIUM_COLORS['text_body']}; font-weight: 600;")
-            link_url_lbl = QLabel(link.url)
-            link_url_lbl.setStyleSheet(f"font-size: 11px; color: {PREMIUM_COLORS['text_hint']};")
-            
-            link_layout.addWidget(link_name_lbl)
-            link_layout.addWidget(link_url_lbl)
-            self.table.setCellWidget(row, 1, link_widget)
-            
-            # 3. 分类
-            cat_item = QTableWidgetItem(link.category or "默认")
-            cat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, cat_item)
-            
-            # 4. 状态
-            status_widget = QWidget()
-            status_layout = QHBoxLayout(status_widget)
-            status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            is_active = link.status == 'active'
-            status_text = "激活" if is_active else "归档"
-            status_lbl = QLabel(status_text)
-            
-            if is_active:
-                status_lbl.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['gradient_green_start']}15;
-                    color: {PREMIUM_COLORS['gradient_green_start']};
-                    padding: 4px 12px;
-                    border-radius: 6px;
-                    font-size: 12px;
-                    font-weight: 600;
-                """)
-            else:
-                status_lbl.setStyleSheet(f"""
-                    background: {PREMIUM_COLORS['text_hint']}15;
-                    color: {PREMIUM_COLORS['text_hint']};
-                    padding: 4px 12px;
-                    border-radius: 6px;
-                    font-size: 12px;
-                    font-weight: 600;
-                """)
-            status_layout.addWidget(status_lbl)
-            self.table.setCellWidget(row, 3, status_widget)
-            
-            # 5. 时间
-            time_str = link.created_at.strftime('%Y-%m-%d %H:%M')
-            time_item = QTableWidgetItem(time_str)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 4, time_item)
-            
-            # 6. 操作
-            ops_widget = QWidget()
-            ops_layout = QHBoxLayout(ops_widget)
-            ops_layout.setContentsMargins(4, 0, 4, 0)
-            ops_layout.setSpacing(6)
-            ops_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 访问按钮
-            visit_btn = QPushButton("访问")
-            visit_btn.setFixedSize(44, 24)
-            visit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            visit_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['gradient_blue_start']};
-                    border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['gradient_blue_start']}10;
-                    border-color: {PREMIUM_COLORS['gradient_blue_start']};
-                }}
-            """)
-            visit_btn.clicked.connect(lambda checked, url=link.url: QDesktopServices.openUrl(QUrl(url)))
-            ops_layout.addWidget(visit_btn)
-            
-            # 更多操作
-            more_btn = QPushButton("•••")
-            more_btn.setFixedSize(24, 24)
-            more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            more_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {PREMIUM_COLORS['text_hint']};
-                    border: none;
-                    font-size: 12px;
-                    font-weight: 900;
-                    border-radius: 12px;
-                }}
-                QPushButton:hover {{
-                    background: {PREMIUM_COLORS['background']};
-                    color: {PREMIUM_COLORS['text_body']};
-                }}
-            """)
-            more_btn.clicked.connect(lambda checked, l=link, b=more_btn: self.show_more_menu(l, b))
-            ops_layout.addWidget(more_btn)
-            
-            self.table.setCellWidget(row, 5, ops_widget)
-            
-    def show_more_menu(self, link, button):
-        """显示更多操作菜单"""
-        menu = QMenu(self)
-        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background: white;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
-                border-radius: 12px;
-                padding: 6px;
-            }}
-            QMenu::item {{
-                padding: 8px 24px;
-                border-radius: 6px;
-                color: {PREMIUM_COLORS['text_body']};
-                font-size: 13px;
-                font-weight: 500;
-            }}
-            QMenu::item:selected {{
-                background: {PREMIUM_COLORS['background']};
-                color: {PREMIUM_COLORS['gradient_blue_start']};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: {PREMIUM_COLORS['border_light']};
-                margin: 4px 0;
-            }}
-        """)
-        
-        shadow = QGraphicsDropShadowEffect(menu)
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 30))
-        shadow.setOffset(0, 4)
-        menu.setGraphicsEffect(shadow)
-        
-        # 删除
-        delete_action = menu.addAction("🗑️ 删除链接")
-        delete_action.triggered.connect(lambda: self.delete_link(link))
-        
-        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+    
+    def visit_link(self, link):
+        """访问链接"""
+        QDesktopServices.openUrl(QUrl(link.url))
         
     def delete_link(self, link):
         """删除链接"""

@@ -16,6 +16,7 @@ from .admin_audit_log import AdminAuditLogManager
 from .admin_fill_record import AdminFillRecordManager
 from .admin_link_manager import AdminLinkManager
 from .admin_field_library import AdminFieldLibraryManager
+from .admin_fixed_template import AdminFixedTemplateManager
 from .admin_notice_manager import AdminNoticeManager
 from .link_manager import LinkManagerDialog
 from .admin_user_manager import UserManagementWidget
@@ -278,8 +279,9 @@ class AdminMainWindow(QMainWindow):
             ("填充记录", Icons.edit('white'), 4),
             ("链接管理", Icons.link('white'), 5), 
             ("字段库管理", Icons.database('white'), 6), 
-            ("通告管理", Icons.broadcast('white'), 7),
-            ("字典管理", Icons.settings('white'), 8),
+            ("固定模板", Icons.copy('white'), 7),
+            ("通告管理", Icons.broadcast('white'), 8),
+            ("字典管理", Icons.settings('white'), 9),
         ]
         
         for text, icon, index in menu_items:
@@ -483,11 +485,15 @@ class AdminMainWindow(QMainWindow):
         field_library_page = self.create_field_library_page()
         self.content_stack.addWidget(field_library_page)
         
-        # 7. 通告管理页面
+        # 7. 固定模板管理页面
+        self.fixed_template_page = AdminFixedTemplateManager()
+        self.content_stack.addWidget(self.fixed_template_page)
+        
+        # 8. 通告管理页面
         self.notice_page = AdminNoticeManager(current_user=self.current_user)
         self.content_stack.addWidget(self.notice_page)
 
-        # 8. 字典管理页面
+        # 9. 字典管理页面
         self.dictionary_page = AdminDictionaryManager()
         self.content_stack.addWidget(self.dictionary_page)
 

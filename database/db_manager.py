@@ -4,7 +4,7 @@
 适配 MongoDB + MongoEngine
 """
 from typing import List, Optional, Dict
-from .models import Card, CardConfigItem, Link, FillRecord, User, Notice, NoticeCategory, Platform, FieldLibrary, Category, CardEditRequest, Notification
+from .models import Card, CardConfigItem, Link, FillRecord, User, Notice, NoticeCategory, Platform, FieldLibrary, Category, CardEditRequest, Notification, FixedTemplate
 from bson import ObjectId
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine import Q
@@ -951,6 +951,141 @@ class DatabaseManager:
             return True
         except Exception as e:
             print(f"❌ 删除字段库条目失败: {e}")
+            return False
+    
+    # ==================== 固定模板相关 ====================
+    
+    @staticmethod
+    def get_all_fixed_templates(category: str = None, is_active: bool = True) -> List[FixedTemplate]:
+        """
+        获取固定模板列表
+        
+        Args:
+            category: 分类筛选
+            is_active: 是否只获取启用的模板
+        
+        Returns:
+            模板列表
+        """
+        try:
+            query = FixedTemplate.objects
+            
+            if is_active is not None:
+                query = query.filter(is_active=is_active)
+            
+            if category and category != '全部':
+                query = query.filter(category=category)
+            
+            return list(query.order_by('category', 'order', '-created_at'))
+        except Exception as e:
+            print(f"❌ 获取固定模板失败: {e}")
+            return []
+            
+    @staticmethod
+    def get_fixed_template_categories() -> List[str]:
+        """
+        获取固定模板所有分类
+        
+        Returns:
+            分类列表
+        """
+        try:
+            templates = FixedTemplate.objects(is_active=True).only('category')
+            categories = list(set([t.category for t in templates if t.category]))
+            return sorted(categories)
+        except Exception as e:
+            print(f"❌ 获取固定模板分类失败: {e}")
+            return []
+
+    @staticmethod
+    def get_fixed_template_by_id(template_id: str) -> Optional[FixedTemplate]:
+        """根据ID获取固定模板"""
+        try:
+            return FixedTemplate.objects.get(id=template_id)
+        except Exception:
+            return None
+
+    @staticmethod
+    def create_fixed_template(field_name: str, field_value: str, category: str = '通用',
+                             description: str = None, order: int = 0, 
+                             created_by=None) -> FixedTemplate:
+        """
+        创建固定模板
+        
+        Args:
+            field_name: 字段名（支持别名，用顿号分隔）
+            field_value: 字段值
+            category: 分类
+            description: 说明
+            order: 排序
+            created_by: 创建人
+        
+        Returns:
+            创建的模板对象
+        """
+        try:
+            template = FixedTemplate(
+                field_name=field_name,
+                field_value=field_value,
+                category=category,
+                description=description,
+                order=order,
+                is_active=True,
+                created_by=created_by
+            )
+            template.save()
+            return template
+        except Exception as e:
+            print(f"❌ 创建固定模板失败: {e}")
+            raise
+
+    @staticmethod
+    def update_fixed_template(template_id: str, **kwargs) -> bool:
+        """
+        更新固定模板
+        
+        Args:
+            template_id: 模板ID
+            **kwargs: 要更新的字段
+        
+        Returns:
+            是否成功
+        """
+        try:
+            template = DatabaseManager.get_fixed_template_by_id(template_id)
+            if not template:
+                return False
+            
+            for key, value in kwargs.items():
+                if hasattr(template, key) and value is not None:
+                    setattr(template, key, value)
+            
+            template.save()
+            return True
+        except Exception as e:
+            print(f"❌ 更新固定模板失败: {e}")
+            return False
+
+    @staticmethod
+    def delete_fixed_template(template_id: str) -> bool:
+        """
+        删除固定模板
+        
+        Args:
+            template_id: 模板ID
+        
+        Returns:
+            是否成功
+        """
+        try:
+            template = DatabaseManager.get_fixed_template_by_id(template_id)
+            if not template:
+                return False
+            
+            template.delete()
+            return True
+        except Exception as e:
+            print(f"❌ 删除固定模板失败: {e}")
             return False
     
     # ==================== 填写记录相关 ====================
