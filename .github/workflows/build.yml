@@ -26,8 +26,9 @@ jobs:
           pip install pyinstaller
 
       - name: Build Windows App
+        shell: cmd
         run: |
-          # 显式收集关键依赖
+          REM 显式收集关键依赖
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
