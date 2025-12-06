@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auto Form Filler - 极速智能表单助手</title>
+    <meta
+      name="description"
+      content="AI驱动的自动表单填充工具，重塑您的工作流。"
+    />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Font Awesome -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+
+    <!-- AOS Animation -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet" />
+
+    <!-- Vanilla Tilt -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.0/vanilla-tilt.min.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Outfit", "Noto Sans SC", "sans-serif"],
+            },
+            colors: {
+              background: "#030712", // gray-950
+              surface: "#111827", // gray-900
+              primary: "#6366f1", // indigo-500
+              secondary: "#ec4899", // pink-500
+              accent: "#06b6d4", // cyan-500
+            },
+            backgroundImage: {
+              "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
+              "hero-glow":
+                "conic-gradient(from 180deg at 50% 50%, #2a8af6 0deg, #a853ba 180deg, #e92a67 360deg)",
+            },
+            animation: {
+              blob: "blob 7s infinite",
+              float: "float 6s ease-in-out infinite",
+              "float-delayed": "float 6s ease-in-out 3s infinite",
+              "pulse-slow": "pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+              shimmer: "shimmer 2.5s linear infinite",
+            },
+            keyframes: {
+              blob: {
+                "0%": { transform: "translate(0px, 0px) scale(1)" },
+                "33%": { transform: "translate(30px, -50px) scale(1.1)" },
+                "66%": { transform: "translate(-20px, 20px) scale(0.9)" },
+                "100%": { transform: "translate(0px, 0px) scale(1)" },
+              },
+              float: {
+                "0%, 100%": { transform: "translateY(0)" },
+                "50%": { transform: "translateY(-20px)" },
+              },
+              shimmer: {
+                "0%": { backgroundPosition: "-1000px 0" },
+                "100%": { backgroundPosition: "1000px 0" },
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      /* Global Styles */
+      body {
+        background-color: #030712;
+        color: #f8fafc;
+        overflow-x: hidden;
+      }
+
+      /* Smooth Scrolling */
+      html {
+        scroll-behavior: smooth;
+      }
+
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #030712;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #374151;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #4b5563;
+      }
+
+      /* Glassmorphism Utilities */
+      .glass {
+        background: rgba(17, 24, 39, 0.7);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .glass-strong {
+        background: rgba(17, 24, 39, 0.85);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .glass-card {
+        background: rgba(30, 41, 59, 0.4);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      }
+
+      .glass-card:hover {
+        border-color: rgba(99, 102, 241, 0.3);
+        box-shadow: 0 0 40px rgba(99, 102, 241, 0.15);
+        background: rgba(30, 41, 59, 0.6);
+      }
+
+      /* Text Gradients */
+      .text-gradient-primary {
+        background: linear-gradient(
+          135deg,
+          #818cf8 0%,
+          #c084fc 50%,
+          #f472b6 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .text-gradient-blue {
+        background: linear-gradient(to right, #38bdf8, #818cf8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      /* Animated Background Blobs */
+      .blob-cont {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        z-index: -1;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      .blob {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.4;
+      }
+
+      /* Button Shine Effect */
+      .btn-shine {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .btn-shine::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 50%;
+        height: 100%;
+        background: linear-gradient(
+          to right,
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.3) 50%,
+          rgba(255, 255, 255, 0) 100%
+        );
+        transform: skewX(-25deg);
+        animation: shimmer 3s infinite;
+      }
+
+      /* Mac Window Style */
+      .mac-window {
+        background: #1e293b;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+
+      .mac-header {
+        background: #0f172a;
+        padding: 12px 16px;
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .mac-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+
+      /* Feature Icon Glow */
+      .icon-box {
+        position: relative;
+      }
+      .icon-box::before {
+        content: "";
+        position: absolute;
+        inset: -5px;
+        border-radius: 50%;
+        background: inherit;
+        filter: blur(15px);
+        opacity: 0.4;
+        z-index: -1;
+      }
+
+      /* Marquee Animation */
+      @keyframes marquee {
+        0% {
+          transform: translateX(0);
+        }
+        100% {
+          transform: translateX(-50%);
+        }
+      }
+
+      .animate-marquee {
+        animation: marquee 30s linear infinite;
+      }
+
+      .animate-marquee:hover {
+        animation-play-state: paused;
+      }
+
+      /* Spotlight Effect */
+      .glass-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(
+          800px circle at var(--mouse-x) var(--mouse-y),
+          rgba(255, 255, 255, 0.06),
+          transparent 40%
+        );
+        z-index: 1;
+        opacity: 0;
+        transition: opacity 0.5s;
+        pointer-events: none;
+      }
+
+      .glass-card:hover::before {
+        opacity: 1;
+      }
+
+      /* Animated Gradient Text */
+      .animate-gradient-text {
+        background-size: 200% auto;
+        animation: gradient-move 3s linear infinite;
+      }
+
+      @keyframes gradient-move {
+        0% {
+          background-position: 0% center;
+        }
+        100% {
+          background-position: 200% center;
+        }
+      }
+    </style>
+  </head>
+  <body class="antialiased selection:bg-indigo-500 selection:text-white">
+    <!-- Background Animation -->
+    <div class="blob-cont">
+      <div class="blob bg-purple-600 w-96 h-96 top-0 left-0 animate-blob"></div>
+      <div
+        class="blob bg-indigo-600 w-96 h-96 bottom-0 right-0 animate-blob animation-delay-2000"
+      ></div>
+      <div
+        class="blob bg-blue-600 w-80 h-80 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 animate-blob animation-delay-4000"
+      ></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 glass-strong transition-all duration-300">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-20 items-center">
+          <div
+            class="flex-shrink-0 flex items-center gap-3 cursor-pointer group"
+            onclick="window.scrollTo(0,0)"
+          >
+            <div class="relative w-10 h-10 flex items-center justify-center">
+              <div
+                class="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl transform rotate-6 group-hover:rotate-12 transition-transform"
+              ></div>
+              <div
+                class="absolute inset-0 bg-black rounded-xl transform rotate-6 scale-90"
+              ></div>
+              <i
+                class="fa-solid fa-bolt text-indigo-500 text-xl relative z-10"
+              ></i>
+            </div>
+            <span
+              class="font-bold text-xl tracking-tight text-white group-hover:text-indigo-400 transition-colors"
+              >Auto<span class="font-light text-gray-400">Filler</span></span
+            >
+          </div>
+          <div class="hidden md:flex items-center space-x-8">
+            <a
+              href="#features"
+              class="text-sm font-medium text-gray-300 hover:text-white transition-colors relative group"
+            >
+              功能特点
+              <span
+                class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-500 transition-all group-hover:w-full"
+              ></span>
+            </a>
+            <a
+              href="#showcase"
+              class="text-sm font-medium text-gray-300 hover:text-white transition-colors relative group"
+            >
+              演示预览
+              <span
+                class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-500 transition-all group-hover:w-full"
+              ></span>
+            </a>
+            <a
+              href="#platforms"
+              class="text-sm font-medium text-gray-300 hover:text-white transition-colors relative group"
+            >
+              下载中心
+              <span
+                class="absolute -bottom-1 left-0 w-0 h-0.5 bg-indigo-500 transition-all group-hover:w-full"
+              ></span>
+            </a>
+            <a
+              href="#platforms"
+              class="btn-shine px-6 py-2.5 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-sm font-bold tracking-wide shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:-translate-y-0.5 transition-all"
+            >
+              立即下载
+            </a>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section
+      class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden min-h-screen flex items-center"
+    >
+      <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10"
+      >
+        <!-- Badge -->
+        <div data-aos="fade-down" data-aos-duration="1000">
+          <a
+            href="#"
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm hover:bg-white/10 transition-all mb-8 group cursor-pointer"
+          >
+            <span class="flex h-2 w-2 relative">
+              <span
+                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
+              ></span>
+              <span
+                class="relative inline-flex rounded-full h-2 w-2 bg-green-500"
+              ></span>
+            </span>
+            <span
+              class="text-sm font-medium text-gray-300 group-hover:text-white transition-colors"
+              >v2.0 全新发布 · 完美支持腾讯文档</span
+            >
+            <i
+              class="fa-solid fa-arrow-right text-xs text-gray-500 group-hover:translate-x-1 transition-transform"
+            ></i>
+          </a>
+        </div>
+
+        <!-- Headline -->
+        <h1
+          class="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-8 leading-[1.1]"
+          data-aos="fade-up"
+          data-aos-duration="1000"
+          data-aos-delay="100"
+        >
+          释放你的<br />
+          <span
+            class="text-gradient-primary animate-gradient-text relative inline-block"
+          >
+            生产力潜能
+            <!-- Underline decoration -->
+            <svg
+              class="absolute w-full h-3 -bottom-1 left-0 text-purple-500 opacity-50"
+              viewBox="0 0 100 10"
+              preserveAspectRatio="none"
+            >
+              <path
+                d="M0 5 Q 50 10 100 5"
+                stroke="currentColor"
+                stroke-width="2"
+                fill="none"
+              />
+            </svg>
+          </span>
+        </h1>
+
+        <p
+          class="mt-6 max-w-2xl mx-auto text-lg md:text-xl text-gray-400 leading-relaxed font-light"
+          data-aos="fade-up"
+          data-aos-duration="1000"
+          data-aos-delay="200"
+        >
+          不再被繁琐的表单束缚。利用
+          <span class="text-indigo-400 font-medium">AI 视觉识别</span> 与
+          <span class="text-indigo-400 font-medium">自动化引擎</span
+          >，一键秒填各类复杂表单。支持 Mac & Windows。
+        </p>
+
+        <!-- CTA Buttons -->
+        <div
+          class="mt-10 flex flex-col sm:flex-row justify-center gap-4"
+          data-aos="fade-up"
+          data-aos-duration="1000"
+          data-aos-delay="300"
+        >
+          <a
+            href="#platforms"
+            class="btn-shine group px-8 py-4 rounded-xl bg-white text-black font-bold text-lg shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_30px_rgba(255,255,255,0.5)] hover:scale-105 transition-all transform flex items-center justify-center gap-3"
+          >
+            <i class="fa-brands fa-apple text-xl"></i>
+            <i class="fa-brands fa-windows text-xl"></i>
+            <span>立即下载体验</span>
+          </a>
+          <a
+            href="#features"
+            class="px-8 py-4 rounded-xl glass hover:bg-white/10 border border-white/10 text-white font-semibold text-lg transition-all flex items-center justify-center gap-2 group"
+          >
+            <i
+              class="fa-solid fa-play group-hover:scale-110 transition-transform"
+            ></i>
+            <span>了解更多</span>
+          </a>
+        </div>
+
+        <!-- Hero Image with Perspective -->
+        <div
+          class="mt-24 relative max-w-6xl mx-auto perspective-1000"
+          data-aos="fade-up"
+          data-aos-duration="1200"
+          data-aos-delay="400"
+        >
+          <!-- Glow Effect Behind -->
+          <div
+            class="absolute inset-0 bg-gradient-to-t from-indigo-600/20 to-purple-600/20 blur-3xl rounded-full transform scale-75 translate-y-10"
+          ></div>
+
+          <!-- Mac Window Container -->
+          <div
+            class="mac-window relative z-10 transform transition-transform hover:scale-[1.01] duration-500 animate-float"
+          >
+            <div class="mac-header">
+              <div class="mac-dot bg-red-500"></div>
+              <div class="mac-dot bg-yellow-500"></div>
+              <div class="mac-dot bg-green-500"></div>
+              <!-- Address Bar Simulation -->
+              <div
+                class="ml-4 flex-1 bg-gray-800/50 rounded-md h-6 flex items-center px-3 text-xs text-gray-500"
+              >
+                <i class="fa-solid fa-lock mr-2 text-gray-600"></i>
+                docs.qq.com/form/page/...
+              </div>
+            </div>
+            <div
+              class="bg-gray-900 aspect-video relative group overflow-hidden"
+            >
+              <img
+                src="https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_c72eb653-60f4-444b-b53d-b63406c8c07b.png"
+                onerror="this.src='https://placehold.co/1920x1080/1e1e1e/6366f1?text=Auto+Form+Filler+UI'"
+                alt="App Screenshot"
+                class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+              />
+
+              <!-- Overlay UI Elements (Decorative) -->
+              <div
+                class="absolute bottom-8 right-8 bg-black/80 backdrop-blur-md border border-white/10 p-4 rounded-xl flex items-center gap-4 transform translate-y-20 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500 delay-100"
+              >
+                <div
+                  class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center text-green-400"
+                >
+                  <i class="fa-solid fa-check"></i>
+                </div>
+                <div>
+                  <div class="text-white font-bold text-sm">填写成功</div>
+                  <div class="text-gray-400 text-xs">耗时 0.5s · 12个字段</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="py-10 border-y border-white/5 bg-white/0">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+          <div data-aos="fade-up" data-aos-delay="0">
+            <div
+              class="text-4xl font-bold text-white mb-2 counter-item"
+              data-target="10"
+              data-suffix="x"
+            >
+              0x
+            </div>
+            <div class="text-sm text-gray-500 uppercase tracking-wider">
+              效率提升
+            </div>
+          </div>
+          <div data-aos="fade-up" data-aos-delay="100">
+            <div
+              class="text-4xl font-bold text-white mb-2 counter-item"
+              data-target="100"
+              data-suffix="%"
+            >
+              0%
+            </div>
+            <div class="text-sm text-gray-500 uppercase tracking-wider">
+              本地安全
+            </div>
+          </div>
+          <div data-aos="fade-up" data-aos-delay="200">
+            <div
+              class="text-4xl font-bold text-white mb-2 counter-item"
+              data-target="3"
+              data-suffix="+"
+            >
+              0+
+            </div>
+            <div class="text-sm text-gray-500 uppercase tracking-wider">
+              支持平台
+            </div>
+          </div>
+          <div data-aos="fade-up" data-aos-delay="300">
+            <div
+              class="text-4xl font-bold text-white mb-2 counter-item"
+              data-target="1"
+              data-suffix="s"
+            >
+              0s
+            </div>
+            <div class="text-sm text-gray-500 uppercase tracking-wider">
+              秒级填充
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Grid (Bento Style) -->
+    <section id="features" class="py-32 relative">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center mb-20">
+          <h2
+            class="text-3xl md:text-5xl font-bold mb-6 text-white"
+            data-aos="fade-up"
+          >
+            不仅是填充，更是<span class="text-gradient-blue">智能进化</span>
+          </h2>
+          <p
+            class="text-gray-400 max-w-2xl mx-auto text-lg"
+            data-aos="fade-up"
+            data-aos-delay="100"
+          >
+            我们重新定义了表单填写体验，让每一次点击都充满科技感。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Feature 1 (Large) -->
+          <div
+            class="md:col-span-2 glass-card rounded-3xl p-10 relative overflow-hidden group"
+            data-tilt
+            data-tilt-max="2"
+            data-tilt-glare
+            data-tilt-max-glare="0.1"
+            data-aos="fade-right"
+          >
+            <div
+              class="absolute top-0 right-0 w-64 h-64 bg-indigo-600/20 rounded-full blur-[80px] -mr-16 -mt-16 pointer-events-none"
+            ></div>
+
+            <div class="relative z-10">
+              <div
+                class="w-14 h-14 rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-8 icon-box text-indigo-400"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles text-2xl"></i>
+              </div>
+              <h3 class="text-2xl font-bold mb-4 text-white">
+                DeepSeek 智能解析
+              </h3>
+              <p class="text-gray-400 text-lg leading-relaxed max-w-md">
+                内置 DeepSeek AI
+                引擎。只需粘贴聊天记录或混合文本，即可自动提取所有表单链接，智能识别标题并自动归类，批量导入从未如此简单。
+              </p>
+            </div>
+            <!-- Decorative UI Element -->
+            <div
+              class="absolute bottom-0 right-0 w-1/2 h-full opacity-50 translate-x-10 translate-y-10 group-hover:translate-x-5 group-hover:translate-y-5 transition-transform duration-500"
+            >
+              <img
+                src="https://placehold.co/400x300/1e1e1e/4f46e5?text=DeepSeek+AI"
+                class="rounded-tl-2xl border-t border-l border-white/10 shadow-2xl"
+                alt="AI Feature"
+              />
+            </div>
+          </div>
+
+          <!-- Feature 2 -->
+          <div
+            class="glass-card rounded-3xl p-10 relative overflow-hidden"
+            data-tilt
+            data-tilt-max="5"
+            data-aos="fade-left"
+          >
+            <div
+              class="w-14 h-14 rounded-2xl bg-pink-500/20 flex items-center justify-center mb-8 icon-box text-pink-400"
+            >
+              <i class="fa-solid fa-database text-2xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-white">海量字段库</h3>
+            <p class="text-gray-400 leading-relaxed">
+              内置覆盖小红书、抖音、微博、快手等平台的专业字段库。基本信息、报价数据、平台资料一应俱全，开箱即用。
+            </p>
+          </div>
+
+          <!-- Feature 3 -->
+          <div
+            class="glass-card rounded-3xl p-10 relative overflow-hidden"
+            data-tilt
+            data-tilt-max="5"
+            data-aos="fade-up"
+          >
+            <div
+              class="w-14 h-14 rounded-2xl bg-cyan-500/20 flex items-center justify-center mb-8 icon-box text-cyan-400"
+            >
+              <i class="fa-solid fa-globe text-2xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-white">12+ 平台全覆盖</h3>
+            <p class="text-gray-400 leading-relaxed">
+              腾讯文档、问卷星、麦客、金数据、飞书…主流表单平台一网打尽，智能识别自动切换填充引擎。
+            </p>
+          </div>
+
+          <!-- Feature 4 (Large) -->
+          <div
+            class="md:col-span-2 glass-card rounded-3xl p-10 relative overflow-hidden group"
+            data-tilt
+            data-tilt-max="2"
+            data-aos="fade-up"
+          >
+            <div
+              class="absolute bottom-0 left-0 w-64 h-64 bg-purple-600/20 rounded-full blur-[80px] -ml-16 -mb-16 pointer-events-none"
+            ></div>
+
+            <div
+              class="flex flex-col md:flex-row gap-8 items-center relative z-10"
+            >
+              <div class="flex-1">
+                <div
+                  class="w-14 h-14 rounded-2xl bg-orange-500/20 flex items-center justify-center mb-8 icon-box text-orange-400"
+                >
+                  <i class="fa-solid fa-layer-group text-2xl"></i>
+                </div>
+                <h3 class="text-2xl font-bold mb-4 text-white">
+                  多身份一键切换
+                </h3>
+                <p class="text-gray-400 text-lg leading-relaxed">
+                  无论你是需要帮团队填报，还是管理多个马甲账号。卡片式管理让你可以保存无限套身份信息，一键切换。
+                </p>
+              </div>
+              <!-- Decorative UI Element -->
+              <div class="flex-1 w-full">
+                <div class="space-y-3">
+                  <div
+                    class="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center gap-4 transform translate-x-4 opacity-60"
+                  >
+                    <div class="w-8 h-8 rounded-full bg-gray-600"></div>
+                    <div class="h-2 w-24 bg-gray-600 rounded"></div>
+                  </div>
+                  <div
+                    class="p-4 rounded-xl bg-gradient-to-r from-indigo-600/50 to-purple-600/50 border border-indigo-500/30 flex items-center gap-4 transform scale-105 shadow-xl"
+                  >
+                    <div class="w-8 h-8 rounded-full bg-indigo-500"></div>
+                    <div class="h-2 w-32 bg-white/80 rounded"></div>
+                    <div class="ml-auto text-green-400">
+                      <i class="fa-solid fa-check-circle"></i>
+                    </div>
+                  </div>
+                  <div
+                    class="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center gap-4 transform translate-x-4 opacity-60"
+                  >
+                    <div class="w-8 h-8 rounded-full bg-gray-600"></div>
+                    <div class="h-2 w-20 bg-gray-600 rounded"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Supported Platforms Marquee -->
+    <section
+      class="py-20 overflow-hidden relative bg-white/5 border-y border-white/5"
+    >
+      <div
+        class="absolute inset-0 bg-gradient-to-r from-[#030712] via-transparent to-[#030712] z-10 pointer-events-none"
+      ></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12 text-center">
+        <h3 class="text-2xl font-bold text-white mb-2" data-aos="fade-up">
+          支持 12+ 主流表单平台
+        </h3>
+        <p
+          class="text-gray-400 text-sm"
+          data-aos="fade-up"
+          data-aos-delay="100"
+        >
+          自动识别，自动切换引擎，无缝兼容
+        </p>
+      </div>
+
+      <div class="relative flex overflow-x-hidden group">
+        <div
+          class="py-4 animate-marquee whitespace-nowrap flex items-center gap-8 px-4"
+        >
+          <!-- Platform Items (First Set) -->
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-file-lines text-blue-400"></i>
+            <span class="text-gray-300 font-medium">腾讯文档</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-users text-orange-400"></i>
+            <span class="text-gray-300 font-medium">麦客CRM</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-star text-yellow-400"></i>
+            <span class="text-gray-300 font-medium">问卷星</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-database text-yellow-600"></i>
+            <span class="text-gray-300 font-medium">金数据</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-file-pen text-gray-400"></i>
+            <span class="text-gray-300 font-medium">石墨文档</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-clipboard-list text-green-400"></i>
+            <span class="text-gray-300 font-medium">报名工具</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-chart-pie text-purple-400"></i>
+            <span class="text-gray-300 font-medium">见数Credamo</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-circle-question text-blue-500"></i>
+            <span class="text-gray-300 font-medium">问卷网</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-stopwatch text-red-400"></i>
+            <span class="text-gray-300 font-medium">番茄表单</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-brands fa-twitter text-blue-300"></i>
+            <span class="text-gray-300 font-medium">飞书表单</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-file-word text-red-500"></i>
+            <span class="text-gray-300 font-medium">金山文档</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-brands fa-qq text-blue-400"></i>
+            <span class="text-gray-300 font-medium">腾讯问卷</span>
+          </div>
+
+          <!-- Duplicate for Infinite Loop -->
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-file-lines text-blue-400"></i>
+            <span class="text-gray-300 font-medium">腾讯文档</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-users text-orange-400"></i>
+            <span class="text-gray-300 font-medium">麦客CRM</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-star text-yellow-400"></i>
+            <span class="text-gray-300 font-medium">问卷星</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-database text-yellow-600"></i>
+            <span class="text-gray-300 font-medium">金数据</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-file-pen text-gray-400"></i>
+            <span class="text-gray-300 font-medium">石墨文档</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-clipboard-list text-green-400"></i>
+            <span class="text-gray-300 font-medium">报名工具</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-chart-pie text-purple-400"></i>
+            <span class="text-gray-300 font-medium">见数Credamo</span>
+          </div>
+          <div
+            class="flex items-center gap-3 bg-gray-800/50 border border-white/10 px-6 py-3 rounded-full backdrop-blur-sm"
+          >
+            <i class="fa-solid fa-circle-question text-blue-500"></i>
+            <span class="text-gray-300 font-medium">问卷网</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Features Based on Application -->
+    <section class="py-32 relative bg-black/30">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center mb-20">
+          <h2
+            class="text-3xl md:text-4xl font-bold mb-6 text-white"
+            data-aos="fade-up"
+          >
+            强大的<span class="text-gradient-primary">桌面端体验</span>
+          </h2>
+          <p
+            class="text-gray-400 max-w-2xl mx-auto"
+            data-aos="fade-up"
+            data-aos-delay="100"
+          >
+            不仅是简单的填写工具，更是完整的表单管理系统。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center mb-24">
+          <div data-aos="fade-right">
+            <div
+              class="glass-card p-2 rounded-xl transform rotate-1 hover:rotate-0 transition-transform duration-500"
+            >
+              <div
+                class="bg-gray-900 rounded-lg aspect-video relative overflow-hidden group"
+              >
+                <img
+                  src="https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_e7776594-50d5-4a6f-9636-a54ae420f430.png"
+                  alt="可视化名片管理界面"
+                  class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                />
+              </div>
+            </div>
+          </div>
+          <div data-aos="fade-left">
+            <div class="flex items-center gap-4 mb-6">
+              <div
+                class="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400"
+              >
+                <i class="fa-solid fa-grip text-xl"></i>
+              </div>
+              <h3 class="text-2xl font-bold text-white">拖拽式名片宫格</h3>
+            </div>
+            <p class="text-gray-400 text-lg leading-relaxed mb-6">
+              告别枯燥的列表。我们在主界面采用了直观的宫格设计，支持<span
+                class="text-white font-medium"
+                >长按拖拽排序</span
+              >。您可以像在手机主屏上整理 App 一样整理您的名片。
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-blue-500"></i>
+                <span>支持自定义分组与折叠</span>
+              </li>
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-blue-500"></i>
+                <span>一键多选、批量操作</span>
+              </li>
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-blue-500"></i>
+                <span>内置字段库，快速导入常用配置</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center mb-24">
+          <div class="order-2 md:order-1" data-aos="fade-right">
+            <div class="flex items-center gap-4 mb-6">
+              <div
+                class="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+              </div>
+              <h3 class="text-2xl font-bold text-white">智能多任务处理</h3>
+            </div>
+            <p class="text-gray-400 text-lg leading-relaxed mb-6">
+              不仅仅是单线程工作。全新的
+              <span class="text-white font-medium">New Fill Window</span>
+              支持多标签页、多WebView并发加载。您可以同时打开多个表单链接，配合多个名片进行批量填充。
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-purple-500"></i>
+                <span>多标签页 (Tab) 切换设计</span>
+              </li>
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-purple-500"></i>
+                <span>WebView 预加载技术，无需等待</span>
+              </li>
+              <li class="flex items-center gap-3 text-gray-400">
+                <i class="fa-solid fa-check-circle text-purple-500"></i>
+                <span>智能检测表单类型 (腾讯文档/麦客/问卷星等)</span>
+              </li>
+            </ul>
+          </div>
+          <div class="order-1 md:order-2" data-aos="fade-left">
+            <div
+              class="glass-card p-2 rounded-xl transform -rotate-1 hover:rotate-0 transition-transform duration-500"
+            >
+              <div
+                class="bg-gray-900 rounded-lg aspect-video relative overflow-hidden group"
+              >
+                <img
+                  src="https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_086a29be-38a0-483a-86a0-e86e810a9fba.png"
+                  alt="多任务并发填充界面"
+                  class="w-full h-full object-cover object-top opacity-90 group-hover:opacity-100 transition-opacity"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div
+            class="glass-card p-6 rounded-xl hover:-translate-y-1 transition-transform"
+            data-aos="fade-up"
+            data-aos-delay="0"
+          >
+            <div
+              class="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400 mb-4"
+            >
+              <i class="fa-solid fa-bell"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">字段推送通知</h4>
+            <p class="text-gray-400 text-sm">
+              支持字段推送功能。当有新的必填项更新时，您可以直接收到通知并一键添加到名片中。
+            </p>
+          </div>
+          <div
+            class="glass-card p-6 rounded-xl hover:-translate-y-1 transition-transform"
+            data-aos="fade-up"
+            data-aos-delay="100"
+          >
+            <div
+              class="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center text-yellow-400 mb-4"
+            >
+              <i class="fa-solid fa-chart-bar"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">可视化数据看板</h4>
+            <p class="text-gray-400 text-sm">
+              主界面集成数据统计面板。实时查看填写成功率、今日完成数等关键指标，效率看得见。
+            </p>
+          </div>
+          <div
+            class="glass-card p-6 rounded-xl hover:-translate-y-1 transition-transform"
+            data-aos="fade-up"
+            data-aos-delay="200"
+          >
+            <div
+              class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center text-red-400 mb-4"
+            >
+              <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">账户安全管理</h4>
+            <p class="text-gray-400 text-sm">
+              内置用户系统与权限管理。支持修改密码、多账号切换，保护您的数据隐私。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Showcase Section (Tabs or Steps) -->
+    <section id="showcase" class="py-24 border-t border-white/5 bg-black/20">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col md:flex-row items-center gap-16">
+          <div class="md:w-1/2" data-aos="fade-right">
+            <h2 class="text-3xl md:text-4xl font-bold mb-8">
+              三步完成自动填写
+            </h2>
+
+            <div class="space-y-8">
+              <div class="flex gap-6 group">
+                <div
+                  class="flex-shrink-0 w-12 h-12 rounded-full border border-indigo-500/30 bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold text-xl group-hover:bg-indigo-500 group-hover:text-white transition-colors"
+                >
+                  1
+                </div>
+                <div>
+                  <h4
+                    class="text-xl font-bold text-white mb-2 group-hover:text-indigo-400 transition-colors"
+                  >
+                    选择名片
+                  </h4>
+                  <p class="text-gray-400">
+                    从左侧列表选择你要使用的身份信息（名片）。
+                  </p>
+                </div>
+              </div>
+              <div class="w-px h-8 bg-gray-800 ml-6 -my-4"></div>
+              <div class="flex gap-6 group">
+                <div
+                  class="flex-shrink-0 w-12 h-12 rounded-full border border-indigo-500/30 bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold text-xl group-hover:bg-indigo-500 group-hover:text-white transition-colors"
+                >
+                  2
+                </div>
+                <div>
+                  <h4
+                    class="text-xl font-bold text-white mb-2 group-hover:text-indigo-400 transition-colors"
+                  >
+                    选择链接
+                  </h4>
+                  <p class="text-gray-400">
+                    点击需要填写的表单链接，页面会自动在右侧加载。
+                  </p>
+                </div>
+              </div>
+              <div class="w-px h-8 bg-gray-800 ml-6 -my-4"></div>
+              <div class="flex gap-6 group">
+                <div
+                  class="flex-shrink-0 w-12 h-12 rounded-full border border-indigo-500/30 bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold text-xl group-hover:bg-indigo-500 group-hover:text-white transition-colors"
+                >
+                  3
+                </div>
+                <div>
+                  <h4
+                    class="text-xl font-bold text-white mb-2 group-hover:text-indigo-400 transition-colors"
+                  >
+                    一键填充
+                  </h4>
+                  <p class="text-gray-400">
+                    点击 "开始自动填写"，看着字段被神奇地填满。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="md:w-1/2 relative" data-aos="fade-left">
+            <div
+              class="absolute inset-0 bg-gradient-to-tr from-indigo-500/20 to-pink-500/20 blur-3xl rounded-full"
+            ></div>
+            <div
+              class="relative mac-window transform -rotate-2 hover:rotate-0 transition-transform duration-500 shadow-2xl"
+            >
+              <div class="mac-header">
+                <div class="mac-dot bg-red-500"></div>
+                <div class="mac-dot bg-yellow-500"></div>
+                <div class="mac-dot bg-green-500"></div>
+              </div>
+              <img
+                src="assets/screenshot-main.png"
+                onerror="this.src='https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_e7776594-50d5-4a6f-9636-a54ae420f430.png'"
+                alt="Action"
+                class="w-full"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download Section -->
+    <section id="platforms" class="py-32 relative">
+      <!-- Abstract Background -->
+      <div
+        class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-4xl bg-indigo-900/20 blur-[120px] rounded-full pointer-events-none"
+      ></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <div class="text-center mb-20">
+          <h2 class="text-4xl md:text-5xl font-bold mb-6 text-white">
+            准备好提升效率了吗？
+          </h2>
+          <p class="text-xl text-gray-400">
+            选择适合您设备的版本，开启高效工作之旅。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <!-- Mac Apple Silicon -->
+          <div
+            class="glass-card rounded-2xl p-1 bg-gradient-to-b from-white/10 to-transparent hover:from-indigo-500/50 transition-colors duration-500 group"
+            data-tilt
+            data-tilt-max="5"
+          >
+            <div
+              class="bg-gray-900/90 rounded-xl p-8 h-full flex flex-col items-center text-center backdrop-blur-xl"
+            >
+              <div
+                class="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-6 shadow-inner group-hover:scale-110 transition-transform duration-300"
+              >
+                <i class="fa-brands fa-apple text-4xl text-white"></i>
+              </div>
+              <h3 class="text-2xl font-bold text-white mb-1">macOS</h3>
+              <p
+                class="text-indigo-400 text-xs font-bold uppercase tracking-widest mb-6"
+              >
+                Apple Silicon (M1/M2/M3)
+              </p>
+              <ul
+                class="text-gray-400 text-sm space-y-3 mb-8 text-left w-full px-4"
+              >
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 原生 ARM64
+                  架构
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 极致性能优化
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> macOS 11.0+
+                </li>
+              </ul>
+              <a
+                href="#"
+                class="mt-auto w-full py-3 rounded-lg bg-white text-black font-bold hover:bg-indigo-50 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.2)]"
+              >
+                <i class="fa-solid fa-download mr-2"></i> 下载 v2.0
+              </a>
+            </div>
+          </div>
+
+          <!-- Mac Intel -->
+          <div
+            class="glass-card rounded-2xl p-1 bg-gradient-to-b from-white/10 to-transparent hover:from-indigo-500/50 transition-colors duration-500 group"
+            data-tilt
+            data-tilt-max="5"
+          >
+            <div
+              class="bg-gray-900/90 rounded-xl p-8 h-full flex flex-col items-center text-center backdrop-blur-xl"
+            >
+              <div
+                class="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-6 shadow-inner group-hover:scale-110 transition-transform duration-300"
+              >
+                <i class="fa-brands fa-apple text-4xl text-gray-400"></i>
+              </div>
+              <h3 class="text-2xl font-bold text-white mb-1">macOS</h3>
+              <p
+                class="text-gray-500 text-xs font-bold uppercase tracking-widest mb-6"
+              >
+                Intel Chip
+              </p>
+              <ul
+                class="text-gray-400 text-sm space-y-3 mb-8 text-left w-full px-4"
+              >
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> x86_64 架构
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 广泛兼容性
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> macOS 10.15+
+                </li>
+              </ul>
+              <a
+                href="#"
+                class="mt-auto w-full py-3 rounded-lg bg-gray-700 text-white font-bold hover:bg-gray-600 transition-colors"
+              >
+                <i class="fa-solid fa-download mr-2"></i> 下载 v2.0
+              </a>
+            </div>
+          </div>
+
+          <!-- Windows -->
+          <div
+            class="glass-card rounded-2xl p-1 bg-gradient-to-b from-white/10 to-transparent hover:from-blue-500/50 transition-colors duration-500 group"
+            data-tilt
+            data-tilt-max="5"
+          >
+            <div
+              class="bg-gray-900/90 rounded-xl p-8 h-full flex flex-col items-center text-center backdrop-blur-xl"
+            >
+              <div
+                class="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-6 shadow-inner group-hover:scale-110 transition-transform duration-300"
+              >
+                <i class="fa-brands fa-windows text-4xl text-blue-400"></i>
+              </div>
+              <h3 class="text-2xl font-bold text-white mb-1">Windows</h3>
+              <p
+                class="text-blue-400 text-xs font-bold uppercase tracking-widest mb-6"
+              >
+                Win 10 / 11
+              </p>
+              <ul
+                class="text-gray-400 text-sm space-y-3 mb-8 text-left w-full px-4"
+              >
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 64位系统支持
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 一键安装包
+                  (.exe)
+                </li>
+                <li class="flex items-center gap-3">
+                  <i class="fa-solid fa-check text-green-500"></i> 无需复杂配置
+                </li>
+              </ul>
+              <a
+                href="#"
+                class="mt-auto w-full py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-colors shadow-[0_0_15px_rgba(37,99,235,0.4)]"
+              >
+                <i class="fa-solid fa-download mr-2"></i> 下载 v2.0
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section
+      class="py-16 bg-gradient-to-b from-transparent to-black/50 border-t border-white/5"
+    >
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center mb-12">
+          <h3 class="text-2xl font-bold text-white mb-3">联系我们</h3>
+          <p class="text-gray-400">如有任何问题或合作意向，欢迎随时联系</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          <!-- 微信客服 -->
+          <div
+            class="glass-card rounded-xl p-6 text-center hover:-translate-y-1 transition-transform"
+          >
+            <div
+              class="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 mx-auto mb-4"
+            >
+              <i class="fa-brands fa-weixin text-2xl"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">微信客服</h4>
+            <p class="text-indigo-400 font-medium">AutoFiller_Support</p>
+            <p class="text-gray-500 text-xs mt-2">工作日 9:00-18:00</p>
+          </div>
+
+          <!-- 邮箱 -->
+          <div
+            class="glass-card rounded-xl p-6 text-center hover:-translate-y-1 transition-transform"
+          >
+            <div
+              class="w-12 h-12 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto mb-4"
+            >
+              <i class="fa-solid fa-envelope text-2xl"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">商务邮箱</h4>
+            <p class="text-indigo-400 font-medium">support@autofiller.cn</p>
+            <p class="text-gray-500 text-xs mt-2">24小时内回复</p>
+          </div>
+
+          <!-- QQ群 -->
+          <div
+            class="glass-card rounded-xl p-6 text-center hover:-translate-y-1 transition-transform"
+          >
+            <div
+              class="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto mb-4"
+            >
+              <i class="fa-brands fa-qq text-2xl"></i>
+            </div>
+            <h4 class="font-bold text-white mb-2">用户交流群</h4>
+            <p class="text-indigo-400 font-medium">123456789</p>
+            <p class="text-gray-500 text-xs mt-2">加入获取最新动态</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer
+      class="bg-black py-12 border-t border-white/10 relative overflow-hidden"
+    >
+      <div
+        class="absolute top-0 left-1/2 transform -translate-x-1/2 w-1/2 h-1 bg-gradient-to-r from-transparent via-indigo-900 to-transparent"
+      ></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div
+          class="flex flex-col md:flex-row justify-between items-center gap-8"
+        >
+          <div class="text-center md:text-left">
+            <div
+              class="flex items-center justify-center md:justify-start gap-2 mb-4"
+            >
+              <div
+                class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white"
+              >
+                <i class="fa-solid fa-bolt"></i>
+              </div>
+              <span class="font-bold text-xl text-white">Auto Form Filler</span>
+            </div>
+            <p class="text-gray-500 text-sm">
+              © 2025 ChenChen Development. Made with ❤️ and ☕.
+            </p>
+          </div>
+
+          <div class="flex gap-6">
+            <a
+              href="#"
+              class="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:bg-green-500 hover:text-white transition-all hover:-translate-y-1"
+              title="微信客服"
+            >
+              <i class="fa-brands fa-weixin text-xl"></i>
+            </a>
+            <a
+              href="mailto:support@autofiller.cn"
+              class="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:bg-indigo-500 hover:text-white transition-all hover:-translate-y-1"
+              title="发送邮件"
+            >
+              <i class="fa-solid fa-envelope text-xl"></i>
+            </a>
+            <a
+              href="#"
+              class="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:bg-blue-500 hover:text-white transition-all hover:-translate-y-1"
+              title="QQ交流群"
+            >
+              <i class="fa-brands fa-qq text-xl"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+      // Initialize AOS
+      AOS.init({
+        once: true,
+        offset: 50,
+        duration: 1000,
+        easing: "cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+      });
+
+      // Vanilla Tilt Initialization
+      VanillaTilt.init(document.querySelectorAll("[data-tilt]"), {
+        max: 10,
+        speed: 400,
+        glare: true,
+        "max-glare": 0.2,
+      });
+
+      // Navbar Scroll Effect
+      const navbar = document.querySelector("nav");
+      window.addEventListener("scroll", () => {
+        if (window.scrollY > 20) {
+          navbar.classList.add("shadow-2xl");
+          navbar.classList.replace("glass-strong", "bg-[#030712]/90");
+        } else {
+          navbar.classList.remove("shadow-2xl");
+          navbar.classList.replace("bg-[#030712]/90", "glass-strong");
+        }
+      });
+
+      // Spotlight Effect
+      document.querySelectorAll(".glass-card").forEach((card) => {
+        card.addEventListener("mousemove", (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          card.style.setProperty("--mouse-x", `${x}px`);
+          card.style.setProperty("--mouse-y", `${y}px`);
+        });
+      });
+
+      // Counter Animation
+      const counters = document.querySelectorAll(".counter-item");
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              const target = entry.target;
+              const endVal = parseFloat(target.getAttribute("data-target"));
+              const suffix = target.getAttribute("data-suffix") || "";
+              const duration = 2000;
+              const startTime = performance.now();
+
+              const updateCount = (currentTime) => {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                // Ease out quart
+                const ease = 1 - Math.pow(1 - progress, 4);
+
+                const currentVal = Math.floor(endVal * ease);
+                target.innerText = currentVal + suffix;
+
+                if (progress < 1) {
+                  requestAnimationFrame(updateCount);
+                } else {
+                  target.innerText = endVal + suffix;
+                }
+              };
+
+              requestAnimationFrame(updateCount);
+              observer.unobserve(target);
+            }
+          });
+        },
+        { threshold: 0.5 }
+      );
+
+      counters.forEach((counter) => observer.observe(counter));
+    </script>
+  </body>
+</html>
