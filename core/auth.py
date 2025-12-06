@@ -219,13 +219,13 @@ def login_with_password(username: str, password: str) -> Tuple[bool, str, Option
         # 获取设备信息
         device_info = get_device_info()
         
-        # 检查设备限制
-        can_login, message = check_device_limit(user, device_info['device_id'])
-        if not can_login:
-            return False, message, None, None
-        
-        # 绑定设备
-        bind_device(user, device_info)
+        # 检查设备限制（管理员跳过设备限制）
+        if user.role != 'admin':
+            can_login, message = check_device_limit(user, device_info['device_id'])
+            if not can_login:
+                return False, message, None, None
+            # 绑定设备（仅非管理员）
+            bind_device(user, device_info)
         
         # 生成 Token
         token = generate_token(user, device_info)
@@ -279,14 +279,15 @@ def login_with_token(token: str) -> Tuple[bool, str, Optional[User]]:
             if user.usage_count >= user.max_usage_count:
                 return False, f"您的使用次数已用尽（{user.usage_count}/{user.max_usage_count}次），请联系平台续费", None
         
-        # 检查设备是否仍然绑定
-        device = Device.objects(user=user, device_id=device_id, is_active=True).first()
-        if not device:
-            return False, "设备已解绑，请重新登录", None
-        
-        # 更新设备最后登录时间
-        device.last_login = datetime.now()
-        device.save()
+        # 检查设备是否仍然绑定（管理员跳过设备限制）
+        if user.role != 'admin':
+            device = Device.objects(user=user, device_id=device_id, is_active=True).first()
+            if not device:
+                return False, "设备已解绑，请重新登录", None
+            
+            # 更新设备最后登录时间
+            device.last_login = datetime.now()
+            device.save()
         
         # 更新用户最后登录时间
         user.last_login = datetime.now()

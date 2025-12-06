@@ -173,12 +173,12 @@ class LoginWindow(QDialog):
         left_layout.addSpacing(30)
         
         # 宣传语
-        slogan_title = QLabel("智能 · 高效 · 安全")
+        slogan_title = QLabel("简单 · 快捷 · 高效")
         slogan_title.setFont(QFont(DesignToken.FONT_FAMILY, 14, QFont.Weight.Bold))
         slogan_title.setStyleSheet("color: #FFFFFF;")
         left_layout.addWidget(slogan_title)
         
-        slogan_desc = QLabel("新一代自动表单填写工具\n让繁琐的工作自动化，释放您的创造力。")
+        slogan_desc = QLabel("新一代自动表单填写工具\n智能多开处理，抢占订单快人一步！")
         slogan_desc.setWordWrap(True)
         slogan_desc.setFont(QFont(DesignToken.FONT_FAMILY, 10))
         slogan_desc.setStyleSheet("color: #94A3B8; line-height: 150%;")
@@ -334,40 +334,66 @@ class LoginWindow(QDialog):
 
     def start_entrance_animation(self):
         """启动高质感入场动画"""
-        self.setWindowOpacity(0)
+        import sys
+        is_windows = sys.platform == 'win32'
         
         # 确保 main_frame 已经创建
         if not hasattr(self, 'main_frame'):
             return
+        
+        # Windows 上只使用透明度动画，避免位置动画导致的重影问题
+        if is_windows:
+            self.setWindowOpacity(0)
             
-        original_rect = self.main_frame.geometry()
+            # 仅透明度动画
+            self.opacity_anim = QPropertyAnimation(self, b"windowOpacity")
+            self.opacity_anim.setDuration(400)
+            self.opacity_anim.setStartValue(0)
+            self.opacity_anim.setEndValue(1)
+            self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            
+            # 动画结束后强制重绘并聚焦
+            self.opacity_anim.finished.connect(self._on_animation_finished)
+            self.opacity_anim.start()
+        else:
+            # macOS/Linux 使用完整动画效果
+            self.setWindowOpacity(0)
+            original_rect = self.main_frame.geometry()
+            
+            # 1. 透明度动画 (Fade In)
+            self.opacity_anim = QPropertyAnimation(self, b"windowOpacity")
+            self.opacity_anim.setDuration(700)
+            self.opacity_anim.setStartValue(0)
+            self.opacity_anim.setEndValue(1)
+            self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            
+            # 2. 位置上浮动画 (Slide Up)
+            start_rect = original_rect.translated(0, 50)
+            
+            self.pos_anim = QPropertyAnimation(self.main_frame, b"geometry")
+            self.pos_anim.setDuration(700)
+            self.pos_anim.setStartValue(start_rect)
+            self.pos_anim.setEndValue(original_rect)
+            self.pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            
+            # 3. 组合并启动
+            self.anim_group = QParallelAnimationGroup()
+            self.anim_group.addAnimation(self.opacity_anim)
+            self.anim_group.addAnimation(self.pos_anim)
+            
+            # 动画结束后聚焦输入框
+            self.anim_group.finished.connect(self._on_animation_finished)
+            self.anim_group.start()
+    
+    def _on_animation_finished(self):
+        """动画结束后的清理工作"""
+        # 强制重绘整个窗口，解决 Windows 上的残影问题
+        self.main_frame.update()
+        self.update()
+        self.repaint()
         
-        # 1. 透明度动画 (Fade In)
-        self.opacity_anim = QPropertyAnimation(self, b"windowOpacity")
-        self.opacity_anim.setDuration(700)
-        self.opacity_anim.setStartValue(0)
-        self.opacity_anim.setEndValue(1)
-        self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        # 2. 位置上浮动画 (Slide Up)
-        # 让内容 frame 从下方 50px 处升上来
-        start_rect = original_rect.translated(0, 50)
-        
-        self.pos_anim = QPropertyAnimation(self.main_frame, b"geometry")
-        self.pos_anim.setDuration(700)
-        self.pos_anim.setStartValue(start_rect)
-        self.pos_anim.setEndValue(original_rect)
-        self.pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        # 3. 组合并启动
-        self.anim_group = QParallelAnimationGroup()
-        self.anim_group.addAnimation(self.opacity_anim)
-        self.anim_group.addAnimation(self.pos_anim)
-        
-        # 动画结束后聚焦输入框
-        self.anim_group.finished.connect(lambda: self.username_input.setFocus())
-        
-        self.anim_group.start()
+        # 聚焦输入框
+        self.username_input.setFocus()
 
     # -------------------------------------------------------------------------
     # Window Drag Logic
