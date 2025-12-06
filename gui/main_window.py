@@ -663,9 +663,12 @@ class AddCardDialog(QDialog):
         self.field_rows = []  # 存储字段行
         self.init_ui()
         
-        # 如果是编辑模式，回显数据
+        # 如果是编辑模式，回显数据；否则加载固定模板
         if self.card:
             self.load_card_data()
+        else:
+            # 新增模式：加载固定模板作为默认配置
+            self.load_fixed_templates()
     
     def init_ui(self):
         """初始化UI"""
@@ -921,17 +924,18 @@ class AddCardDialog(QDialog):
         if self.category_combo.count() == 0:
             self.category_combo.addItem("默认分类")
     
-    def add_field_row(self, key="", value=""):
+    def add_field_row(self, key="", value="", fixed_template_id=None):
         """添加字段行"""
         # 创建可拖拽的行组件
-        row_widget = DraggableFieldRow(key, value, self)
+        row_widget = DraggableFieldRow(key, value, self, fixed_template_id)
         
         # 添加到列表
         self.field_rows.append({
             'widget': row_widget,
             'key_input': row_widget.key_input,
             'value_input': row_widget.value_input,
-            'drag_btn': row_widget.drag_btn
+            'drag_btn': row_widget.drag_btn,
+            'fixed_template_id': fixed_template_id  # 存储固定模板ID
         })
         
         # 添加到布局
@@ -1044,7 +1048,12 @@ class AddCardDialog(QDialog):
                 print(f"  - 行 {i}: key='{key}', value='{value}'")
                 
                 if key:  # 只添加有字段名的
-                    configs.append({"key": key, "value": value})
+                    config = {"key": key, "value": value}
+                    # 添加固定模板ID（如果有）
+                    template_id = row_data.get('fixed_template_id')
+                    if template_id:
+                        config['fixed_template_id'] = template_id
+                    configs.append(config)
             except RuntimeError:
                 print(f"  - 行 {i}: 组件已被删除，跳过")
                 continue
@@ -1117,26 +1126,48 @@ class AddCardDialog(QDialog):
                 for config in configs:
                     key = ""
                     value = ""
+                    fixed_template_id = None
                     if isinstance(config, dict):
                         key = config.get('key', '')
                         value = config.get('value', '')
-                    elif hasattr(config, 'key'): # 对象格式
+                        fixed_template_id = config.get('fixed_template_id')
+                    elif hasattr(config, 'key'):  # 对象格式
                         key = config.key
                         value = getattr(config, 'value', '')
+                        fixed_template_id = getattr(config, 'fixed_template_id', None)
                         
-                    self.add_field_row(key, value)
+                    self.add_field_row(key, value, fixed_template_id)
             except Exception as e:
                 print(f"解析配置失败: {e}")
+
+
+    def load_fixed_templates(self):
+        """加载固定模板到字段列表（新增名片时调用）"""
+        try:
+            templates = self.db_manager.get_all_fixed_templates(is_active=True)
+            if templates:
+                for template in templates:
+                    self.add_field_row(
+                        template.field_name,
+                        template.field_value,
+                        str(template.id)  # 固定模板ID
+                    )
+                print(f"DEBUG: 已加载 {len(templates)} 个固定模板")
+            else:
+                print("DEBUG: 没有可用的固定模板")
+        except Exception as e:
+            print(f"加载固定模板失败: {e}")
 
 
 class DraggableFieldRow(QWidget):
     """可拖拽的字段行"""
     
-    def __init__(self, key="", value="", parent_dialog=None):
+    def __init__(self, key="", value="", parent_dialog=None, fixed_template_id=None):
         super().__init__()
         self.parent_dialog = parent_dialog
         self.dragging = False
         self.drag_start_pos = None
+        self.fixed_template_id = fixed_template_id  # 固定模板ID，用户自己添加的为None
         self.init_ui(key, value)
     
     def init_ui(self, key, value):

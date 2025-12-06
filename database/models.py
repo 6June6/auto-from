@@ -230,6 +230,7 @@ class CardConfigItem(EmbeddedDocument):
     key = StringField(required=True, max_length=100, verbose_name="字段名")
     value = StringField(required=True, verbose_name="字段值")
     order = IntField(default=0, verbose_name="排序")
+    fixed_template_id = StringField(verbose_name="固定模板ID")  # 来源模板ID，用户自己添加的为空
     
     meta = {
         'ordering': ['order']
@@ -240,7 +241,8 @@ class CardConfigItem(EmbeddedDocument):
         return {
             'key': self.key,
             'value': self.value,
-            'order': self.order
+            'order': self.order,
+            'fixed_template_id': self.fixed_template_id
         }
 
 

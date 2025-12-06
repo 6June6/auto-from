@@ -81,7 +81,8 @@ class DatabaseManager:
                 config_item = CardConfigItem(
                     key=config['key'],
                     value=config['value'],
-                    order=i
+                    order=i,
+                    fixed_template_id=config.get('fixed_template_id')  # 固定模板ID，用户自己添加的为空
                 )
                 config_items.append(config_item)
             
@@ -103,7 +104,7 @@ class DatabaseManager:
     
     @staticmethod
     def update_card(card_id: str, name: str = None, configs: List[Dict[str, str]] = None, 
-                   description: str = None, category: str = None) -> bool:
+                   description: str = None, category: str = None, sync_fixed_templates: bool = True) -> bool:
         """
         更新名片
         
@@ -113,6 +114,7 @@ class DatabaseManager:
             configs: 新配置项列表
             description: 新描述
             category: 分类
+            sync_fixed_templates: 是否同步固定模板字段到其他名片（默认True）
         
         Returns:
             是否成功
@@ -132,24 +134,129 @@ class DatabaseManager:
             if category is not None:
                 card.category = category
             
+            # 收集需要同步的固定模板字段（在更新前收集）
+            fixed_template_updates = {}  # {fixed_template_id: {'key': key, 'value': value}}
+            
             # 更新配置项
             if configs is not None:
                 config_items = []
                 for i, config in enumerate(configs):
+                    fixed_template_id = config.get('fixed_template_id')
                     config_item = CardConfigItem(
                         key=config['key'],
                         value=config['value'],
-                        order=i
+                        order=i,
+                        fixed_template_id=fixed_template_id
                     )
                     config_items.append(config_item)
+                    
+                    # 记录需要同步的固定模板字段
+                    if fixed_template_id and sync_fixed_templates:
+                        fixed_template_updates[fixed_template_id] = {
+                            'key': config['key'],
+                            'value': config['value']
+                        }
+                
                 card.configs = config_items
             
             card.save()
+            
+            # 同步固定模板字段到该用户的其他名片
+            if fixed_template_updates and sync_fixed_templates and card.user:
+                DatabaseManager._sync_fixed_template_fields(
+                    user=card.user,
+                    exclude_card_id=str(card_id),  # 确保是字符串格式
+                    updates=fixed_template_updates
+                )
+                print(f"🔄 已检查同步固定模板字段，共 {len(fixed_template_updates)} 个模板")
+            
             return True
             
         except Exception as e:
             print(f"❌ 更新名片失败: {e}")
             return False
+    
+    @staticmethod
+    def _sync_fixed_template_fields(user, exclude_card_id: str, updates: Dict[str, Dict[str, str]]) -> int:
+        """
+        同步固定模板字段到用户的其他名片
+        
+        Args:
+            user: 用户对象
+            exclude_card_id: 排除的名片ID（当前正在编辑的名片）
+            updates: 需要同步的更新 {fixed_template_id: {'key': key, 'value': value}}
+        
+        Returns:
+            更新的名片数量
+        """
+        if not updates:
+            print("🔄 没有需要同步的固定模板字段")
+            return 0
+        
+        print(f"🔄 开始同步固定模板字段，需要同步的模板ID: {list(updates.keys())}")
+        
+        try:
+            # 获取该用户的所有其他名片
+            other_cards = Card.objects(user=user)
+            updated_count = 0
+            
+            print(f"🔄 找到用户的 {other_cards.count()} 个名片，排除当前名片ID: {exclude_card_id}")
+            
+            for other_card in other_cards:
+                # 跳过当前编辑的名片
+                if str(other_card.id) == exclude_card_id:
+                    print(f"  ⏭️ 跳过当前编辑的名片: {other_card.name}")
+                    continue
+                
+                # 检查该名片的配置项是否有需要同步的固定模板
+                card_updated = False
+                new_configs = []
+                
+                for config in other_card.configs:
+                    config_dict = {
+                        'key': config.key,
+                        'value': config.value,
+                        'order': config.order,
+                        'fixed_template_id': config.fixed_template_id
+                    }
+                    
+                    # 检查是否需要同步
+                    if config.fixed_template_id and config.fixed_template_id in updates:
+                        update_data = updates[config.fixed_template_id]
+                        # 更新字段名和值
+                        if config_dict['key'] != update_data['key'] or config_dict['value'] != update_data['value']:
+                            print(f"  📝 发现需要同步的字段: 名片「{other_card.name}」的 {config_dict['key']}={config_dict['value']} -> {update_data['key']}={update_data['value']}")
+                            config_dict['key'] = update_data['key']
+                            config_dict['value'] = update_data['value']
+                            card_updated = True
+                    
+                    new_configs.append(config_dict)
+                
+                # 如果有更新，保存名片（不递归同步）
+                if card_updated:
+                    # 直接更新配置项，避免递归调用
+                    config_items = []
+                    for i, cfg in enumerate(new_configs):
+                        config_item = CardConfigItem(
+                            key=cfg['key'],
+                            value=cfg['value'],
+                            order=cfg.get('order', i),
+                            fixed_template_id=cfg.get('fixed_template_id')
+                        )
+                        config_items.append(config_item)
+                    
+                    other_card.configs = config_items
+                    other_card.save()
+                    updated_count += 1
+            
+            if updated_count > 0:
+                print(f"✅ 已同步固定模板字段到 {updated_count} 个其他名片")
+            
+            return updated_count
+            
+        except Exception as e:
+            print(f"❌ 同步固定模板字段失败: {e}")
+            return 0
     
     @staticmethod
     def update_cards_order(card_orders: List[Dict[str, any]]) -> bool:

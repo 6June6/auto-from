@@ -1109,11 +1109,12 @@ class CardEditDialog(QDialog):
         
         # 加载现有配置
         if self.card:
+            # 编辑模式：加载名片已有配置
             for config in self.card.configs:
-                self.add_config_row(config.key, config.value)
+                self.add_config_row(config.key, config.value, getattr(config, 'fixed_template_id', None))
         else:
-            # 默认添加一个空行
-            self.add_config_row()
+            # 新增模式：加载所有启用的固定模板
+            self.load_fixed_templates()
         
         # 底部按钮
         button_layout = QHBoxLayout()
@@ -1158,8 +1159,33 @@ class CardEditDialog(QDialog):
         
         layout.addLayout(button_layout)
     
-    def add_config_row(self, key: str = "", value: str = ""):
-        """添加配置行"""
+    def load_fixed_templates(self):
+        """加载固定模板到配置项"""
+        try:
+            templates = self.db_manager.get_all_fixed_templates(is_active=True)
+            if templates:
+                for template in templates:
+                    self.add_config_row(
+                        template.field_name,
+                        template.field_value,
+                        str(template.id)  # 固定模板ID
+                    )
+            else:
+                # 如果没有固定模板，添加一个空行
+                self.add_config_row()
+        except Exception as e:
+            print(f"加载固定模板失败: {e}")
+            # 加载失败时添加一个空行
+            self.add_config_row()
+    
+    def add_config_row(self, key: str = "", value: str = "", fixed_template_id: str = None):
+        """添加配置行
+        
+        Args:
+            key: 字段名
+            value: 字段值
+            fixed_template_id: 固定模板ID，用户自己添加的为None
+        """
         row_frame = QFrame()
         row_frame.setStyleSheet(f"""
             QFrame {{
@@ -1168,6 +1194,8 @@ class CardEditDialog(QDialog):
                 padding: 8px;
             }}
         """)
+        # 存储固定模板ID到frame的属性中
+        row_frame.fixed_template_id = fixed_template_id
         
         row_layout = QHBoxLayout()
         row_layout.setContentsMargins(5, 5, 5, 5)
@@ -1250,11 +1278,16 @@ class CardEditDialog(QDialog):
         
         # 收集配置项
         configs = []
-        for key_input, value_input, _ in self.config_widgets:
+        for key_input, value_input, row_frame in self.config_widgets:
             key = key_input.text().strip()
             value = value_input.text().strip()
             if key and value:  # 只保存非空的配置
-                configs.append({'key': key, 'value': value})
+                config = {'key': key, 'value': value}
+                # 获取固定模板ID（如果有）
+                fixed_template_id = getattr(row_frame, 'fixed_template_id', None)
+                if fixed_template_id:
+                    config['fixed_template_id'] = fixed_template_id
+                configs.append(config)
         
         if not configs:
             QMessageBox.warning(self, "警告", "请至少添加一个配置项")

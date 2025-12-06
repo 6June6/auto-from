@@ -1631,17 +1631,22 @@ class NewFillWindow(QDialog):
                 except:
                     configs = []
             
+            print(f"🔍 加载名片配置，共 {len(configs)} 个字段")
             for config in configs:
                 key = ""
                 value = ""
+                fixed_template_id = None
                 if isinstance(config, dict):
                     key = config.get('key', '')
                     value = config.get('value', '')
+                    fixed_template_id = config.get('fixed_template_id')
                 elif hasattr(config, 'key'): 
                     key = config.key
                     value = getattr(config, 'value', '')
+                    fixed_template_id = getattr(config, 'fixed_template_id', None)
                 
-                self.add_edit_field_row(key, str(value) if value is not None else "")
+                print(f"  - 加载字段: key={key}, fixed_template_id={fixed_template_id}")
+                self.add_edit_field_row(key, str(value) if value is not None else "", fixed_template_id)
         
         # 切换到编辑页 (index 1)
         self.right_panel_stack.setCurrentIndex(1)
@@ -1662,10 +1667,16 @@ class NewFillWindow(QDialog):
         
         # 收集字段
         configs = []
+        print(f"🔍 收集编辑字段，共 {len(self.edit_field_rows)} 行")
         for row_widget in self.edit_field_rows:
-            key, value = row_widget.get_data()
+            key, value, fixed_template_id = row_widget.get_data()
+            print(f"  - key={key}, value={value}, fixed_template_id={fixed_template_id}")
             if key:  # 只添加有字段名的
-                configs.append({"key": key, "value": value})
+                config = {"key": key, "value": value}
+                if fixed_template_id:
+                    config['fixed_template_id'] = fixed_template_id
+                configs.append(config)
+        print(f"🔍 最终收集到 {len(configs)} 个有效配置")
         
         if not configs:
             QMessageBox.warning(self, "提示", "请至少添加一个字段")
@@ -1684,6 +1695,9 @@ class NewFillWindow(QDialog):
             self.current_card.name = name
             self.current_card.configs = configs
             self.current_card.category = category
+            
+            # 刷新其他被同步的名片的内存数据
+            self._refresh_synced_cards_data(configs)
             
             # 刷新界面
             # 暂时屏蔽信号，防止 load_categories 和 setCurrentIndex 触发 load_cards_list
@@ -1711,10 +1725,72 @@ class NewFillWindow(QDialog):
             
         except Exception as e:
             QMessageBox.warning(self, "失败", f"保存失败：{str(e)}")
+    
+    def _refresh_synced_cards_data(self, saved_configs):
+        """刷新被同步的其他名片的内存数据
+        
+        当修改名片时，如果包含固定模板字段，会同步到其他名片。
+        这个方法刷新 self.selected_cards 中其他名片的内存数据，保持界面显示一致。
+        """
+        # 收集当前保存的固定模板字段
+        template_updates = {}  # {fixed_template_id: {'key': key, 'value': value}}
+        for config in saved_configs:
+            if isinstance(config, dict):
+                template_id = config.get('fixed_template_id')
+                if template_id:
+                    template_updates[template_id] = {
+                        'key': config.get('key', ''),
+                        'value': config.get('value', '')
+                    }
+        
+        if not template_updates:
+            return
+        
+        print(f"🔄 刷新被同步的名片内存数据，涉及 {len(template_updates)} 个固定模板")
+        
+        # 遍历 selected_cards，更新其他名片的内存数据
+        current_card_id = str(self.current_card.id)
+        updated_count = 0
+        
+        for card in self.selected_cards:
+            if str(card.id) == current_card_id:
+                continue  # 跳过当前编辑的名片
+            
+            # 检查这张名片是否有需要同步的字段
+            if not hasattr(card, 'configs') or not card.configs:
+                continue
+            
+            card_updated = False
+            
+            # 遍历名片的配置项
+            for config in card.configs:
+                template_id = None
+                if isinstance(config, dict):
+                    template_id = config.get('fixed_template_id')
+                elif hasattr(config, 'fixed_template_id'):
+                    template_id = config.fixed_template_id
+                
+                if template_id and template_id in template_updates:
+                    update_data = template_updates[template_id]
+                    # 更新内存中的配置
+                    if isinstance(config, dict):
+                        config['key'] = update_data['key']
+                        config['value'] = update_data['value']
+                    elif hasattr(config, 'key'):
+                        config.key = update_data['key']
+                        config.value = update_data['value']
+                    card_updated = True
+            
+            if card_updated:
+                updated_count += 1
+                print(f"  ✅ 已刷新名片「{card.name}」的内存数据")
+        
+        if updated_count > 0:
+            print(f"🔄 共刷新 {updated_count} 个名片的内存数据")
 
-    def add_edit_field_row(self, key="", value=""):
+    def add_edit_field_row(self, key="", value="", fixed_template_id=None):
         """添加编辑字段行"""
-        row = EditFieldRow(key, value, self)
+        row = EditFieldRow(key, value, self, fixed_template_id)
         self.edit_fields_layout.addWidget(row)
         self.edit_field_rows.append(row)
         
@@ -6242,9 +6318,10 @@ class NewFillWindow(QDialog):
 
 class EditFieldRow(QWidget):
     """编辑字段行组件 - 按原型图设计"""
-    def __init__(self, key="", value="", parent_window=None):
+    def __init__(self, key="", value="", parent_window=None, fixed_template_id=None):
         super().__init__()
         self.parent_window = parent_window
+        self.fixed_template_id = fixed_template_id  # 固定模板ID
         self.init_ui(key, value)
         
     def init_ui(self, key, value):
@@ -6367,4 +6444,4 @@ class EditFieldRow(QWidget):
             self.key_input.setText(new_val)
         
     def get_data(self):
-        return self.key_input.text().strip(), self.value_input.text().strip()
+        return self.key_input.text().strip(), self.value_input.text().strip(), self.fixed_template_id
