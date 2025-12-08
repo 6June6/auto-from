@@ -59,7 +59,7 @@ class NoticeListHeader(QFrame):
             ('平台', NOTICE_LIST_COLUMNS['platform']),
             ('类目', NOTICE_LIST_COLUMNS['category']),
             ('品牌', NOTICE_LIST_COLUMNS['brand']),
-            ('发布时间', NOTICE_LIST_COLUMNS['date']),
+            ('日期范围', NOTICE_LIST_COLUMNS['date']),
             ('状态', NOTICE_LIST_COLUMNS['status']),
             ('操作', NOTICE_LIST_COLUMNS['actions']),
         ]
@@ -184,13 +184,28 @@ class NoticeRowWidget(QFrame):
     def _add_date(self, layout):
         container = QWidget()
         container.setFixedWidth(NOTICE_LIST_COLUMNS['date'])
-        c_layout = QHBoxLayout(container)
+        c_layout = QVBoxLayout(container)
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setSpacing(2)
         
-        date_str = self.notice.publish_date.strftime('%Y-%m-%d') if self.notice.publish_date else ""
-        lbl = QLabel(date_str)
-        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        start_date = self.notice.start_date
+        end_date = self.notice.end_date
+        publish_date = self.notice.publish_date
+
+        if start_date and end_date:
+            date_str = f"{start_date.strftime('%Y-%m-%d')}\n至\n{end_date.strftime('%Y-%m-%d')}"
+            lbl = QLabel(date_str)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 11px; line-height: 12px;")
+        elif publish_date:
+            date_str = publish_date.strftime('%Y-%m-%d')
+            lbl = QLabel(date_str)
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+        else:
+            lbl = QLabel("-")
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+            
         c_layout.addWidget(lbl)
         layout.addWidget(container)
     
@@ -1291,7 +1306,13 @@ class NoticeDialog(BaseDialog):
         
         # 标题
         self.title_input = QLineEdit(self.notice.title if self.notice else "")
+        self.title_input.setPlaceholderText("请输入通告完整标题")
         form_layout.addLayout(self.create_field("通告标题", self.title_input))
+        
+        # 主题
+        self.subject_input = QLineEdit(self.notice.subject if self.notice and hasattr(self.notice, 'subject') else "")
+        self.subject_input.setPlaceholderText("例如：探店打卡、新品试色、日常种草")
+        form_layout.addLayout(self.create_field("通告主题", self.subject_input))
         
         # 平台 & 类目 (一行两列)
         row1 = QHBoxLayout()
@@ -1356,20 +1377,50 @@ class NoticeDialog(BaseDialog):
         row4 = QHBoxLayout()
         row4.setSpacing(20)
         
-        self.publish_date = QDateEdit()
-        self.publish_date.setDisplayFormat("yyyy-MM-dd")
-        self.publish_date.setCalendarPopup(True)
-        if self.notice and self.notice.publish_date:
-            self.publish_date.setDate(self.notice.publish_date.date())
+        # 日期范围选择
+        date_range_widget = QWidget()
+        date_range_layout = QHBoxLayout(date_range_widget)
+        date_range_layout.setContentsMargins(0, 0, 0, 0)
+        date_range_layout.setSpacing(8)
+        
+        self.start_date = QDateEdit()
+        self.start_date.setDisplayFormat("yyyy-MM-dd")
+        self.start_date.setCalendarPopup(True)
+        
+        separator = QLabel("至")
+        separator.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-weight: bold;")
+        
+        self.end_date = QDateEdit()
+        self.end_date.setDisplayFormat("yyyy-MM-dd")
+        self.end_date.setCalendarPopup(True)
+        
+        # 初始化日期
+        if self.notice:
+            if self.notice.start_date:
+                self.start_date.setDate(self.notice.start_date.date())
+            elif self.notice.publish_date:
+                self.start_date.setDate(self.notice.publish_date.date())
+            else:
+                self.start_date.setDate(QDate.currentDate())
+                
+            if self.notice.end_date:
+                self.end_date.setDate(self.notice.end_date.date())
+            else:
+                self.end_date.setDate(QDate.currentDate().addDays(30))
         else:
-            self.publish_date.setDate(QDate.currentDate())
+            self.start_date.setDate(QDate.currentDate())
+            self.end_date.setDate(QDate.currentDate().addDays(30))
             
+        date_range_layout.addWidget(self.start_date)
+        date_range_layout.addWidget(separator)
+        date_range_layout.addWidget(self.end_date)
+        
         self.status_combo = QComboBox()
         self.status_combo.addItems(['active', 'expired', 'closed'])
         if self.notice:
             self.status_combo.setCurrentText(self.notice.status)
             
-        row4.addLayout(self.create_field("发布日期", self.publish_date))
+        row4.addLayout(self.create_field("有效期", date_range_widget))
         row4.addLayout(self.create_field("当前状态", self.status_combo))
         form_layout.addLayout(row4)
         
@@ -1378,8 +1429,12 @@ class NoticeDialog(BaseDialog):
         self.create_bottom_buttons()
         
     def get_data(self):
+        start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
+        end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time().replace(microsecond=0))
+        
         data = {
             'title': self.title_input.text(),
+            'subject': self.subject_input.text(),
             'platform': self.platform_combo.currentText(),
             'category': self.category_combo.currentText(),
             'brand': self.brand_input.text(),
@@ -1388,7 +1443,9 @@ class NoticeDialog(BaseDialog):
             'min_fans': self.min_fans_spin.value(),
             'reward': self.reward_input.text(),
             'link': self.link_input.text(),
-            'publish_date': datetime.combine(self.publish_date.date().toPyDate(), datetime.min.time()),
+            'publish_date': start_date,  # 兼容旧字段
+            'start_date': start_date,
+            'end_date': end_date,
             'status': self.status_combo.currentText()
         }
         return data

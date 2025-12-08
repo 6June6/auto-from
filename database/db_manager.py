@@ -715,7 +715,9 @@ class DatabaseManager:
     @staticmethod
     def get_all_notices(category: str = None, platform: str = None, 
                        status: str = 'active', min_fans: int = None,
-                       keyword: str = None, limit: int = 100) -> List[Notice]:
+                       keyword: str = None, limit: int = 100,
+                       start_date=None, end_date=None,
+                       max_reward: str = None) -> List[Notice]:
         """
         获取通告列表
         
@@ -723,9 +725,12 @@ class DatabaseManager:
             category: 类目筛选
             platform: 平台筛选
             status: 状态筛选
-            min_fans: 最低粉丝要求筛选 (<= min_fans)
+            min_fans: 用户粉丝数，筛选粉丝门槛 <= 此值的通告
             keyword: 关键词搜索 (标题/品牌)
             limit: 限制数量
+            start_date: 开始日期筛选（通告的结束时间需 >= 此日期）
+            end_date: 结束日期筛选（通告的开始时间需 <= 此日期）
+            max_reward: 最高报酬筛选
         
         Returns:
             通告列表
@@ -743,19 +748,50 @@ class DatabaseManager:
                 query = query.filter(platform=platform)
                 
             if min_fans is not None:
-                # 筛选粉丝要求小于等于用户粉丝数的通告，或者是筛选要求粉丝数大于等于某个值的通告？
-                # 通常用户想看自己能报名的，所以这里假设 min_fans 是用户的粉丝数
-                # 或者是筛选通告的门槛，比如筛选门槛 > 10000 的通告
-                # 这里假设是筛选器，筛选 min_fans 字段
-                # 比如 min_fans=5000，找出所有 min_fans <= 5000 的通告？还是 >= 5000？
-                # 假设用户想找粉丝要求 <= 自己的粉丝数的通告
-                query = query.filter(min_fans__lte=min_fans)
+                # 筛选粉丝门槛 >= 指定值的通告（"5000+" 表示找门槛 >= 5000 的）
+                query = query.filter(min_fans__gte=min_fans)
+            
+            # 时间区间筛选：通告有效期与筛选区间有交集
+            if start_date is not None:
+                # 通告的结束时间需 >= 筛选的开始时间
+                query = query.filter(end_date__gte=start_date)
+            
+            if end_date is not None:
+                # 通告的开始时间需 <= 筛选的结束时间
+                query = query.filter(start_date__lte=end_date)
                 
             if keyword:
                 from mongoengine.queryset.visitor import Q
                 query = query.filter(Q(title__icontains=keyword) | Q(brand__icontains=keyword))
             
-            return list(query.order_by('-publish_date', '-created_at').limit(limit))
+            notices = list(query.order_by('-publish_date', '-created_at').limit(limit))
+            
+            # 报酬筛选（在内存中进行，因为报酬是字符串格式）
+            if max_reward and max_reward != '不限':
+                filtered_notices = []
+                for notice in notices:
+                    reward_str = notice.reward or ''
+                    # 提取报酬中的数字
+                    import re
+                    numbers = re.findall(r'\d+', reward_str)
+                    if numbers:
+                        # 取最大值作为报酬上限
+                        max_val = max(int(n) for n in numbers)
+                        
+                        if max_reward == '500以下' and max_val < 500:
+                            filtered_notices.append(notice)
+                        elif max_reward == '500-1000' and 500 <= max_val <= 1000:
+                            filtered_notices.append(notice)
+                        elif max_reward == '1000-3000' and 1000 < max_val <= 3000:
+                            filtered_notices.append(notice)
+                        elif max_reward == '3000以上' and max_val > 3000:
+                            filtered_notices.append(notice)
+                    else:
+                        # 没有数字的报酬，不过滤
+                        filtered_notices.append(notice)
+                return filtered_notices
+            
+            return notices
             
         except Exception as e:
             print(f"❌ 获取通告列表失败: {e}")

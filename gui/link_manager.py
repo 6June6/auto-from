@@ -3,15 +3,519 @@
 """
 import re
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-                             QTableWidget, QTableWidgetItem, QHeaderView,
                              QMessageBox, QLineEdit, QLabel, QWidget,
                              QFormLayout, QComboBox, QTextEdit, QGroupBox,
-                             QSplitter, QProgressBar)
+                             QSplitter, QProgressBar, QFrame, QScrollArea,
+                             QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtGui import QColor
 from database import DatabaseManager, Link
 from core.ai_parser import AIParser
 from .icons import Icons
+from .admin_base_components import PREMIUM_COLORS, create_action_button
 
+
+# 链接列表列宽配置
+LINK_LIST_COLUMNS = {
+    'name': 150,
+    'url': 240,
+    'category': 90,
+    'status': 70,
+    'actions': 160
+}
+
+# 解析结果列宽配置
+PARSE_RESULT_COLUMNS = {
+    'name': 170,
+    'url': 300,
+    'category': 90,
+    'actions': 70
+}
+
+
+class LinkListHeader(QFrame):
+    """链接列表表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(44)
+        self.setStyleSheet(f"""
+            LinkListHeader {{
+                background: {PREMIUM_COLORS['background']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(0)
+        
+        columns = [
+            ("名称", LINK_LIST_COLUMNS['name']),
+            ("URL", LINK_LIST_COLUMNS['url']),
+            ("分类", LINK_LIST_COLUMNS['category']),
+            ("状态", LINK_LIST_COLUMNS['status']),
+            ("操作", LINK_LIST_COLUMNS['actions']),
+        ]
+        
+        for text, width in columns:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class LinkRowWidget(QFrame):
+    """链接行组件"""
+    edit_clicked = pyqtSignal(object)
+    copy_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
+    
+    def __init__(self, link, parent=None):
+        super().__init__(parent)
+        self.link = link
+        self.setFixedHeight(56)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(f"""
+            LinkRowWidget {{
+                background: white;
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            LinkRowWidget:hover {{
+                background: #fafbfc;
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(0)
+        
+        # 名称
+        name_lbl = QLabel(self.link.name)
+        name_lbl.setFixedWidth(LINK_LIST_COLUMNS['name'])
+        name_lbl.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['text_heading']};
+            font-weight: 600;
+            font-size: 13px;
+        """)
+        layout.addWidget(name_lbl)
+        
+        # URL（截断显示）
+        url_text = self.link.url[:40] + "..." if len(self.link.url) > 40 else self.link.url
+        url_lbl = QLabel(url_text)
+        url_lbl.setFixedWidth(LINK_LIST_COLUMNS['url'])
+        url_lbl.setToolTip(self.link.url)
+        url_lbl.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['primary']};
+            font-size: 12px;
+        """)
+        layout.addWidget(url_lbl)
+        
+        # 分类
+        category_lbl = QLabel(self.link.category or "-")
+        category_lbl.setFixedWidth(LINK_LIST_COLUMNS['category'])
+        category_lbl.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['text_body']};
+            font-size: 12px;
+        """)
+        layout.addWidget(category_lbl)
+        
+        # 状态标签
+        status_widget = self._create_status_label()
+        status_container = QWidget()
+        status_container.setFixedWidth(LINK_LIST_COLUMNS['status'])
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.addWidget(status_widget)
+        status_layout.addStretch()
+        layout.addWidget(status_container)
+        
+        # 操作按钮
+        actions_widget = QWidget()
+        actions_widget.setFixedWidth(LINK_LIST_COLUMNS['actions'])
+        actions_layout = QHBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(6)
+        
+        edit_btn = create_action_button("编辑", PREMIUM_COLORS['primary'], size=(48, 26))
+        edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.link))
+        actions_layout.addWidget(edit_btn)
+        
+        copy_btn = create_action_button("复制", PREMIUM_COLORS['info'], size=(48, 26))
+        copy_btn.clicked.connect(lambda: self.copy_clicked.emit(self.link))
+        actions_layout.addWidget(copy_btn)
+        
+        del_btn = create_action_button("删除", PREMIUM_COLORS['danger'], size=(48, 26))
+        del_btn.clicked.connect(lambda: self.delete_clicked.emit(self.link))
+        actions_layout.addWidget(del_btn)
+        
+        actions_layout.addStretch()
+        layout.addWidget(actions_widget)
+        
+        layout.addStretch()
+    
+    def _create_status_label(self):
+        """创建状态标签"""
+        status_map = {
+            "active": ("激活", "#34C759", "#E8F8ED"),
+            "archived": ("归档", "#FF9500", "#FFF4E6"),
+            "deleted": ("已删除", "#FF3B30", "#FFEBEB"),
+        }
+        text, color, bg_color = status_map.get(self.link.status, ("未知", "#999", "#f0f0f0"))
+        
+        label = QLabel(text)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setFixedSize(52, 22)
+        label.setStyleSheet(f"""
+            background: {bg_color};
+            color: {color};
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 11px;
+        """)
+        return label
+
+
+class LinkListWidget(QWidget):
+    """链接列表组件"""
+    edit_link = pyqtSignal(object)
+    copy_link = pyqtSignal(object)
+    delete_link = pyqtSignal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 表头
+        self.header = LinkListHeader()
+        layout.addWidget(self.header)
+        
+        # 滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 8px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {PREMIUM_COLORS['border']};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {PREMIUM_COLORS['text_hint']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+        """)
+        
+        # 内容容器
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def set_links(self, links):
+        """设置链接数据"""
+        # 清空现有行
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        
+        if not links:
+            self._show_empty_state()
+            return
+        
+        for link in links:
+            row = LinkRowWidget(link)
+            row.edit_clicked.connect(self.edit_link.emit)
+            row.copy_clicked.connect(self.copy_link.emit)
+            row.delete_clicked.connect(self.delete_link.emit)
+            self.content_layout.addWidget(row)
+            self.row_widgets.append(row)
+    
+    def _show_empty_state(self):
+        """显示空状态"""
+        empty_label = QLabel("暂无链接数据")
+        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_label.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['text_hint']};
+            font-size: 14px;
+            padding: 60px;
+        """)
+        self.content_layout.addWidget(empty_label)
+        self.row_widgets.append(empty_label)
+
+
+# ========== 解析结果列表组件 ==========
+
+class ParseResultHeader(QFrame):
+    """解析结果表头"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(40)
+        self.setStyleSheet(f"""
+            ParseResultHeader {{
+                background: {PREMIUM_COLORS['background']};
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setSpacing(0)
+        
+        columns = [
+            ("链接名称", PARSE_RESULT_COLUMNS['name']),
+            ("URL", PARSE_RESULT_COLUMNS['url']),
+            ("分类", PARSE_RESULT_COLUMNS['category']),
+            ("操作", PARSE_RESULT_COLUMNS['actions']),
+        ]
+        
+        for text, width in columns:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']};
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            layout.addWidget(lbl)
+        
+        layout.addStretch()
+
+
+class ParseResultRowWidget(QFrame):
+    """解析结果行组件"""
+    delete_clicked = pyqtSignal(object)  # 传递自身
+    
+    def __init__(self, name, url, category, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.url = url
+        self.category = category
+        self.setFixedHeight(48)
+        self.setStyleSheet(f"""
+            ParseResultRowWidget {{
+                background: white;
+                border: none;
+                border-bottom: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+            ParseResultRowWidget:hover {{
+                background: #fafbfc;
+            }}
+        """)
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(0)
+        
+        # 名称输入框
+        self.name_input = QLineEdit(self.name)
+        self.name_input.setFixedWidth(PARSE_RESULT_COLUMNS['name'] - 8)
+        self.name_input.setPlaceholderText("链接名称")
+        self.name_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: white;
+            }}
+            QLineEdit:focus {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
+        layout.addWidget(self.name_input)
+        layout.addSpacing(8)
+        
+        # URL输入框
+        self.url_input = QLineEdit(self.url)
+        self.url_input.setFixedWidth(PARSE_RESULT_COLUMNS['url'] - 8)
+        self.url_input.setPlaceholderText("URL")
+        self.url_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: white;
+                color: {PREMIUM_COLORS['primary']};
+            }}
+            QLineEdit:focus {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
+        layout.addWidget(self.url_input)
+        layout.addSpacing(8)
+        
+        # 分类输入框
+        self.category_input = QLineEdit(self.category)
+        self.category_input.setFixedWidth(PARSE_RESULT_COLUMNS['category'] - 8)
+        self.category_input.setPlaceholderText("分类")
+        self.category_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: white;
+            }}
+            QLineEdit:focus {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
+        layout.addWidget(self.category_input)
+        layout.addSpacing(8)
+        
+        # 删除按钮
+        del_btn = QPushButton("删除")
+        del_btn.setFixedHeight(26)
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {PREMIUM_COLORS['danger']};
+                border: none;
+                font-size: 12px;
+                padding: 0 8px;
+            }}
+            QPushButton:hover {{
+                color: #FF1744;
+                text-decoration: underline;
+            }}
+        """)
+        del_btn.clicked.connect(lambda: self.delete_clicked.emit(self))
+        layout.addWidget(del_btn)
+        
+        layout.addStretch()
+    
+    def get_data(self):
+        """获取行数据"""
+        return {
+            'name': self.name_input.text().strip(),
+            'url': self.url_input.text().strip(),
+            'category': self.category_input.text().strip()
+        }
+
+
+class ParseResultListWidget(QWidget):
+    """解析结果列表组件"""
+    row_count_changed = pyqtSignal(int)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_widgets = []
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 表头
+        self.header = ParseResultHeader()
+        layout.addWidget(self.header)
+        
+        # 滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: white;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 6px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {PREMIUM_COLORS['border']};
+                border-radius: 3px;
+            }}
+        """)
+        
+        # 内容容器
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: white;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+    
+    def clear(self):
+        """清空所有行"""
+        for widget in self.row_widgets:
+            widget.deleteLater()
+        self.row_widgets.clear()
+        self.row_count_changed.emit(0)
+    
+    def add_row(self, name, url, category):
+        """添加一行"""
+        row = ParseResultRowWidget(name, url, category)
+        row.delete_clicked.connect(self._on_row_delete)
+        self.content_layout.addWidget(row)
+        self.row_widgets.append(row)
+        self.row_count_changed.emit(len(self.row_widgets))
+    
+    def _on_row_delete(self, row_widget):
+        """删除行"""
+        if row_widget in self.row_widgets:
+            self.row_widgets.remove(row_widget)
+            row_widget.deleteLater()
+            self.row_count_changed.emit(len(self.row_widgets))
+    
+    def get_all_data(self):
+        """获取所有行数据"""
+        return [row.get_data() for row in self.row_widgets]
+    
+    def row_count(self):
+        """获取行数"""
+        return len(self.row_widgets)
+
+
+# ========== 主对话框 ==========
 
 class LinkManagerDialog(QDialog):
     """链接管理对话框"""
@@ -26,57 +530,146 @@ class LinkManagerDialog(QDialog):
         """初始化UI"""
         self.setWindowTitle("链接管理")
         self.setGeometry(150, 150, 1000, 600)
+        self.setStyleSheet(f"background: {PREMIUM_COLORS['background']};")
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
         self.setLayout(layout)
         
-        # 标题
+        # 标题栏
+        header_layout = QHBoxLayout()
         title_label = QLabel("🔗 链接管理")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
-        layout.addWidget(title_label)
+        title_label.setStyleSheet(f"""
+            font-size: 20px;
+            font-weight: bold;
+            color: {PREMIUM_COLORS['text_heading']};
+        """)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
         
-        # 筛选区域
-        filter_layout = QHBoxLayout()
+        # 筛选和操作区域
+        filter_card = QFrame()
+        filter_card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-radius: 12px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        filter_layout = QHBoxLayout(filter_card)
+        filter_layout.setContentsMargins(16, 12, 16, 12)
+        
         filter_label = QLabel("状态筛选:")
+        filter_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']};")
         filter_layout.addWidget(filter_label)
         
         self.status_combo = QComboBox()
         self.status_combo.addItems(["全部", "激活", "归档", "已删除"])
+        self.status_combo.setFixedWidth(120)
+        self.status_combo.setStyleSheet(f"""
+            QComboBox {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 6px;
+                padding: 6px 12px;
+                background: white;
+            }}
+            QComboBox:hover {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+        """)
         self.status_combo.currentTextChanged.connect(self.load_data)
         filter_layout.addWidget(self.status_combo)
         
         filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-        
-        # 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["名称", "URL", "分类", "状态", "操作"])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.verticalHeader().setDefaultSectionSize(45)  # 增加行高，防止按钮显示不全
-        layout.addWidget(self.table)
-        
-        # 按钮区域
-        button_layout = QHBoxLayout()
         
         btn_add = QPushButton("➕ 新增链接")
+        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add.setFixedHeight(36)
+        btn_add.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['success']};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 0 16px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: #2EAE5B;
+            }}
+        """)
         btn_add.clicked.connect(self.add_link)
-        btn_add.setStyleSheet("background-color: #28a745; color: white; padding: 10px; font-weight: bold;")
-        button_layout.addWidget(btn_add)
+        filter_layout.addWidget(btn_add)
         
         btn_refresh = QPushButton("🔄 刷新")
+        btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_refresh.setFixedHeight(36)
+        btn_refresh.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
         btn_refresh.clicked.connect(self.load_data)
-        button_layout.addWidget(btn_refresh)
+        filter_layout.addWidget(btn_refresh)
         
-        button_layout.addStretch()
+        layout.addWidget(filter_card)
+        
+        # 列表区域
+        list_card = QFrame()
+        list_card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-radius: 12px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        list_layout = QVBoxLayout(list_card)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.link_list = LinkListWidget()
+        self.link_list.edit_link.connect(self.edit_link)
+        self.link_list.copy_link.connect(self.copy_url)
+        self.link_list.delete_link.connect(self.delete_link)
+        list_layout.addWidget(self.link_list)
+        
+        layout.addWidget(list_card, 1)
+        
+        # 底部按钮
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addStretch()
         
         btn_close = QPushButton("关闭")
+        btn_close.setFixedSize(100, 40)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+            }}
+        """)
         btn_close.clicked.connect(self.accept)
-        button_layout.addWidget(btn_close)
+        bottom_layout.addWidget(btn_close)
         
-        layout.addLayout(button_layout)
+        layout.addLayout(bottom_layout)
         
         # 加载数据
         self.load_data()
@@ -95,82 +688,7 @@ class LinkManagerDialog(QDialog):
         """加载数据"""
         status = self.get_filter_status()
         links = self.db_manager.get_all_links(status, user=self.current_user)
-        self.table.setRowCount(len(links))
-        
-        for i, link in enumerate(links):
-            # 名称
-            self.table.setItem(i, 0, QTableWidgetItem(link.name))
-            
-            # URL
-            url_text = link.url[:50] + "..." if len(link.url) > 50 else link.url
-            self.table.setItem(i, 1, QTableWidgetItem(url_text))
-            
-            # 分类
-            self.table.setItem(i, 2, QTableWidgetItem(link.category or "-"))
-            
-            # 状态
-            status_map = {
-                "active": "✅ 激活",
-                "archived": "📦 归档",
-                "deleted": "🗑️ 已删除"
-            }
-            self.table.setItem(i, 3, QTableWidgetItem(status_map.get(link.status, link.status)))
-            
-            # 操作按钮
-            action_widget = QWidget()
-            action_layout = QHBoxLayout()
-            action_layout.setContentsMargins(4, 2, 4, 2)
-            action_layout.setSpacing(6)
-            action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            action_widget.setLayout(action_layout)
-            
-            # 样式
-            btn_style = """
-                QPushButton {
-                    background: transparent;
-                    border: 1px solid transparent;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background: #F0F2F5;
-                    border-color: #DCDFE6;
-                }
-                QPushButton:pressed {
-                    background: #E4E7ED;
-                }
-            """
-            
-            # 编辑按钮
-            btn_edit = QPushButton()
-            btn_edit.setIcon(Icons.edit('primary'))
-            btn_edit.setFixedSize(28, 28)
-            btn_edit.setToolTip("编辑")
-            btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_edit.setStyleSheet(btn_style)
-            btn_edit.clicked.connect(lambda checked, l=link: self.edit_link(l))
-            action_layout.addWidget(btn_edit)
-            
-            # 复制按钮
-            btn_copy = QPushButton()
-            btn_copy.setIcon(Icons.copy('info'))
-            btn_copy.setFixedSize(28, 28)
-            btn_copy.setToolTip("复制URL")
-            btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_copy.setStyleSheet(btn_style)
-            btn_copy.clicked.connect(lambda checked, l=link: self.copy_url(l))
-            action_layout.addWidget(btn_copy)
-            
-            # 删除按钮
-            btn_delete = QPushButton()
-            btn_delete.setIcon(Icons.delete('danger'))
-            btn_delete.setFixedSize(28, 28)
-            btn_delete.setToolTip("删除")
-            btn_delete.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_delete.setStyleSheet(btn_style)
-            btn_delete.clicked.connect(lambda checked, l=link: self.delete_link(l))
-            action_layout.addWidget(btn_delete)
-            
-            self.table.setCellWidget(i, 4, action_widget)
+        self.link_list.set_links(links)
     
     def add_link(self):
         """新增链接 - 智能批量添加"""
@@ -231,51 +749,78 @@ class SmartAddLinkDialog(QDialog):
         super().__init__(parent)
         self.db_manager = DatabaseManager()
         self.current_user = current_user
-        self.parsed_links = []  # 存储解析结果
         self.ai_thread = None
         self.init_ui()
         
     def init_ui(self):
         self.setWindowTitle("新增链接 - 智能解析 (DeepSeek 支持)")
         self.resize(1000, 700)
+        self.setStyleSheet(f"background: {PREMIUM_COLORS['background']};")
         
         # 主布局
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
         self.setLayout(layout)
         
         # 说明
-        info_label = QLabel("💡 提示：直接粘贴包含链接的文本（如聊天记录）。可以使用「本地正则解析」快速提取，或使用「AI 智能解析」获得更准确的标题和分类。")
-        info_label.setStyleSheet("color: #666; font-style: italic;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
+        info_card = QFrame()
+        info_card.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #E8F4FD, stop:1 #F0E6FF);
+                border-radius: 10px;
+                border: 1px solid {PREMIUM_COLORS['primary']}30;
+            }}
+        """)
+        info_layout = QHBoxLayout(info_card)
+        info_layout.setContentsMargins(16, 12, 16, 12)
         
-        # 分割器：上部输入，下部预览
+        info_label = QLabel("💡 直接粘贴包含链接的文本（如聊天记录），可使用「本地正则解析」快速提取，或使用「AI 智能解析」获得更准确的标题和分类")
+        info_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+        layout.addWidget(info_card)
+        
+        # 分割器
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: transparent;
+                height: 8px;
+            }
+        """)
         layout.addWidget(splitter, 1)
         
         # 上部：输入区域
-        input_widget = QWidget()
-        input_layout = QVBoxLayout(input_widget)
-        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_card = QFrame()
+        input_card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-radius: 12px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        input_layout = QVBoxLayout(input_card)
+        input_layout.setContentsMargins(16, 16, 16, 16)
         
         input_header = QHBoxLayout()
-        input_label = QLabel("粘贴文本:")
-        input_label.setStyleSheet("font-weight: bold;")
+        input_label = QLabel("粘贴文本")
+        input_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {PREMIUM_COLORS['text_heading']};")
         input_header.addWidget(input_label)
         input_header.addStretch()
         
         # AI 解析按钮
         self.btn_ai_parse = QPushButton("✨ DeepSeek 智能解析")
         self.btn_ai_parse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai_parse.setFixedHeight(34)
         self.btn_ai_parse.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #8b5cf6);
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
+                border-radius: 8px;
+                padding: 0 16px;
+                font-weight: 600;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5, stop:1 #7c3aed);
@@ -291,132 +836,159 @@ class SmartAddLinkDialog(QDialog):
         
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText("在此粘贴包含链接的文本...\n例如：\nhttps://docs.qq.com/form/page/xx 邀请你填写《XX报名表》")
+        self.text_edit.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 13px;
+                background: white;
+            }}
+            QTextEdit:focus {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
         self.text_edit.textChanged.connect(self.on_text_changed)
         input_layout.addWidget(self.text_edit)
         
         # 进度条
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # 不确定进度
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.hide()
+        self.progress_bar.setFixedHeight(4)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #bbb;
-                border-radius: 4px;
-                text-align: center;
+                border: none;
+                border-radius: 2px;
                 background: #f0f0f0;
-                height: 6px;
             }
             QProgressBar::chunk {
                 background-color: #6366f1;
-                width: 20px;
+                border-radius: 2px;
             }
         """)
         input_layout.addWidget(self.progress_bar)
         
-        splitter.addWidget(input_widget)
+        splitter.addWidget(input_card)
         
         # 下部：解析结果
-        result_widget = QWidget()
-        result_layout = QVBoxLayout(result_widget)
-        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_card = QFrame()
+        result_card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-radius: 12px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        result_layout = QVBoxLayout(result_card)
+        result_layout.setContentsMargins(16, 16, 16, 16)
         
         result_header = QHBoxLayout()
-        result_label = QLabel("解析结果:")
-        result_label.setStyleSheet("font-weight: bold;")
+        result_label = QLabel("解析结果")
+        result_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {PREMIUM_COLORS['text_heading']};")
         result_header.addWidget(result_label)
         
         self.count_label = QLabel("共找到 0 个链接")
-        self.count_label.setStyleSheet("color: #007AFF;")
+        self.count_label.setStyleSheet(f"color: {PREMIUM_COLORS['primary']}; font-size: 13px;")
         result_header.addWidget(self.count_label)
         result_header.addStretch()
         
         result_layout.addLayout(result_header)
         
-        # 结果表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["链接名称", "URL", "分类", "操作"])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        result_layout.addWidget(self.table)
+        # 解析结果列表
+        self.result_list = ParseResultListWidget()
+        self.result_list.row_count_changed.connect(self.update_status)
+        result_layout.addWidget(self.result_list, 1)
         
-        splitter.addWidget(result_widget)
+        splitter.addWidget(result_card)
         
         # 底部按钮
         button_layout = QHBoxLayout()
         
-        # 手动添加单条按钮
-        btn_add_single = QPushButton("手动添加单条")
+        btn_add_single = QPushButton("➕ 手动添加单条")
+        btn_add_single.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add_single.setFixedHeight(40)
+        btn_add_single.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """)
         btn_add_single.clicked.connect(self.add_empty_row)
         button_layout.addWidget(btn_add_single)
         
         button_layout.addStretch()
         
         btn_cancel = QPushButton("取消")
-        btn_cancel.clicked.connect(self.reject)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setFixedSize(100, 40)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.reject)
         button_layout.addWidget(btn_cancel)
         
         self.btn_save = QPushButton("保存全部")
-        self.btn_save.clicked.connect(self.save_all)
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.setFixedSize(120, 40)
-        self.btn_save.setStyleSheet("""
-            QPushButton {
-                background-color: #007AFF;
+        self.btn_save.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['primary']};
                 color: white;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0062CC;
-            }
-            QPushButton:disabled {
-                background-color: #CCC;
-            }
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: #0056CC;
+            }}
+            QPushButton:disabled {{
+                background: #CCC;
+            }}
         """)
+        self.btn_save.clicked.connect(self.save_all)
+        self.btn_save.setEnabled(False)
         button_layout.addWidget(self.btn_save)
         
         layout.addLayout(button_layout)
         
-        # 定时器用于防抖解析（本地正则）
+        # 定时器用于防抖解析
         self.parse_timer = QTimer()
         self.parse_timer.setSingleShot(True)
-        self.parse_timer.timeout.connect(self.parse_content_regex)
-        
-        # 初始禁用保存
-        self.btn_save.setEnabled(False)
 
     def on_text_changed(self):
-        """文本变化时触发防抖解析（仅本地）"""
-        # 如果 AI 正在解析，不打断
+        """文本变化时触发防抖解析"""
         if self.ai_thread and self.ai_thread.isRunning():
             return
         
-        # 自动触发 DeepSeek 解析（延迟 1 秒）
-        # 之前的 parse_timer 是本地正则，这里改为自动调用 start_ai_parse
-        # 但为了避免太频繁请求 API，设置较长的防抖时间
-        
-        # 先停止之前的计时器
         self.parse_timer.stop()
         
-        # 如果文本为空，清空表格
         if not self.text_edit.toPlainText().strip():
-            self.table.setRowCount(0)
-            self.update_status()
+            self.result_list.clear()
             return
 
-        # 自动触发 AI 解析
-        # 注意：这会消耗 token，用户可能只想粘贴一下，所以还是保留手动点击或非常长的延迟比较好？
-        # 用户的需求是“默认就是 deepseek”，所以我们可以在这里自动触发
-        
-        # 断开之前的连接（如果有）
         try:
             self.parse_timer.timeout.disconnect()
         except:
             pass
             
         self.parse_timer.timeout.connect(self.start_ai_parse)
-        self.parse_timer.start(1500)  # 1.5秒后自动开始解析
+        self.parse_timer.start(1500)
     
     def start_ai_parse(self):
         """开始 AI 解析"""
@@ -444,7 +1016,7 @@ class SmartAddLinkDialog(QDialog):
             QMessageBox.information(self, "提示", "未识别到有效的链接信息")
             return
             
-        self.populate_table(links)
+        self.populate_list(links)
         QMessageBox.information(self, "成功", f"AI 成功解析出 {len(links)} 个链接！")
         
     def on_ai_parse_error(self, error_msg):
@@ -460,15 +1032,14 @@ class SmartAddLinkDialog(QDialog):
         if not text:
             return
             
-        # 简单的正则提取，作为 AI 的补充或快速预览
         url_pattern = r'https?://[a-zA-Z0-9\-._~:/?#[\]@!$&\'()*+,;=%]+'
         matches = list(re.finditer(url_pattern, text))
         
-        if not matches and self.table.rowCount() > 0:
+        if not matches and self.result_list.row_count() > 0:
             return
 
         links = []
-        seen_urls = set() # 正则模式下还是简单去重一下，避免刷屏，AI模式下由AI决定
+        seen_urls = set()
         
         for match in matches:
             url = match.group()
@@ -476,7 +1047,6 @@ class SmartAddLinkDialog(QDialog):
                 continue
             seen_urls.add(url)
             
-            # 简单标题提取
             start, end = match.span()
             context = text[max(0, start - 50):min(len(text), end + 50)]
             
@@ -493,21 +1063,17 @@ class SmartAddLinkDialog(QDialog):
             category = self.guess_category(url)
             links.append({"name": name, "url": url, "category": category})
             
-        self.populate_table(links)
+        self.populate_list(links)
 
-    def populate_table(self, links):
-        """填充表格"""
-        self.table.setRowCount(0)
-        self.parsed_links = links
+    def populate_list(self, links):
+        """填充列表"""
+        self.result_list.clear()
         
         for link in links:
             name = link.get('name', '')
             url = link.get('url', '')
             category = link.get('category', '其他')
-            
-            self.add_row(name, url, category)
-            
-        self.update_status()
+            self.result_list.add_row(name, url, category)
 
     def guess_category(self, url):
         """根据 URL 猜测分类"""
@@ -525,95 +1091,121 @@ class SmartAddLinkDialog(QDialog):
             return "WPS"
         elif "wenjuan.com" in url:
             return "问卷网"
+        elif "baominggongju" in url or "p.baominggongju.com" in url:
+            return "报名工具"
         return "其他"
-
-    def add_row(self, name, url, category):
-        """添加一行到表格"""
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        
-        # 名称（可编辑）
-        name_item = QTableWidgetItem(name)
-        self.table.setItem(row, 0, name_item)
-        
-        # URL（可编辑）
-        url_item = QTableWidgetItem(url)
-        self.table.setItem(row, 1, url_item)
-        
-        # 分类（可编辑）
-        cat_item = QTableWidgetItem(category)
-        self.table.setItem(row, 2, cat_item)
-        
-        # 操作按钮
-        btn_del = QPushButton("删除")
-        btn_del.setStyleSheet("color: red; border: none; background: transparent;")
-        btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_del.clicked.connect(lambda: self.remove_row(row))
-        self.table.setCellWidget(row, 3, btn_del)
+    
+    def is_supported_platform(self, url):
+        """检查链接是否为支持的平台"""
+        supported_domains = [
+            "docs.qq.com",      # 腾讯文档
+            "wj.qq.com",        # 腾讯问卷
+            "shimo.im",         # 石墨文档
+            "wjx.cn",           # 问卷星
+            "jinshuju",         # 金数据
+            "feishu.cn",        # 飞书
+            "kdocs.cn",         # WPS
+            "wenjuan.com",      # 问卷网
+            "baominggongju",    # 报名工具
+            "fanqier.cn",       # 番茄表单
+            "credamo.com",      # 见数
+            "jsj.top",          # 金数据
+        ]
+        return any(domain in url for domain in supported_domains)
 
     def add_empty_row(self):
         """手动添加空行"""
-        self.add_row("", "", "其他")
-        self.update_status()
+        self.result_list.add_row("", "", "其他")
 
-    def remove_row(self, row):
-        """删除行"""
-        self.table.removeRow(row)
-        self.update_status()
-        
-        # 重新绑定删除按钮
-        for i in range(self.table.rowCount()):
-            btn = self.table.cellWidget(i, 3)
-            if btn:
-                new_btn = QPushButton("删除")
-                new_btn.setStyleSheet("color: red; border: none; background: transparent;")
-                new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                new_btn.clicked.connect(lambda checked, r=i: self.remove_row(r))
-                self.table.setCellWidget(i, 3, new_btn)
-
-    def update_status(self):
+    def update_status(self, count):
         """更新状态标签"""
-        count = self.table.rowCount()
         self.count_label.setText(f"共找到 {count} 个链接")
         self.btn_save.setEnabled(count > 0)
 
     def save_all(self):
         """保存所有链接"""
-        count = self.table.rowCount()
-        if count == 0:
+        all_data = self.result_list.get_all_data()
+        if not all_data:
+            return
+        
+        # 预检查：找出已存在和不支持的链接
+        existing_links = []
+        unsupported_links = []
+        valid_links = []
+        
+        for data in all_data:
+            url = data['url']
+            name = data['name'] or "未命名链接"
+            
+            if not url:
+                continue
+            
+            # 检查是否支持该平台
+            if not self.is_supported_platform(url):
+                unsupported_links.append(name or url[:30])
+                continue
+            
+            # 检查是否已存在
+            existing = self.db_manager.get_link_by_url(url, user=self.current_user)
+            if existing:
+                existing_links.append(name or url[:30])
+            
+            valid_links.append((data, existing))
+        
+        # 显示预检查结果提示
+        warning_msgs = []
+        if unsupported_links:
+            warning_msgs.append(f"⚠️ 以下 {len(unsupported_links)} 个链接平台暂不支持，将跳过：\n• " + "\n• ".join(unsupported_links[:5]))
+            if len(unsupported_links) > 5:
+                warning_msgs[-1] += f"\n...等共 {len(unsupported_links)} 个"
+        
+        if existing_links:
+            warning_msgs.append(f"ℹ️ 以下 {len(existing_links)} 个链接已存在，将更新：\n• " + "\n• ".join(existing_links[:5]))
+            if len(existing_links) > 5:
+                warning_msgs[-1] += f"\n...等共 {len(existing_links)} 个"
+        
+        # 如果有警告，询问用户是否继续
+        if warning_msgs:
+            warning_text = "\n\n".join(warning_msgs)
+            if valid_links:
+                warning_text += f"\n\n确定要继续保存 {len(valid_links)} 个链接吗？"
+                reply = QMessageBox.question(
+                    self, "保存确认",
+                    warning_text,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            else:
+                QMessageBox.warning(self, "无法保存", "没有可保存的有效链接。\n\n" + warning_text)
+                return
+        
+        if not valid_links:
+            QMessageBox.warning(self, "提示", "没有可保存的有效链接")
             return
             
+        # 执行保存
         success_count = 0
         updated_count = 0
         error_count = 0
         
-        for i in range(count):
-            name = self.table.item(i, 0).text().strip()
-            url = self.table.item(i, 1).text().strip()
-            category = self.table.item(i, 2).text().strip()
-            
-            if not url:
-                continue
-                
-            if not name:
-                name = "未命名链接"
+        for data, existing in valid_links:
+            name = data['name'] or "未命名链接"
+            url = data['url']
+            category = data['category']
             
             try:
-                # 检查是否已存在（按当前用户筛选）
-                existing_link = self.db_manager.get_link_by_url(url, user=self.current_user)
-                if existing_link:
-                    # 更新现有链接
+                if existing:
                     self.db_manager.update_link(
-                        existing_link.id,
+                        existing.id,
                         name=name,
                         category=category,
-                        status='active',  # 重新激活
+                        status='active',
                         description=f"批量导入更新 - {name}"
                     )
                     print(f"更新已存在链接: {url}")
                     updated_count += 1
                 else:
-                    # 创建新链接
                     self.db_manager.create_link(
                         name=name,
                         url=url,
@@ -627,9 +1219,20 @@ class SmartAddLinkDialog(QDialog):
                 print(f"保存链接失败: {e}")
                 error_count += 1
         
-        msg = f"处理完成：\n新增 {success_count} 个\n更新 {updated_count} 个"
+        # 显示结果
+        msg_parts = []
+        if success_count > 0:
+            msg_parts.append(f"✅ 新增 {success_count} 个")
+        if updated_count > 0:
+            msg_parts.append(f"🔄 更新 {updated_count} 个")
         if error_count > 0:
-            msg += f"\n失败 {error_count} 个"
+            msg_parts.append(f"❌ 失败 {error_count} 个")
+        if unsupported_links:
+            msg_parts.append(f"⏭️ 跳过 {len(unsupported_links)} 个（不支持）")
+        
+        msg = "处理完成：\n" + "\n".join(msg_parts)
+        
+        if error_count > 0:
             QMessageBox.warning(self, "导入完成", msg)
         else:
             QMessageBox.information(self, "导入完成", msg)
@@ -651,65 +1254,160 @@ class LinkEditDialog(QDialog):
         """初始化UI"""
         title = "编辑链接" if self.link else "新增链接"
         self.setWindowTitle(title)
-        self.setGeometry(250, 250, 600, 400)
+        self.setGeometry(250, 250, 550, 420)
+        self.setStyleSheet(f"background: {PREMIUM_COLORS['background']};")
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(20)
         self.setLayout(layout)
         
-        # 表单
-        form_layout = QFormLayout()
+        # 标题
+        title_label = QLabel(f"{'✏️' if self.link else '➕'} {title}")
+        title_label.setStyleSheet(f"""
+            font-size: 18px;
+            font-weight: bold;
+            color: {PREMIUM_COLORS['text_heading']};
+        """)
+        layout.addWidget(title_label)
+        
+        # 表单卡片
+        form_card = QFrame()
+        form_card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border-radius: 12px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+            }}
+        """)
+        form_layout = QFormLayout(form_card)
+        form_layout.setContentsMargins(20, 20, 20, 20)
+        form_layout.setSpacing(16)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        
+        # 输入框样式
+        input_style = f"""
+            QLineEdit {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                padding: 10px 12px;
+                font-size: 13px;
+                background: white;
+            }}
+            QLineEdit:focus {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+        """
+        
+        label_style = f"color: {PREMIUM_COLORS['text_body']}; font-weight: 500;"
         
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("输入链接名称")
+        self.name_input.setStyleSheet(input_style)
         if self.link:
             self.name_input.setText(self.link.name)
-        form_layout.addRow("链接名称:*", self.name_input)
+        name_label = QLabel("链接名称 *")
+        name_label.setStyleSheet(label_style)
+        form_layout.addRow(name_label, self.name_input)
         
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("输入完整 URL（如：https://example.com）")
+        self.url_input.setStyleSheet(input_style)
         if self.link:
             self.url_input.setText(self.link.url)
-        form_layout.addRow("URL:*", self.url_input)
+        url_label = QLabel("URL *")
+        url_label.setStyleSheet(label_style)
+        form_layout.addRow(url_label, self.url_input)
         
         self.category_input = QLineEdit()
         self.category_input.setPlaceholderText("输入分类（如：测试、抖音、小红书）")
+        self.category_input.setStyleSheet(input_style)
         if self.link:
             self.category_input.setText(self.link.category or "")
-        form_layout.addRow("分类:", self.category_input)
+        category_label = QLabel("分类")
+        category_label.setStyleSheet(label_style)
+        form_layout.addRow(category_label, self.category_input)
         
         self.status_combo = QComboBox()
         self.status_combo.addItems(["激活", "归档", "已删除"])
+        self.status_combo.setStyleSheet(f"""
+            QComboBox {{
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                padding: 10px 12px;
+                background: white;
+            }}
+            QComboBox:hover {{
+                border-color: {PREMIUM_COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+        """)
         if self.link:
             status_index = {"active": 0, "archived": 1, "deleted": 2}.get(self.link.status, 0)
             self.status_combo.setCurrentIndex(status_index)
-        form_layout.addRow("状态:", self.status_combo)
+        status_label = QLabel("状态")
+        status_label.setStyleSheet(label_style)
+        form_layout.addRow(status_label, self.status_combo)
         
         self.desc_input = QLineEdit()
         self.desc_input.setPlaceholderText("输入描述（可选）")
+        self.desc_input.setStyleSheet(input_style)
         if self.link:
             self.desc_input.setText(self.link.description or "")
-        form_layout.addRow("描述:", self.desc_input)
+        desc_label = QLabel("描述")
+        desc_label.setStyleSheet(label_style)
+        form_layout.addRow(desc_label, self.desc_input)
         
-        layout.addLayout(form_layout)
+        layout.addWidget(form_card)
         
         # 提示
-        hint_label = QLabel("* 必填项")
-        hint_label.setStyleSheet("color: #999; font-size: 12px;")
+        hint_label = QLabel("* 为必填项")
+        hint_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
         layout.addWidget(hint_label)
         
         layout.addStretch()
         
         # 按钮
         button_layout = QHBoxLayout()
-        
-        btn_save = QPushButton("💾 保存")
-        btn_save.clicked.connect(self.save)
-        btn_save.setStyleSheet("background-color: #667eea; color: white; padding: 10px;")
-        button_layout.addWidget(btn_save)
+        button_layout.addStretch()
         
         btn_cancel = QPushButton("取消")
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setFixedSize(100, 40)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+            }}
+        """)
         btn_cancel.clicked.connect(self.reject)
         button_layout.addWidget(btn_cancel)
+        
+        btn_save = QPushButton("💾 保存")
+        btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_save.setFixedSize(120, 40)
+        btn_save.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5a6fd6, stop:1 #6a4190);
+            }}
+        """)
+        btn_save.clicked.connect(self.save)
+        button_layout.addWidget(btn_save)
         
         layout.addLayout(button_layout)
     
@@ -742,7 +1440,6 @@ class LinkEditDialog(QDialog):
         
         try:
             if self.link:
-                # 更新
                 self.db_manager.update_link(
                     self.link.id,
                     name=name,
@@ -753,7 +1450,6 @@ class LinkEditDialog(QDialog):
                 )
                 QMessageBox.information(self, "成功", "链接已更新")
             else:
-                # 新增
                 self.db_manager.create_link(name, url, self.current_user, status, category, description)
                 QMessageBox.information(self, "成功", "链接已创建")
             

@@ -345,6 +345,57 @@ def increment_usage_count(user: User) -> bool:
         return False
 
 
+def try_increment_usage_count(user: User) -> Tuple[bool, str]:
+    """
+    尝试增加用户使用次数（带权限检查的原子操作）
+    
+    在增加计数前先检查用户是否还有剩余额度，防止并发填充时超额
+    
+    Args:
+        user: 用户对象
+        
+    Returns:
+        (是否成功, 消息)
+    """
+    try:
+        # 重新加载确保数据最新
+        user.reload()
+        
+        # 管理员无限制
+        if user.role == 'admin':
+            user.usage_count = (user.usage_count or 0) + 1
+            user.save()
+            return True, "成功"
+        
+        # 检查账号是否过期
+        if user.expire_time and datetime.now() > user.expire_time:
+            return False, "账号已过期"
+        
+        # 检查使用次数是否已用尽
+        current_count = user.usage_count or 0
+        max_count = user.max_usage_count or -1
+        
+        # -1 表示无限次数
+        if max_count == -1:
+            user.usage_count = current_count + 1
+            user.save()
+            return True, "成功"
+        
+        # 检查是否还有剩余额度
+        if current_count >= max_count:
+            return False, f"使用次数已用尽（{current_count}/{max_count}次）"
+        
+        # 有剩余额度，增加计数
+        user.usage_count = current_count + 1
+        user.save()
+        print(f"✅ 用户 {user.username} 使用次数: {current_count + 1}/{max_count}")
+        return True, "成功"
+        
+    except Exception as e:
+        print(f"❌ 增加使用次数失败: {e}")
+        return False, f"操作失败: {str(e)}"
+
+
 def get_user_status_info(user: User) -> dict:
     """
     获取用户状态信息（用于前端展示）

@@ -881,20 +881,28 @@ class NewFillWindow(QDialog):
         # 左侧占位
         cat_layout.addStretch()
         
-        # 中间：类别名称 + 下箭头 (合并在一个容器中)
-        center_container = QWidget()
+        # 中间：类别名称 + 下箭头 (合并在一个容器中，可点击)
+        center_container = QPushButton()
+        center_container.setCursor(Qt.CursorShape.PointingHandCursor)
         center_container.setStyleSheet(f"""
-            QWidget {{
+            QPushButton {{
                 background: white;
                 border: 1px solid {COLORS['border']};
                 border-radius: 6px;
                 padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLORS['primary']};
+                background: #F8F9FA;
             }}
         """)
         center_layout = QHBoxLayout()
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(8)
         center_container.setLayout(center_layout)
+        
+        # 保存引用以便后续绑定点击事件
+        self.category_selector_btn = center_container
         
         self.category_label = QLabel("美妆类")
         self.category_label.setStyleSheet(f"""
@@ -942,7 +950,8 @@ class NewFillWindow(QDialog):
         """)
         self.category_combo.currentTextChanged.connect(self.on_category_changed)
         
-        # 连接逻辑
+        # 连接逻辑 - 点击分类选择区域或切换按钮都可以打开下拉
+        self.category_selector_btn.clicked.connect(self.category_combo.showPopup)
         switch_cat_btn.clicked.connect(self.category_combo.showPopup)
         self.category_combo.currentTextChanged.connect(lambda t: self.category_label.setText(t if t else "选择分类"))
         
@@ -1455,6 +1464,9 @@ class NewFillWindow(QDialog):
         self.current_card = card
         
         print(f"\n🔍 显示名片信息: {card.name}")
+        
+        # 更新标题为名片名称
+        self.card_info_title.setText(card.name)
         
         # 清空字段列表
         while self.card_fields_layout.count():
@@ -2483,6 +2495,20 @@ class NewFillWindow(QDialog):
     
     def execute_auto_fill_for_webview(self, web_view: QWebEngineView, card):
         """为单个WebView执行自动填写（参考 auto_fill_window.py）"""
+        # ⚡️ 关键修复：每次填充前检查用户权限（防止多开模式绕过次数限制）
+        if self.current_user:
+            from core.auth import check_user_can_use
+            can_use, message = check_user_can_use(self.current_user)
+            if not can_use:
+                print(f"❌ [权限检查] 用户无法继续填充: {message}")
+                web_view.setProperty("status", "quota_exceeded")
+                # 只弹出一次提示（使用实例标记防止重复弹窗）
+                if not getattr(self, '_quota_exceeded_shown', False):
+                    self._quota_exceeded_shown = True
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "使用受限", f"{message}\n\n请联系平台客服续费后继续使用。")
+                return
+        
         current_url = web_view.url().toString()
         
         # ⚡️ 优先使用原始 URL（防止 data: URL 干扰）
@@ -6245,19 +6271,30 @@ class NewFillWindow(QDialog):
                     fill_count = result.get('fillCount', 0)
                     total_count = result.get('totalCount', 0)
                 
+                # 填写成功后尝试增加使用次数（带权限检查）
+                record_success = fill_count > 0
+                if fill_count > 0 and self.current_user:
+                    from core.auth import try_increment_usage_count
+                    can_increment, msg = try_increment_usage_count(self.current_user)
+                    if not can_increment:
+                        # 额度已用尽，不记录为成功
+                        print(f"⚠️ [额度检查] 无法增加使用次数: {msg}")
+                        record_success = False
+                        fill_count = 0  # 标记为未成功填充
+                        # 只弹出一次提示（使用实例标记防止重复弹窗）
+                        if not getattr(self, '_quota_exceeded_shown', False):
+                            self._quota_exceeded_shown = True
+                            from PyQt6.QtWidgets import QMessageBox
+                            QMessageBox.warning(self, "使用受限", f"{msg}\n\n请联系平台客服续费后继续使用。")
+                
                 # 保存记录
                 self.db_manager.create_fill_record(
                     card.id,
                     link_data.id,
                     fill_count,
                     total_count,
-                    success=(fill_count > 0)
+                    success=record_success
                 )
-                
-                # 填写成功后增加使用次数
-                if fill_count > 0 and self.current_user:
-                    from core.auth import increment_usage_count
-                    increment_usage_count(self.current_user)
                 
                 web_view.setProperty("status", "filled")
                 print(f"✅ {card.name}: 填写 {fill_count}/{total_count} 个字段")

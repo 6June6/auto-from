@@ -100,7 +100,7 @@ class FieldRowWidget(QFrame):
                 background: #fafbfc;
             }}
         """)
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(0)
@@ -952,7 +952,7 @@ class AdminFieldLibraryManager(QWidget):
         
         self.field_list.set_fields(fields)
         self.update_pagination()
-    
+        
     def push_to_user(self, field):
         """推送字段到用户 - 行组件信号处理"""
         current_user = None

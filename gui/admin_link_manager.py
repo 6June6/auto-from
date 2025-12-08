@@ -44,7 +44,7 @@ class LinkListHeader(QFrame):
             }}
         """)
         self._setup_ui()
-    
+
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
@@ -631,7 +631,7 @@ class AdminLinkManager(QWidget):
         self.page_num_label.setText(f"{self.current_page} / {self.total_pages}")
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
-    
+        
     def visit_link(self, link):
         """访问链接"""
         QDesktopServices.openUrl(QUrl(link.url))

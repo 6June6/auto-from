@@ -40,7 +40,7 @@ class RecordListHeader(QFrame):
             }}
         """)
         self._setup_ui()
-    
+
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
@@ -420,11 +420,11 @@ class AdminFillRecordManager(QWidget):
         
         toolbar_layout.addStretch()
         
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setIcon(Icons.refresh())
-        refresh_btn.setFixedSize(80, 36)
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.setStyleSheet(f"""
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setIcon(Icons.refresh())
+        self.refresh_btn.setFixedSize(80, 36)
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 border: 1px solid {PREMIUM_COLORS['border']};
@@ -439,8 +439,8 @@ class AdminFillRecordManager(QWidget):
                 border-color: {PREMIUM_COLORS['gradient_blue_start']};
             }}
         """)
-        refresh_btn.clicked.connect(self.load_data)
-        toolbar_layout.addWidget(refresh_btn)
+        self.refresh_btn.clicked.connect(lambda: self.load_data())
+        toolbar_layout.addWidget(self.refresh_btn)
         
         card_layout.addWidget(toolbar)
         
@@ -573,6 +573,6 @@ class AdminFillRecordManager(QWidget):
         self.page_num_label.setText(f"{self.current_page} / {self.total_pages}")
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
-
+        
 
 

@@ -795,10 +795,8 @@ class AddCardDialog(QDialog):
         scroll.setStyleSheet("background: transparent;")
         
         self.fields_container = QWidget()
-        self.fields_layout = QVBoxLayout()
-        self.fields_layout.setContentsMargins(0, 0, 0, 0)
-        self.fields_layout.setSpacing(12)
-        self.fields_container.setLayout(self.fields_layout)
+        # 使用手动布局，不设置 Layout
+        self.fields_container.setMinimumHeight(100)
         
         scroll.setWidget(self.fields_container)
         main_layout.addWidget(scroll, 1)
@@ -808,6 +806,36 @@ class AddCardDialog(QDialog):
         # 底部按钮
         button_layout = QHBoxLayout()
         button_layout.setSpacing(15)
+        
+        # 如果是编辑模式，在左侧添加"复制为新名片"按钮
+        if self.card:
+            copy_btn = QPushButton("复制为新名片")
+            copy_btn.setFixedSize(140, 44)
+            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # 采用 Outline 风格：白底绿字，悬停变实心
+            copy_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 1.5px solid #34C759;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #34C759;
+                }
+                QPushButton:hover {
+                    background-color: #34C759;
+                    color: white;
+                    border-color: #34C759;
+                }
+                QPushButton:pressed {
+                    background-color: #248A3D;
+                    border-color: #248A3D;
+                    color: white;
+                }
+            """)
+            copy_btn.clicked.connect(self.copy_as_new_card)
+            button_layout.addWidget(copy_btn)
+        
         button_layout.addStretch()
         
         cancel_btn = QPushButton("取消")
@@ -928,6 +956,8 @@ class AddCardDialog(QDialog):
         """添加字段行"""
         # 创建可拖拽的行组件
         row_widget = DraggableFieldRow(key, value, self, fixed_template_id)
+        row_widget.setParent(self.fields_container)
+        row_widget.show()
         
         # 添加到列表
         self.field_rows.append({
@@ -935,11 +965,11 @@ class AddCardDialog(QDialog):
             'key_input': row_widget.key_input,
             'value_input': row_widget.value_input,
             'drag_btn': row_widget.drag_btn,
-            'fixed_template_id': fixed_template_id  # 存储固定模板ID
+            'fixed_template_id': fixed_template_id
         })
         
-        # 添加到布局
-        self.fields_layout.addWidget(row_widget)
+        # 更新位置
+        self._update_field_positions(animate=False)
     
     def remove_field_row(self, row_widget):
         """删除字段行"""
@@ -947,8 +977,53 @@ class AddCardDialog(QDialog):
             if row_data['widget'] == row_widget:
                 self.field_rows.remove(row_data)
                 row_widget.deleteLater()
+                self._update_field_positions(animate=True)
                 break
     
+    def _update_field_positions(self, animate=True, skip_widget=None):
+        """更新所有字段行位置"""
+        ROW_HEIGHT = 72
+        SPACING = 12
+        MARGIN_TOP = 0
+        
+        container_width = self.fields_container.width()
+        
+        for i, row_data in enumerate(self.field_rows):
+            widget = row_data['widget']
+            target_y = MARGIN_TOP + i * (ROW_HEIGHT + SPACING)
+            target_pos = QPoint(0, target_y)
+            
+            # 确保宽度跟随容器
+            if widget.width() != container_width:
+                widget.setFixedWidth(container_width)
+            
+            if widget == skip_widget:
+                continue
+                
+            if animate and widget.pos() != target_pos and widget.isVisible():
+                anim = QPropertyAnimation(widget, b"pos", self)
+                anim.setDuration(200)
+                anim.setStartValue(widget.pos())
+                anim.setEndValue(target_pos)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                anim.start()
+                # 保存引用防止被垃圾回收
+                if not hasattr(self, '_anims'): self._anims = []
+                self._anims.append(anim)
+                anim.finished.connect(lambda a=anim: self._anims.remove(a) if a in self._anims else None)
+            else:
+                widget.move(target_pos)
+        
+        # 更新容器高度
+        total_height = MARGIN_TOP + len(self.field_rows) * (ROW_HEIGHT + SPACING)
+        self.fields_container.setMinimumHeight(total_height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 窗口大小改变时，更新字段行宽度
+        if hasattr(self, 'field_rows'):
+            self._update_field_positions(animate=False)
+
     def add_field_alias(self, key_input):
         """添加字段别名"""
         from PyQt6.QtWidgets import QInputDialog
@@ -976,9 +1051,8 @@ class AddCardDialog(QDialog):
         row_data = self.field_rows.pop(from_index)
         self.field_rows.insert(to_index, row_data)
         
-        widget = row_data['widget']
-        self.fields_layout.removeWidget(widget)
-        self.fields_layout.insertWidget(to_index, widget)
+        # 更新位置（跳过正在拖拽的组件）
+        self._update_field_positions(animate=True, skip_widget=row_data['widget'])
     
     def import_from_field_library(self):
         """从官方字段库导入字段"""
@@ -1088,6 +1162,67 @@ class AddCardDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "失败", f"保存名片失败：{str(e)}")
     
+    def copy_as_new_card(self):
+        """复制为新名片"""
+        name = self.name_input.text().strip()
+        category = self.category_combo.currentText()
+        
+        if not name:
+            QMessageBox.warning(self, "提示", "请输入名片名称")
+            return
+        
+        # 收集字段（按顺序）
+        configs = []
+        print(f"DEBUG: 准备复制名片，当前字段行数: {len(self.field_rows)}")
+        
+        for i, row_data in enumerate(self.field_rows):
+            try:
+                key = row_data['key_input'].text().strip()
+                value = row_data['value_input'].text().strip()
+                print(f"  - 行 {i}: key='{key}', value='{value}'")
+                
+                if key:  # 只添加有字段名的
+                    config = {"key": key, "value": value}
+                    # 添加固定模板ID（如果有）
+                    template_id = row_data.get('fixed_template_id')
+                    if template_id:
+                        config['fixed_template_id'] = template_id
+                    configs.append(config)
+            except RuntimeError:
+                print(f"  - 行 {i}: 组件已被删除，跳过")
+                continue
+        
+        print(f"DEBUG: 收集到的有效配置数: {len(configs)}")
+        
+        if not configs:
+            QMessageBox.warning(self, "提示", "请至少添加一个字段")
+            return
+        
+        # 生成新名片名称（添加副本后缀）
+        new_name = f"{name}(副本)"
+        
+        # 检查名称是否重复，如果重复则添加数字后缀
+        existing_cards = self.db_manager.get_all_cards(user=self.current_user)
+        existing_names = {card.name for card in existing_cards}
+        
+        counter = 1
+        while new_name in existing_names:
+            new_name = f"{name}(副本{counter})"
+            counter += 1
+        
+        # 创建新名片
+        try:
+            self.db_manager.create_card(
+                name=new_name,
+                configs=configs,
+                user=self.current_user,
+                category=category
+            )
+            QMessageBox.information(self, "成功", f"名片已复制为：{new_name}")
+            self.accept()
+        except Exception as e:
+            QMessageBox.warning(self, "失败", f"复制名片失败：{str(e)}")
+    
     def load_card_data(self):
         """加载名片数据（编辑模式）"""
         if not self.card:
@@ -1172,6 +1307,7 @@ class DraggableFieldRow(QWidget):
     
     def init_ui(self, key, value):
         """初始化UI"""
+        self.setFixedHeight(72)
         self.setStyleSheet("""
             DraggableFieldRow {
                 background: #FAFAFA;
@@ -1327,6 +1463,8 @@ class DraggableFieldRow(QWidget):
                 if event.button() == Qt.MouseButton.LeftButton:
                     self.dragging = True
                     self.drag_start_pos = event.globalPosition().toPoint()
+                    self.widget_start_pos = self.pos()
+                    self.raise_()  # 提到最上层
                     self.setStyleSheet("""
                         DraggableFieldRow {
                             background: #E3F2FD;
@@ -1341,8 +1479,11 @@ class DraggableFieldRow(QWidget):
                 if self.dragging:
                     # 计算移动距离
                     delta = event.globalPosition().toPoint() - self.drag_start_pos
-                    if abs(delta.y()) > 10:  # 移动超过10px才触发
-                        self.handle_drag(delta.y())
+                    new_y = self.widget_start_pos.y() + delta.y()
+                    
+                    # 移动自身
+                    self.move(self.x(), new_y)
+                    self.handle_drag(delta.y())
                     return True
             
             elif event.type() == QEvent.Type.MouseButtonRelease:
@@ -1355,38 +1496,38 @@ class DraggableFieldRow(QWidget):
                             padding: 6px;
                         }
                     """)
+                    # 归位
+                    if self.parent_dialog:
+                        self.parent_dialog._update_field_positions(animate=True)
                     return True
         
         return super().eventFilter(obj, event)
     
-    def handle_drag(self, delta_y):
+    def handle_drag(self, delta_y=0):
         """处理拖拽移动"""
         if not self.parent_dialog:
             return
         
-        # 获取当前索引
-        current_index = None
-        for i, row_data in enumerate(self.parent_dialog.field_rows):
-            if row_data['widget'] == self:
+        # 使用常量
+        ROW_HEIGHT = 72
+        SPACING = 12
+        UNIT_HEIGHT = ROW_HEIGHT + SPACING
+        
+        # 计算当前中心点所在的行索引
+        center_y = self.y() + self.height() / 2
+        target_index = int(center_y / UNIT_HEIGHT)
+        target_index = max(0, min(target_index, len(self.parent_dialog.field_rows) - 1))
+        
+        # 查找当前在列表中的索引
+        current_index = -1
+        for i, row in enumerate(self.parent_dialog.field_rows):
+            if row['widget'] == self:
                 current_index = i
                 break
         
-        if current_index is None:
-            return
-        
-        # 根据移动方向判断目标位置
-        row_height = self.height()
-        move_rows = delta_y // row_height
-        
-        if move_rows == 0:
-            return
-        
-        target_index = current_index + move_rows
-        target_index = max(0, min(target_index, len(self.parent_dialog.field_rows) - 1))
-        
-        if target_index != current_index:
+        # 如果索引变化，触发交换
+        if current_index != -1 and current_index != target_index:
             self.parent_dialog.move_field_row(current_index, target_index)
-            self.drag_start_pos = self.drag_btn.mapToGlobal(self.drag_btn.rect().center())
 
 
 class CollapsibleCategoryWidget(QWidget):
@@ -2716,10 +2857,10 @@ class AllRecordsDialog(QDialog):
         header.addStretch()
         
         # 刷新按钮
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setIcon(Icons.refresh(COLORS['primary']))
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.setStyleSheet(f"""
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setIcon(Icons.refresh(COLORS['primary']))
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']}15;
                 color: {COLORS['primary']};
@@ -2732,8 +2873,8 @@ class AllRecordsDialog(QDialog):
                 background: {COLORS['primary']}25;
             }}
         """)
-        refresh_btn.clicked.connect(self.load_records)
-        header.addWidget(refresh_btn)
+        self.refresh_btn.clicked.connect(lambda: self.load_records())
+        header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
         
@@ -2962,6 +3103,7 @@ class UserAvatarMenu(QPushButton):
         """)
         
         # 初始化菜单
+        self.menu_just_closed = False
         self.menu = QMenu(self)
         self.init_menu()
         
@@ -3027,9 +3169,24 @@ class UserAvatarMenu(QPushButton):
         action_exit.triggered.connect(QApplication.instance().quit)
         self.menu.addAction(action_exit)
         
+        self.menu.aboutToHide.connect(self._on_menu_close)
+        
+    def _on_menu_close(self):
+        self.menu_just_closed = True
+        QTimer.singleShot(200, self._reset_menu_closed)
+        
+    def _reset_menu_closed(self):
+        self.menu_just_closed = False
+        
+    def mousePressEvent(self, event):
+        if not self.menu.isVisible() and not self.menu_just_closed:
+            pos = self.mapToGlobal(QPoint(0, self.height() + 5))
+            self.menu.popup(pos)
+        super().mousePressEvent(event)
+        
     def enterEvent(self, event):
         """鼠标悬浮显示菜单"""
-        if not self.menu.isVisible():
+        if not self.menu.isVisible() and not self.menu_just_closed:
             # 计算位置：在头像正下方
             pos = self.mapToGlobal(QPoint(0, self.height() + 5))
             self.menu.popup(pos)

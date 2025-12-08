@@ -192,7 +192,7 @@ class TemplateListWidget(BaseListWidget):
     
     edit_template = pyqtSignal(object)
     toggle_template = pyqtSignal(object)
-    
+        
     def __init__(self, parent=None):
         super().__init__(TemplateListHeader, parent)
         
@@ -745,7 +745,7 @@ class AdminFixedTemplateManager(QWidget):
         # 使用自定义列表组件显示数据
         self.template_list.set_templates(templates)
         self.update_pagination()
-        
+            
     def show_add_dialog(self, template=None):
         # 获取当前主窗口的用户信息
         current_user = None

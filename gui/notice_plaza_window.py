@@ -110,8 +110,14 @@ class NoticeCardWidget(QFrame):
         
         header_layout.addStretch()
         
-        # 状态标签（如果是 active 就不显示，显示日期）
-        date_label = QLabel(self.notice.publish_date.strftime('%m-%d') if self.notice.publish_date else "")
+        # 显示日期范围（如果有），否则显示发布日期
+        if hasattr(self.notice, 'start_date') and self.notice.start_date and self.notice.end_date:
+            date_str = f"{self.notice.start_date.strftime('%m-%d')}~{self.notice.end_date.strftime('%m-%d')}"
+        elif self.notice.publish_date:
+            date_str = self.notice.publish_date.strftime('%m-%d')
+        else:
+            date_str = ""
+        date_label = QLabel(date_str)
         date_label.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 12px;")
         header_layout.addWidget(date_label)
         
@@ -136,6 +142,12 @@ class NoticeCardWidget(QFrame):
         brand_layout.addWidget(brand_label)
         brand_layout.addStretch()
         layout.addLayout(brand_layout)
+        
+        # 增加主题显示
+        if hasattr(self.notice, 'subject') and self.notice.subject:
+            subject_label = QLabel(f"【主题】{self.notice.subject}")
+            subject_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px; margin-top: 2px;")
+            layout.addWidget(subject_label)
         
         # 3. 关键数据卡片
         data_container = QWidget()
@@ -324,7 +336,7 @@ class NoticePlazaWindow(QMainWindow):
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
         self.start_date.setDisplayFormat("yyyy-MM-dd")
-        self.start_date.setDate(QDate.currentDate())
+        self.start_date.setDate(QDate.currentDate().addDays(-60))  # 默认从60天前开始
         self.start_date.setFixedWidth(130)
         self.start_date.setStyleSheet(f"""
             QDateEdit {{ {input_style} }}
@@ -334,7 +346,7 @@ class NoticePlazaWindow(QMainWindow):
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
         self.end_date.setDisplayFormat("yyyy-MM-dd")
-        self.end_date.setDate(QDate.currentDate().addDays(30))
+        self.end_date.setDate(QDate.currentDate().addDays(60))  # 默认到60天后
         self.end_date.setFixedWidth(130)
         self.end_date.setStyleSheet(f"""
             QDateEdit {{ {input_style} }}
@@ -522,19 +534,32 @@ class NoticePlazaWindow(QMainWindow):
                 item.widget().deleteLater()
         
         # 获取筛选条件
+        # 1. 粉丝要求
         min_fans = None
         fans_text = self.fans_combo.currentText()
-        if "1000+" in fans_text: min_fans = 1000
-        elif "5000+" in fans_text: min_fans = 5000
-        elif "1w+" in fans_text: min_fans = 10000
-        elif "5w+" in fans_text: min_fans = 50000
-        elif "10w+" in fans_text: min_fans = 100000
+        if fans_text != "不限":
+            if "1000+" in fans_text: min_fans = 1000
+            elif "5000+" in fans_text: min_fans = 5000
+            elif "1w+" in fans_text: min_fans = 10000
+            elif "5w+" in fans_text: min_fans = 50000
+            elif "10w+" in fans_text: min_fans = 100000
+        
+        # 2. 时间区间
+        from datetime import datetime
+        start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
+        end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time().replace(microsecond=0))
+        
+        # 3. 报酬筛选
+        max_reward = self.reward_combo.currentText()
         
         # 获取数据
         notices = self.db_manager.get_all_notices(
             category=self.current_category,
             platform=self.current_platform,
-            min_fans=min_fans
+            min_fans=min_fans,
+            start_date=start_date,
+            end_date=end_date,
+            max_reward=max_reward
         )
         
         # 简单的分页逻辑

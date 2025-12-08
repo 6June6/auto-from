@@ -104,7 +104,7 @@ class CardRowWidget(QFrame):
                 background: #fafbfc;
             }}
         """)
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(0)
@@ -1183,7 +1183,7 @@ class AdminCardManager(QWidget):
         self.page_num_label.setText(f"{self.current_page} / {self.total_pages}")
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
-        
+            
     def view_card(self, card):
         """查看名片详情"""
         dialog = AdminCardViewDialog(card, self)

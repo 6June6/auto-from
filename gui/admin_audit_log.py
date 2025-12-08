@@ -100,7 +100,7 @@ class AuditRowWidget(QFrame):
                 background: #fafbfc;
             }}
         """)
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(0)
@@ -231,7 +231,7 @@ class AuditListWidget(QWidget):
         super().__init__(parent)
         self.row_widgets = []
         self._setup_ui()
-    
+        
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

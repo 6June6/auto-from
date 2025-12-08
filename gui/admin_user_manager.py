@@ -207,7 +207,22 @@ class UserEditDialog(QDialog):
                 background: white;
                 border-color: #cbd5e1;
             }}
+            QLineEdit:disabled, QComboBox:disabled, QDateTimeEdit:disabled, QSpinBox:disabled {{
+                background: #e2e8f0;
+                color: #94a3b8;
+                border-color: #e2e8f0;
+            }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
+            QDateTimeEdit::drop-down {{
+                border: none;
+                width: 30px;
+                subcontrol-position: right center;
+            }}
+            QDateTimeEdit::down-arrow {{
+                image: none;
+                width: 16px;
+                height: 16px;
+            }}
         """
         form_widget.setStyleSheet(self.input_style)
         
@@ -240,8 +255,10 @@ class UserEditDialog(QDialog):
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         
-        # 左：有效期
-        expire_box = QVBoxLayout()
+        # 左：有效期 (使用容器控制宽度)
+        expire_container = QWidget()
+        expire_box = QVBoxLayout(expire_container)
+        expire_box.setContentsMargins(0, 0, 0, 0)
         expire_box.setSpacing(8)
         expire_header = QHBoxLayout()
         expire_label = QLabel("账户有效期")
@@ -255,22 +272,32 @@ class UserEditDialog(QDialog):
         self.expire_edit = QDateTimeEdit()
         self.expire_edit.setCalendarPopup(True)
         self.expire_edit.setDisplayFormat("yyyy-MM-dd")
-        self.expire_edit.setDateTime(QDateTime.currentDateTime().addDays(30))
+        self.expire_edit.setDateTime(QDateTime.currentDateTime().addDays(5))
         self.expire_edit.setEnabled(False)
+        
+        # 设置日历弹出窗口样式
+        self._setup_calendar_style(self.expire_edit)
         
         self.expire_check.stateChanged.connect(
             lambda state: self.expire_edit.setEnabled(state == Qt.CheckState.Checked.value)
         )
         if self.user and self.user.expire_time:
+            # 编辑用户时，如果有有效期则勾选
             self.expire_check.setChecked(True)
             self.expire_edit.setDateTime(self.user.expire_time)
+        elif not self.user:
+            # 新建用户时，默认勾选并设置5天有效期
+            self.expire_check.setChecked(True)
+            self.expire_edit.setEnabled(True)
             
         expire_box.addLayout(expire_header)
         expire_box.addWidget(self.expire_edit)
-        row2.addLayout(expire_box)
+        row2.addWidget(expire_container, 1)  # stretch=1
         
-        # 右：最大使用次数
-        usage_box = QVBoxLayout()
+        # 右：最大使用次数 (使用容器控制宽度)
+        usage_container = QWidget()
+        usage_box = QVBoxLayout(usage_container)
+        usage_box.setContentsMargins(0, 0, 0, 0)
         usage_box.setSpacing(8)
         usage_label = QLabel("最大使用次数")
         usage_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-weight: 600; font-size: 13px;")
@@ -287,7 +314,7 @@ class UserEditDialog(QDialog):
         usage_box.addWidget(usage_label)
         usage_box.addWidget(self.usage_spin)
         usage_box.addWidget(usage_hint)
-        row2.addLayout(usage_box)
+        row2.addWidget(usage_container, 1)  # stretch=1，与左边等宽
         
         form_layout.addLayout(row2)
         
@@ -393,6 +420,130 @@ class UserEditDialog(QDialog):
                 image: url(gui/assets/check.png); /* 这里的图标如果没有可能不显示，但颜色会变 */
             }}
         """
+    
+    def _setup_calendar_style(self, date_edit):
+        """为日期选择器设置清晰的日历弹出样式"""
+        calendar = date_edit.calendarWidget()
+        if calendar:
+            calendar.setStyleSheet(f"""
+                /* 日历整体背景 */
+                QCalendarWidget {{
+                    background-color: white;
+                    border: 1px solid {PREMIUM_COLORS['border']};
+                    border-radius: 8px;
+                }}
+                
+                /* 导航栏（年月选择区域） */
+                QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                    background-color: {PREMIUM_COLORS['gradient_blue_start']};
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                    padding: 8px;
+                    min-height: 40px;
+                }}
+                
+                /* 月份/年份按钮 */
+                QCalendarWidget QToolButton {{
+                    color: white;
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 14px;
+                    font-weight: 600;
+                }}
+                QCalendarWidget QToolButton:hover {{
+                    background-color: rgba(255, 255, 255, 0.2);
+                }}
+                QCalendarWidget QToolButton:pressed {{
+                    background-color: rgba(255, 255, 255, 0.3);
+                }}
+                
+                /* 左右箭头按钮 */
+                QCalendarWidget QToolButton#qt_calendar_prevmonth,
+                QCalendarWidget QToolButton#qt_calendar_nextmonth {{
+                    qproperty-icon: none;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: bold;
+                    min-width: 30px;
+                }}
+                QCalendarWidget QToolButton#qt_calendar_prevmonth {{
+                    qproperty-text: "◀";
+                }}
+                QCalendarWidget QToolButton#qt_calendar_nextmonth {{
+                    qproperty-text: "▶";
+                }}
+                
+                /* 年月下拉菜单 */
+                QCalendarWidget QMenu {{
+                    background-color: white;
+                    border: 1px solid {PREMIUM_COLORS['border']};
+                    border-radius: 6px;
+                    padding: 4px;
+                }}
+                QCalendarWidget QMenu::item {{
+                    padding: 8px 20px;
+                    border-radius: 4px;
+                    color: {PREMIUM_COLORS['text_heading']};
+                }}
+                QCalendarWidget QMenu::item:selected {{
+                    background-color: {PREMIUM_COLORS['primary_light']};
+                    color: {PREMIUM_COLORS['gradient_blue_start']};
+                }}
+                
+                /* 年份输入框 */
+                QCalendarWidget QSpinBox {{
+                    background-color: rgba(255, 255, 255, 0.2);
+                    border: 1px solid rgba(255, 255, 255, 0.3);
+                    border-radius: 4px;
+                    color: white;
+                    padding: 4px 8px;
+                    font-size: 13px;
+                    selection-background-color: rgba(255, 255, 255, 0.3);
+                }}
+                QCalendarWidget QSpinBox::up-button,
+                QCalendarWidget QSpinBox::down-button {{
+                    width: 16px;
+                    background-color: transparent;
+                    border: none;
+                }}
+                
+                /* 星期标题行 */
+                QCalendarWidget QWidget {{
+                    alternate-background-color: #f8fafc;
+                }}
+                
+                /* 日期表格 */
+                QCalendarWidget QAbstractItemView:enabled {{
+                    background-color: white;
+                    color: {PREMIUM_COLORS['text_heading']};
+                    selection-background-color: {PREMIUM_COLORS['gradient_blue_start']};
+                    selection-color: white;
+                    outline: none;
+                    font-size: 13px;
+                }}
+                
+                /* 日期单元格 */
+                QCalendarWidget QAbstractItemView:enabled {{
+                    border: none;
+                }}
+                
+                /* 星期标题 */
+                QCalendarWidget QHeaderView::section {{
+                    background-color: #f1f5f9;
+                    color: {PREMIUM_COLORS['text_body']};
+                    font-weight: 600;
+                    font-size: 11px;
+                    padding: 6px;
+                    border: none;
+                }}
+                
+                /* 周末颜色 (周六周日) */
+                QCalendarWidget QAbstractItemView:enabled {{
+                    color: {PREMIUM_COLORS['text_heading']};
+                }}
+            """)
         
     def save_user(self):
         username = self.username_input.text().strip()

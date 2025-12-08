@@ -478,6 +478,7 @@ class Notification(Document):
 class Notice(Document):
     """通告广场-通告模型"""
     title = StringField(required=True, max_length=200, verbose_name="标题")
+    subject = StringField(max_length=200, verbose_name="主题")  # 新增主题字段
     platform = StringField(required=True, max_length=50, verbose_name="平台")
     category = StringField(max_length=50, verbose_name="类目")
     brand = StringField(max_length=100, verbose_name="品牌")
@@ -527,6 +528,7 @@ class Notice(Document):
         return {
             'id': str(self.id),
             'title': self.title,
+            'subject': self.subject,
             'platform': self.platform,
             'category': self.category,
             'brand': self.brand,
@@ -909,7 +911,8 @@ def create_default_data():
         if Notice.objects.count() == 0:
             notices_data = [
                 {
-                    'title': '安踏儿童探店打卡',
+                    'title': '安踏儿童探店打卡招募',
+                    'subject': '探店打卡',
                     'platform': '小红书',
                     'category': '母婴',
                     'brand': '安踏儿童',
@@ -924,7 +927,8 @@ def create_default_data():
                     'created_by': admin_user
                 },
                 {
-                    'title': '美妆新品试色',
+                    'title': '美妆新品试色活动',
+                    'subject': '新品试色',
                     'platform': '抖音',
                     'category': '美妆',
                     'brand': '花西子',
@@ -939,7 +943,8 @@ def create_default_data():
                     'created_by': admin_user
                 },
                 {
-                    'title': '数码测评-蓝牙耳机',
+                    'title': '数码测评-蓝牙耳机体验',
+                    'subject': '产品测评',
                     'platform': 'B站',
                     'category': '科技数码',
                     'brand': 'Sony',
