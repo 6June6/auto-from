@@ -48,6 +48,7 @@ jobs:
         with:
           name: Windows-App
           path: dist/自动表单填写工具-Windows/
+          retention-days: 3
 
   build-macos-intel:
     runs-on: macos-13 # Intel Mac
@@ -75,6 +76,7 @@ jobs:
         with:
           name: macOS-Intel-App
           path: dist/自动表单填写工具-Intel.app/
+          retention-days: 3
 
   build-macos-arm:
     runs-on: macos-14 # Apple Silicon Mac
@@ -101,3 +103,4 @@ jobs:
         with:
           name: macOS-AppleSilicon-App
           path: dist/自动表单填写工具-AppleSilicon.app/
+          retention-days: 3
