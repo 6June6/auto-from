@@ -3169,28 +3169,51 @@ class UserAvatarMenu(QPushButton):
         action_exit.triggered.connect(QApplication.instance().quit)
         self.menu.addAction(action_exit)
         
+        # Windows 兼容：使用 aboutToHide 和 triggered 信号来跟踪菜单状态
         self.menu.aboutToHide.connect(self._on_menu_close)
         
     def _on_menu_close(self):
+        """菜单关闭时设置标志，防止立即重新弹出"""
         self.menu_just_closed = True
-        QTimer.singleShot(200, self._reset_menu_closed)
+        # Windows 下需要更长的延迟，并使用更可靠的方式重置
+        QTimer.singleShot(300, self._reset_menu_closed)
         
     def _reset_menu_closed(self):
+        """重置菜单关闭标志"""
         self.menu_just_closed = False
         
+    def _show_menu(self):
+        """显示菜单的通用方法"""
+        if self.menu.isVisible():
+            return
+        if self.menu_just_closed:
+            return
+        # 计算位置：在头像正下方
+        pos = self.mapToGlobal(QPoint(0, self.height() + 5))
+        self.menu.popup(pos)
+        
     def mousePressEvent(self, event):
-        if not self.menu.isVisible() and not self.menu_just_closed:
-            pos = self.mapToGlobal(QPoint(0, self.height() + 5))
-            self.menu.popup(pos)
-        super().mousePressEvent(event)
+        """点击显示菜单"""
+        # Windows 兼容：如果菜单可见，先隐藏
+        if self.menu.isVisible():
+            self.menu.hide()
+        else:
+            # 强制重置标志（解决 Windows 下标志未正确重置的问题）
+            self.menu_just_closed = False
+            self._show_menu()
+        # 不调用 super，避免默认行为干扰
+        event.accept()
         
     def enterEvent(self, event):
         """鼠标悬浮显示菜单"""
-        if not self.menu.isVisible() and not self.menu_just_closed:
-            # 计算位置：在头像正下方
-            pos = self.mapToGlobal(QPoint(0, self.height() + 5))
-            self.menu.popup(pos)
+        self._show_menu()
         super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """鼠标离开时重置标志（Windows 兼容）"""
+        # 延迟重置，确保菜单有时间响应
+        QTimer.singleShot(100, lambda: setattr(self, 'menu_just_closed', False) if not self.menu.isVisible() else None)
+        super().leaveEvent(event)
 
     def change_password(self):
         dialog = ChangePasswordDialog(self.user, self.parent_window)
