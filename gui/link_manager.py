@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QSplitter, QProgressBar, QFrame, QScrollArea,
                              QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPalette
 from database import DatabaseManager, Link
 from core.ai_parser import AIParser
 from .icons import Icons
@@ -23,6 +23,74 @@ LINK_LIST_COLUMNS = {
     'status': 70,
     'actions': 160
 }
+
+# QMessageBox 按钮样式修复
+MESSAGEBOX_STYLE = """
+    QMessageBox {
+        background-color: #FFFFFF;
+    }
+    QMessageBox QLabel {
+        color: #1D1D1F;
+        font-size: 14px;
+    }
+    QMessageBox QPushButton {
+        background-color: #007AFF;
+        color: #FFFFFF;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 20px;
+        font-size: 13px;
+        font-weight: 600;
+        min-width: 70px;
+    }
+    QMessageBox QPushButton:hover {
+        background-color: #0056CC;
+    }
+    QMessageBox QPushButton:pressed {
+        background-color: #004099;
+    }
+"""
+
+
+def show_info(parent, title, message):
+    """显示信息对话框"""
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Information)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(MESSAGEBOX_STYLE)
+    msg.exec()
+
+
+def show_warning(parent, title, message):
+    """显示警告对话框"""
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Warning)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(MESSAGEBOX_STYLE)
+    msg.exec()
+
+
+def show_error(parent, title, message):
+    """显示错误对话框"""
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Critical)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(MESSAGEBOX_STYLE)
+    msg.exec()
+
+
+def show_question(parent, title, message):
+    """显示确认对话框，返回是否点击了Yes"""
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Question)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    msg.setStyleSheet(MESSAGEBOX_STYLE)
+    return msg.exec() == QMessageBox.StandardButton.Yes
 
 # 解析结果列宽配置
 PARSE_RESULT_COLUMNS = {
@@ -149,15 +217,15 @@ class LinkRowWidget(QFrame):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(6)
         
-        edit_btn = create_action_button("编辑", PREMIUM_COLORS['primary'], size=(48, 26))
+        edit_btn = self._create_row_action_button("编辑", PREMIUM_COLORS['primary'])
         edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.link))
         actions_layout.addWidget(edit_btn)
         
-        copy_btn = create_action_button("复制", PREMIUM_COLORS['info'], size=(48, 26))
+        copy_btn = self._create_row_action_button("复制", PREMIUM_COLORS['info'])
         copy_btn.clicked.connect(lambda: self.copy_clicked.emit(self.link))
         actions_layout.addWidget(copy_btn)
         
-        del_btn = create_action_button("删除", PREMIUM_COLORS['danger'], size=(48, 26))
+        del_btn = self._create_row_action_button("删除", PREMIUM_COLORS['danger'])
         del_btn.clicked.connect(lambda: self.delete_clicked.emit(self.link))
         actions_layout.addWidget(del_btn)
         
@@ -186,6 +254,35 @@ class LinkRowWidget(QFrame):
             border-radius: 11px;
         """)
         return label
+    
+    def _create_row_action_button(self, text, color):
+        """创建行操作按钮 - 使用实心彩色背景"""
+        btn = QPushButton()
+        btn.setFixedSize(48, 26)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {color};
+                border: none;
+                border-radius: 13px;
+            }}
+        """)
+        
+        # 使用 QLabel 作为按钮内容来确保文字颜色正确
+        label = QLabel(text, btn)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                background: transparent;
+                font-size: 11px;
+                font-weight: 600;
+            }
+        """)
+        label.setGeometry(0, 0, 48, 26)
+        label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        
+        return btn
 
 
 class LinkListWidget(QWidget):
@@ -707,22 +804,16 @@ class LinkManagerDialog(QDialog):
         from PyQt6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         clipboard.setText(link.url)
-        QMessageBox.information(self, "成功", "URL 已复制到剪贴板")
+        show_info(self, "成功", "URL 已复制到剪贴板")
     
     def delete_link(self, link: Link):
         """删除链接"""
-        reply = QMessageBox.question(
-            self, "确认删除",
-            f"确定要删除链接 '{link.name}' 吗？\n此操作不可撤销！",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
+        if show_question(self, "确认删除", f"确定要删除链接 '{link.name}' 吗？\n此操作不可撤销！"):
             if self.db_manager.delete_link(link.id):
-                QMessageBox.information(self, "成功", "链接已删除")
+                show_info(self, "成功", "链接已删除")
                 self.load_data()
             else:
-                QMessageBox.critical(self, "错误", "删除失败")
+                show_error(self, "错误", "删除失败")
 
 
 class AIParseThread(QThread):
@@ -994,7 +1085,7 @@ class SmartAddLinkDialog(QDialog):
         """开始 AI 解析"""
         text = self.text_edit.toPlainText().strip()
         if not text:
-            QMessageBox.warning(self, "提示", "请先粘贴文本")
+            show_warning(self, "提示", "请先粘贴文本")
             return
             
         self.btn_ai_parse.setEnabled(False)
@@ -1013,18 +1104,18 @@ class SmartAddLinkDialog(QDialog):
         self.progress_bar.hide()
         
         if not links:
-            QMessageBox.information(self, "提示", "未识别到有效的链接信息")
+            show_info(self, "提示", "未识别到有效的链接信息")
             return
             
         self.populate_list(links)
-        QMessageBox.information(self, "成功", f"AI 成功解析出 {len(links)} 个链接！")
+        show_info(self, "成功", f"AI 成功解析出 {len(links)} 个链接！")
         
     def on_ai_parse_error(self, error_msg):
         """AI 解析出错"""
         self.btn_ai_parse.setEnabled(True)
         self.btn_ai_parse.setText("✨ DeepSeek 智能解析")
         self.progress_bar.hide()
-        QMessageBox.warning(self, "解析失败", f"AI 解析出错: {error_msg}\n请检查网络或配置。")
+        show_warning(self, "解析失败", f"AI 解析出错: {error_msg}\n请检查网络或配置。")
     
     def parse_content_regex(self):
         """本地正则解析（快速预览）"""
@@ -1169,19 +1260,14 @@ class SmartAddLinkDialog(QDialog):
             warning_text = "\n\n".join(warning_msgs)
             if valid_links:
                 warning_text += f"\n\n确定要继续保存 {len(valid_links)} 个链接吗？"
-                reply = QMessageBox.question(
-                    self, "保存确认",
-                    warning_text,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+                if not show_question(self, "保存确认", warning_text):
                     return
             else:
-                QMessageBox.warning(self, "无法保存", "没有可保存的有效链接。\n\n" + warning_text)
+                show_warning(self, "无法保存", "没有可保存的有效链接。\n\n" + warning_text)
                 return
         
         if not valid_links:
-            QMessageBox.warning(self, "提示", "没有可保存的有效链接")
+            show_warning(self, "提示", "没有可保存的有效链接")
             return
             
         # 执行保存
@@ -1233,9 +1319,9 @@ class SmartAddLinkDialog(QDialog):
         msg = "处理完成：\n" + "\n".join(msg_parts)
         
         if error_count > 0:
-            QMessageBox.warning(self, "导入完成", msg)
+            show_warning(self, "导入完成", msg)
         else:
-            QMessageBox.information(self, "导入完成", msg)
+            show_info(self, "导入完成", msg)
             
         self.accept()
 
@@ -1417,15 +1503,15 @@ class LinkEditDialog(QDialog):
         url = self.url_input.text().strip()
         
         if not name:
-            QMessageBox.warning(self, "警告", "请输入链接名称")
+            show_warning(self, "警告", "请输入链接名称")
             return
         
         if not url:
-            QMessageBox.warning(self, "警告", "请输入 URL")
+            show_warning(self, "警告", "请输入 URL")
             return
         
         if not url.startswith(('http://', 'https://')):
-            QMessageBox.warning(self, "警告", "URL 必须以 http:// 或 https:// 开头")
+            show_warning(self, "警告", "URL 必须以 http:// 或 https:// 开头")
             return
         
         category = self.category_input.text().strip() or None
@@ -1448,11 +1534,11 @@ class LinkEditDialog(QDialog):
                     status=status,
                     description=description
                 )
-                QMessageBox.information(self, "成功", "链接已更新")
+                show_info(self, "成功", "链接已更新")
             else:
                 self.db_manager.create_link(name, url, self.current_user, status, category, description)
-                QMessageBox.information(self, "成功", "链接已创建")
+                show_info(self, "成功", "链接已创建")
             
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存失败: {str(e)}")
+            show_error(self, "错误", f"保存失败: {str(e)}")
