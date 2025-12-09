@@ -489,8 +489,8 @@ class NewFillWindow(QDialog):
         container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         
         # ⚡️ 启用实时渲染，避免延迟
-        container.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-        container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        # container.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        # container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -638,8 +638,8 @@ class NewFillWindow(QDialog):
         """)
         
         # ⚡️ 启用实时渲染
-        container.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-        container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        # container.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        # container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -741,8 +741,8 @@ class NewFillWindow(QDialog):
         web_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # ⚡️ 禁用双缓冲优化，确保实时渲染
-        web_view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-        web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        # web_view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
         # 创建独立 Profile（参考 auto_fill_window.py）
@@ -2067,24 +2067,75 @@ class NewFillWindow(QDialog):
         
         link_id = str(current_link.id)
         
+        # ⚡️ 清理其他标签页的资源，减少内存占用和卡顿
+        self.unload_inactive_tabs(link_id)
+        
         # ⚡️ 强制刷新当前标签页的UI
         current_widget = self.tab_widget.currentWidget()
         if current_widget:
             current_widget.update()
-            QApplication.processEvents()
+            # QApplication.processEvents()
             
         # 获取该链接的WebView信息
         webview_infos = self.web_views_by_link.get(link_id, [])
         
-        # ⚡️ 懒加载检查：如果该链接尚未初始化加载队列，则开始加载
+        # 检查是否需要加载（如果是首次访问，或之前被清理了）
+        needs_load = False
+        
         if not hasattr(self, 'loading_queues') or link_id not in self.loading_queues:
-             print(f"⚡️ 首次访问，开始加载链接 '{current_link.name}' 的WebView...")
-             # 这会初始化队列并开始加载第一批
+             needs_load = True
+        else:
+             # 检查是否有任何已加载的 view，如果没有（被unload了），也视为需要加载
+             has_views = any(info.get('web_view') for info in webview_infos)
+             if not has_views:
+                 needs_load = True
+        
+        if needs_load:
+             print(f"⚡️ 激活标签页，开始加载链接 '{current_link.name}' 的WebView...")
+             # 重新初始化加载队列并开始加载
              self.load_webviews_only(webview_infos)
         else:
              # 如果已经初始化过，检查是否有挂起的加载任务（继续加载剩余的）
              # 或者只是单纯的切换显示（WebView已经创建）
              pass
+             
+    def unload_inactive_tabs(self, active_link_id: str):
+        """销毁非当前标签页的 WebView 以释放资源"""
+        print(f"🧹 正在清理非当前标签页资源，保留: {active_link_id}")
+        
+        # 遍历所有链接的 WebView 信息
+        for link_id, webview_infos in self.web_views_by_link.items():
+            if link_id == active_link_id:
+                continue
+                
+            # 清理该链接下的所有 WebView
+            destroyed_count = 0
+            for info in webview_infos:
+                if info.get('web_view'):
+                    web_view = info['web_view']
+                    # 停止加载并销毁
+                    try:
+                        web_view.stop()
+                        web_view.setParent(None)
+                        web_view.deleteLater()
+                    except Exception as e:
+                        print(f"⚠️ 销毁 WebView 失败: {e}")
+                    
+                    # 重置信息
+                    info['web_view'] = None
+                    info['loaded'] = False
+                    destroyed_count += 1
+            
+            if destroyed_count > 0:
+                print(f"  - 已销毁链接 {link_id} 的 {destroyed_count} 个 WebView")
+            
+            # 清理加载队列，防止后台继续加载
+            if hasattr(self, 'loading_queues') and link_id in self.loading_queues:
+                del self.loading_queues[link_id]
+                
+        # 强制垃圾回收
+        import gc
+        gc.collect()
         
     def refresh_webview(self, link_id: str, index: int):
         """刷新指定的WebView"""
@@ -2220,8 +2271,8 @@ class NewFillWindow(QDialog):
         web_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # ⚡️ 禁用双缓冲优化，确保实时渲染
-        web_view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-        web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        # web_view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
         # 创建独立 Profile
@@ -2258,7 +2309,7 @@ class NewFillWindow(QDialog):
         # ⚡️ 强制刷新UI，确保WebView立即显示
         web_view.show()
         placeholder.update()
-        QApplication.processEvents()  # 处理挂起的事件，立即刷新UI
+        # QApplication.processEvents()  # 处理挂起的事件，立即刷新UI
         
         return web_view
     
@@ -2305,7 +2356,7 @@ class NewFillWindow(QDialog):
             
             # ⚡️ 强制刷新，确保加载立即可见
             web_view.show()
-            web_view.update()
+            # web_view.update()
     
     def load_next_batch(self, batch_size):
         """加载下一批WebView（兼容旧方法）"""
@@ -2339,7 +2390,7 @@ class NewFillWindow(QDialog):
             
             # ⚡️ 强制刷新，确保加载立即可见
             web_view.show()
-            web_view.update()
+            # web_view.update()
     
     def on_batch_webview_loaded(self, web_view: QWebEngineView, success: bool):
         """批量加载时的回调"""
@@ -2361,7 +2412,7 @@ class NewFillWindow(QDialog):
         
         # ⚡️ 加载完成后强制刷新UI
         web_view.update()
-        QApplication.processEvents()
+        # QApplication.processEvents()
         
         # ⚡️ 逻辑优化：如果是被手动禁用（如刷新）的自动填充，
         # 在页面加载完成2秒后，自动恢复自动填充能力（is_auto_fill_active -> True）
@@ -2408,8 +2459,8 @@ class NewFillWindow(QDialog):
             if hasattr(self, 'loading_queues') and link_id in self.loading_queues and self.loading_queues[link_id]:
                 # 继续加载该链接的下一批
                 print(f"\n⏭️  链接 {link_id} 继续加载下一批（剩余 {len(self.loading_queues[link_id])} 个）")
-                # 使用默认参数捕获link_id的当前值，避免闭包问题
-                QTimer.singleShot(500, lambda lid=link_id: self.load_next_batch_for_link(lid, BATCH_SIZE))
+                # ⚡️ 优化：增加加载间隔，减轻卡顿
+                QTimer.singleShot(800, lambda lid=link_id: self.load_next_batch_for_link(lid, BATCH_SIZE))
             else:
                 # 该链接的所有WebView加载完成
                 loaded_count = sum(1 for info in webview_infos if info.get('loaded', False))
@@ -3222,33 +3273,74 @@ class NewFillWindow(QDialog):
         timer.setProperty("poll_count", 0)
         
         def check_login():
-            poll_count = timer.property("poll_count") or 0
-            timer.setProperty("poll_count", poll_count + 1)
-            
-            # 先检查是否需要刷新二维码
-            def handle_refresh_check(need_refresh):
-                if need_refresh:
-                    print(f"  🔄 [报名工具] 检测到刷新二维码请求")
-                    # 重置轮询计数
-                    timer.setProperty("poll_count", 0)
-                    # 调用API获取新二维码
-                    self.refresh_baoming_qrcode(web_view, filler)
-                else:
-                    # 继续正常的登录检查
-                    do_login_check()
-            
-            web_view.page().runJavaScript("window.__refreshQrCode__ === true", handle_refresh_check)
+            try:
+                from PyQt6 import sip
+            except ImportError:
+                import sip
+                
+            # ⚡️ 安全检查：如果 WebView 已被删除，停止定时器并退出
+            if sip.isdeleted(web_view):
+                print("🛑 WebView 已销毁，停止登录轮询")
+                timer.stop()
+                timer.deleteLater()
+                return
+
+            try:
+                # 再次检查 page 是否存在
+                if not web_view.page():
+                    timer.stop()
+                    return
+
+                poll_count = timer.property("poll_count") or 0
+                timer.setProperty("poll_count", poll_count + 1)
+                
+                # 先检查是否需要刷新二维码
+                def handle_refresh_check(need_refresh):
+                    # 异步回调中的安全检查
+                    if sip.isdeleted(web_view):
+                        return
+                        
+                    if need_refresh:
+                        print(f"  🔄 [报名工具] 检测到刷新二维码请求")
+                        # 重置轮询计数
+                        timer.setProperty("poll_count", 0)
+                        # 调用API获取新二维码
+                        self.refresh_baoming_qrcode(web_view, filler)
+                    else:
+                        # 继续正常的登录检查
+                        do_login_check()
+                
+                web_view.page().runJavaScript("window.__refreshQrCode__ === true", handle_refresh_check)
+            except RuntimeError:
+                print("⚠️ WebView 运行时错误，停止轮询")
+                timer.stop()
+            except Exception as e:
+                print(f"⚠️ 登录检查异常: {e}")
+                timer.stop()
         
         def do_login_check():
+            try:
+                from PyQt6 import sip
+            except ImportError:
+                import sip
+                
+            # 安全检查
+            if sip.isdeleted(web_view) or not web_view.page():
+                timer.stop()
+                return
+
             poll_count = timer.property("poll_count") or 0
             
             # 最多轮询120次（4分钟）
             if poll_count >= 120:
                 timer.stop()
-                web_view.page().runJavaScript(
-                    "document.getElementById('status').textContent = '登录超时，请点击刷新二维码';"
-                    "document.getElementById('status').className = 'status error';"
-                )
+                try:
+                    web_view.page().runJavaScript(
+                        "document.getElementById('status').textContent = '登录超时，请点击刷新二维码';"
+                        "document.getElementById('status').className = 'status error';"
+                    )
+                except Exception:
+                    pass
                 return
             
             status, msg, user_info = filler.check_login()
@@ -3277,6 +3369,8 @@ class NewFillWindow(QDialog):
                     "document.getElementById('status').className = 'status error';"
                 )
         
+        # 将定时器绑定到 WebView 上，方便销毁时查找（虽然已通过setProperty绑定，但这里是逻辑上的）
+        web_view.setProperty("baoming_login_timer", timer)
         timer.timeout.connect(check_login)
         timer.start(2000)  # 每2秒检查一次
         
@@ -3551,12 +3645,29 @@ class NewFillWindow(QDialog):
     def start_baoming_submit_check(self, web_view: QWebEngineView, filler, card):
         """开始检查报名工具提交"""
         timer = QTimer(self)
+        web_view.setProperty("baoming_submit_timer", timer) # 绑定以便清理
         
         def check_submit():
-            web_view.page().runJavaScript(
-                "window.__submitReady__ === true",
-                lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready else None
-            )
+            try:
+                from PyQt6 import sip
+            except ImportError:
+                import sip
+                
+            if sip.isdeleted(web_view) or not web_view.page():
+                timer.stop()
+                timer.deleteLater()
+                return
+
+            try:
+                web_view.page().runJavaScript(
+                    "window.__submitReady__ === true",
+                    lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready and not sip.isdeleted(web_view) else None
+                )
+            except RuntimeError:
+                timer.stop()
+            except Exception as e:
+                print(f"⚠️ 提交检查异常: {e}")
+                timer.stop()
         
         timer.timeout.connect(check_submit)
         timer.start(500)  # 每500ms检查一次
