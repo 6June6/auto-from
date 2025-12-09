@@ -23,13 +23,23 @@ jobs:
           pip install -r requirements.txt
           # 强制指定 Windows 兼容版本
           pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
-          pip install pyinstaller
+          pip install pyinstaller pillow
+
+      - name: Convert PNG to ICO
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('website/logo.png')
+          img.save('app_icon.ico', format='ICO', sizes=[(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)])
+          print('ICO icon created successfully')
+          "
 
       - name: Build Windows App
         shell: cmd
         run: |
           REM 显式收集关键依赖
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
+            --icon=app_icon.ico ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
             --collect-all requests ^
@@ -67,9 +77,28 @@ jobs:
           pip install "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
           pip install pyinstaller
 
+      - name: Create ICNS icon
+        run: |
+          mkdir -p app_icon.iconset
+          sips -z 16 16     website/logo.png --out app_icon.iconset/icon_16x16.png
+          sips -z 32 32     website/logo.png --out app_icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     website/logo.png --out app_icon.iconset/icon_32x32.png
+          sips -z 64 64     website/logo.png --out app_icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   website/logo.png --out app_icon.iconset/icon_128x128.png
+          sips -z 256 256   website/logo.png --out app_icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   website/logo.png --out app_icon.iconset/icon_256x256.png
+          sips -z 512 512   website/logo.png --out app_icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   website/logo.png --out app_icon.iconset/icon_512x512.png
+          sips -z 1024 1024 website/logo.png --out app_icon.iconset/icon_512x512@2x.png
+          iconutil -c icns app_icon.iconset -o app_icon.icns
+          echo "ICNS icon created successfully"
+
       - name: Build macOS Intel App
         run: |
-          pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean --osx-bundle-identifier=com.autofill.app main.py
+          pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
+            --icon=app_icon.icns \
+            --osx-bundle-identifier=com.autofill.app \
+            main.py
 
       - name: Upload macOS Intel Build
         uses: actions/upload-artifact@v4
@@ -94,9 +123,28 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Create ICNS icon
+        run: |
+          mkdir -p app_icon.iconset
+          sips -z 16 16     website/logo.png --out app_icon.iconset/icon_16x16.png
+          sips -z 32 32     website/logo.png --out app_icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     website/logo.png --out app_icon.iconset/icon_32x32.png
+          sips -z 64 64     website/logo.png --out app_icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   website/logo.png --out app_icon.iconset/icon_128x128.png
+          sips -z 256 256   website/logo.png --out app_icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   website/logo.png --out app_icon.iconset/icon_256x256.png
+          sips -z 512 512   website/logo.png --out app_icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   website/logo.png --out app_icon.iconset/icon_512x512.png
+          sips -z 1024 1024 website/logo.png --out app_icon.iconset/icon_512x512@2x.png
+          iconutil -c icns app_icon.iconset -o app_icon.icns
+          echo "ICNS icon created successfully"
+
       - name: Build macOS ARM App
         run: |
-          pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean --osx-bundle-identifier=com.autofill.app main.py
+          pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
+            --icon=app_icon.icns \
+            --osx-bundle-identifier=com.autofill.app \
+            main.py
 
       - name: Upload macOS ARM Build
         uses: actions/upload-artifact@v4
