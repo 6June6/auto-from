@@ -4,6 +4,7 @@
 MongoDB 版本
 """
 import sys
+import os  # 添加 os 导入
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt
@@ -53,6 +54,15 @@ def try_auto_login():
 
 def main():
     """主函数"""
+    # ⚡️ 强制开启 GPU 加速配置 (必须在 QApplication 创建前设置)
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        "--ignore-gpu-blocklist "
+        "--enable-gpu-rasterization "
+        "--enable-zero-copy "
+        "--enable-accelerated-video-decode "
+        "--enable-features=VaapiVideoDecoder,CanvasOopRasterization"
+    )
+    
     # 初始化数据库连接
     print("🔧 初始化 MongoDB 数据库...")
     if not init_database():
@@ -72,6 +82,9 @@ def main():
         sys.exit(1)
     
     print("✅ 数据库初始化完成")
+    
+    # ⚡️ 开启 OpenGL 上下文共享 (优化 WebEngine 渲染)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     
     # 创建应用
     app = QApplication(sys.argv)

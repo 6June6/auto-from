@@ -884,41 +884,51 @@ class NewFillWindow(QDialog):
         # 中间：类别名称 + 下箭头 (合并在一个容器中，可点击)
         center_container = QPushButton()
         center_container.setCursor(Qt.CursorShape.PointingHandCursor)
+        # ⚡️ 加大高度到 50px
+        center_container.setFixedHeight(50)
+        center_container.setMinimumWidth(200)  # 加大最小宽度到 200px
+        center_container.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         center_container.setStyleSheet(f"""
             QPushButton {{
                 background: white;
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 6px 12px;
+                border-radius: 8px; /* 加大圆角 */
+                padding: 0px 20px; /* 加大左右padding */
+                text-align: left;
             }}
             QPushButton:hover {{
                 border-color: {COLORS['primary']};
                 background: #F8F9FA;
             }}
         """)
-        center_layout = QHBoxLayout()
+        
+        center_layout = QHBoxLayout(center_container)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(8)
-        center_container.setLayout(center_layout)
+        center_layout.setSpacing(16) # 加大间距
         
-        # 保存引用以便后续绑定点击事件
-        self.category_selector_btn = center_container
-        
-        self.category_label = QLabel("美妆类")
+        # 1. 分类名称标签
+        self.category_label = QLabel("选择分类")
+        self.category_label.setFixedHeight(50) # 高度同步加大
         self.category_label.setStyleSheet(f"""
-            font-size: 15px;
-            font-weight: 600;
-            color: {COLORS['text_primary']};
-            border: none;
-            background: transparent;
+            QLabel {{
+                font-size: 18px; /* 字体加大 */
+                font-weight: 600;
+                color: {COLORS['text_primary']};
+                border: none;
+                background: transparent;
+            }}
         """)
-        center_layout.addWidget(self.category_label)
+        self.category_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        center_layout.addWidget(self.category_label, 1) # flex=1
         
+        # 2. 下箭头图标
         arrow_label = QLabel()
         arrow_label.setPixmap(Icons.chevron_down('gray').pixmap(12, 12))
         arrow_label.setStyleSheet("border: none; background: transparent;")
-        center_layout.addWidget(arrow_label)
+        arrow_label.setFixedSize(12, 12)
+        center_layout.addWidget(arrow_label, 0) # flex=0
         
+        self.category_selector_btn = center_container
         cat_layout.addWidget(center_container)
         
         # 右侧：切换按钮
@@ -960,7 +970,12 @@ class NewFillWindow(QDialog):
         
         layout.addWidget(category_box)
         layout.addWidget(self.category_combo)
-        self.category_combo.hide() 
+        # ⚡️ 修复：不能使用 hide()，否则无法弹出下拉框。改为设为0大小
+        # 同时要确保它在布局中不占据额外空间，但必须 visible
+        self.category_combo.setFixedSize(0, 0)
+        # 将其父对象设为 self，而不是添加到布局中，这样它就不会影响布局
+        # 但这样会导致无法弹出，所以还是得在布局里，但是尺寸为0
+        self.category_combo.setVisible(True)
         
         # 名片列表（可滚动）
         scroll = QScrollArea()
@@ -2598,7 +2613,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'tencent_docs'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'tencent_docs')
+            
+            QTimer.singleShot(3000, safe_get_result)
             
         elif form_type == 'mikecrm':
             # 麦客CRM需要列表格式
@@ -2621,7 +2644,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'mikecrm'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'mikecrm')
+
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'wjx':
             # 问卷星需要列表格式
@@ -2643,7 +2674,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'wjx'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'wjx')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'jinshuju':
             # 金数据需要列表格式
@@ -2665,7 +2704,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'jinshuju'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'jinshuju')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'shimo':
             # 石墨文档需要列表格式
@@ -2687,7 +2734,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'shimo'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'shimo')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'credamo':
             # 见数平台需要列表格式
@@ -2709,7 +2764,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'credamo'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'credamo')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'wenjuan':
             # 问卷网需要列表格式
@@ -2731,7 +2794,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'wenjuan'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'wenjuan')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'fanqier':
             # 番茄表单需要列表格式
@@ -2753,7 +2824,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'fanqier'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'fanqier')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'feishu':
             # 飞书问卷需要列表格式
@@ -2775,7 +2854,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'feishu'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'feishu')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'kdocs':
             # WPS表单需要列表格式
@@ -2797,7 +2884,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'kdocs'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'kdocs')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'tencent_wj':
             # 腾讯问卷需要列表格式
@@ -2819,7 +2914,15 @@ class NewFillWindow(QDialog):
             web_view.page().runJavaScript(js_code)
             
             # 延迟3秒后获取结果
-            QTimer.singleShot(3000, lambda: self.get_fill_result(web_view, card, 'tencent_wj'))
+            def safe_get_result():
+                try:
+                    from PyQt6 import sip
+                except ImportError:
+                    import sip
+                if not sip.isdeleted(web_view):
+                    self.get_fill_result(web_view, card, 'tencent_wj')
+            
+            QTimer.singleShot(3000, safe_get_result)
         
         elif form_type == 'baominggongju':
             # 报名工具需要特殊处理
