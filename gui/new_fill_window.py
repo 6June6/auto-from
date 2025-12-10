@@ -38,12 +38,68 @@ class NewFillWindow(QDialog):
         self.tencent_docs_engine = TencentDocsFiller()
         self.current_card = None  # 当前查看的名片
         self.web_views_by_link = {}  # {link_id: [web_views]}
+        self._is_closing = False  # ⚡️ 标记窗口是否正在关闭
         
         # 单开模式下，默认选中第一个名片
         if self.fill_mode == "single" and self.selected_cards:
             self.current_card = self.selected_cards[0]
             
         self.init_ui()
+    
+    def closeEvent(self, event):
+        """窗口关闭时清理所有资源，防止异步回调访问已销毁对象"""
+        print("🛑 填充窗口正在关闭，清理资源...")
+        self._is_closing = True
+        
+        # 停止所有定时器和清理 WebView
+        for link_id, webview_infos in self.web_views_by_link.items():
+            for info in webview_infos:
+                web_view = info.get('web_view')
+                if web_view:
+                    try:
+                        # 停止加载
+                        web_view.stop()
+                        # 断开所有信号连接
+                        try:
+                            web_view.loadFinished.disconnect()
+                        except:
+                            pass
+                        # 清理报名工具定时器
+                        login_timer = web_view.property("login_timer")
+                        if login_timer:
+                            login_timer.stop()
+                            try:
+                                login_timer.timeout.disconnect()
+                            except:
+                                pass
+                        submit_timer = web_view.property("submit_timer")
+                        if submit_timer:
+                            submit_timer.stop()
+                            try:
+                                submit_timer.timeout.disconnect()
+                            except:
+                                pass
+                    except Exception as e:
+                        print(f"⚠️ 清理 WebView 时出错: {e}")
+        
+        # 清理加载队列
+        if hasattr(self, 'loading_queues'):
+            self.loading_queues.clear()
+        
+        self.web_views_by_link.clear()
+        print("✅ 资源清理完成")
+        
+        super().closeEvent(event)
+    
+    def _is_valid(self) -> bool:
+        """检查窗口是否仍然有效（未被关闭/销毁）"""
+        if self._is_closing:
+            return False
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        return not sip.isdeleted(self)
     
     def init_ui(self):
         """初始化UI"""
@@ -122,6 +178,8 @@ class NewFillWindow(QDialog):
                 self.right_panel.setMaximumWidth(400)
                 self.expand_btn.show()
                 self.is_panel_animating = False
+                # ⚡️ 动画完成后刷新左侧面板布局
+                QTimer.singleShot(50, self._refresh_left_panel_layout)
                 return
             
             self.right_panel.setMaximumWidth(steps[i])
@@ -151,12 +209,58 @@ class NewFillWindow(QDialog):
                 self.right_panel.setMinimumWidth(400)
                 self.right_panel.setMaximumWidth(400)
                 self.is_panel_animating = False
+                # ⚡️ 动画完成后刷新左侧面板布局
+                QTimer.singleShot(50, self._refresh_left_panel_layout)
                 return
             
             self.right_panel.setMaximumWidth(steps[i])
             QTimer.singleShot(30, lambda: animate_step(i + 1))
         
         QTimer.singleShot(10, lambda: animate_step(0))
+    
+    def _refresh_left_panel_layout(self):
+        """刷新左侧面板布局，解决右侧面板收起/展开后 WebView 显示异常的问题"""
+        if not self._is_valid():
+            return
+        
+        # 获取当前标签页索引
+        current_index = self.tab_widget.currentIndex()
+        if current_index <= 0:
+            return
+        
+        real_index = current_index - 1
+        if real_index >= len(self.selected_links):
+            return
+        
+        current_link = self.selected_links[real_index]
+        link_id = str(current_link.id)
+        webview_infos = self.web_views_by_link.get(link_id, [])
+        
+        # ⚡️ 强制刷新每个 WebView - 使用隐藏/显示技巧
+        for info in webview_infos:
+            web_view = info.get('web_view')
+            placeholder = info.get('placeholder')
+            
+            if web_view:
+                # ⚡️ 关键修复：临时隐藏再显示，强制 WebView 重新渲染
+                web_view.hide()
+        
+        # 处理事件队列
+        QApplication.processEvents()
+        
+        # ⚡️ 延迟显示所有 WebView
+        def show_all_webviews():
+            if not self._is_valid():
+                return
+            for info in webview_infos:
+                web_view = info.get('web_view')
+                if web_view:
+                    web_view.show()
+                    web_view.update()
+            QApplication.processEvents()
+        
+        # 50ms 后显示
+        QTimer.singleShot(50, show_all_webviews)
     
     def create_left_panel(self) -> QWidget:
         """创建左侧面板（顶部导航 + 标签页 + WebView）"""
@@ -1398,25 +1502,126 @@ class NewFillWindow(QDialog):
                 first_item.widget().click()
                 
     def refresh_all_webviews(self):
-        """刷新当前页面的所有WebView"""
+        """刷新当前页面的所有WebView - 优化版本，避免卡顿"""
         current_index = self.tab_widget.currentIndex()
         # 0是首页
         if current_index <= 0:
-            QMessageBox.information(self, "提示", "请先进入某个链接页面")
+            # ⚡️ 使用非阻塞提示
+            self._show_toast("请先进入某个链接页面")
             return
             
         real_index = current_index - 1
-        if real_index < len(self.selected_links):
-            link = self.selected_links[real_index]
-            webview_infos = self.web_views_by_link.get(str(link.id), [])
+        if real_index >= len(self.selected_links):
+            return
             
-            print(f"⟳ 刷新所有WebView: {link.name}")
-            for info in webview_infos:
-                if info['web_view']:
-                    info['web_view'].reload()
-                    info['web_view'].setProperty("status", "loading")
-            
-            QMessageBox.information(self, "提示", "正在刷新当前页面所有名片...")
+        link = self.selected_links[real_index]
+        webview_infos = self.web_views_by_link.get(str(link.id), [])
+        
+        if not webview_infos:
+            self._show_toast("当前页面没有可刷新的名片")
+            return
+        
+        # ⚡️ 先显示提示，避免用户以为卡住
+        self._show_toast("正在刷新当前页面所有名片...")
+        
+        print(f"⟳ 刷新所有WebView: {link.name}")
+        
+        # ⚡️ 分批刷新，避免同时刷新多个 WebView 导致卡顿
+        webviews_to_refresh = [info for info in webview_infos if info.get('web_view')]
+        
+        if not webviews_to_refresh:
+            return
+        
+        # 使用队列分批刷新
+        self._refresh_queue = list(webviews_to_refresh)
+        self._refresh_batch_size = 2  # 每批刷新2个
+        
+        # 开始第一批刷新
+        self._do_refresh_batch()
+    
+    def _do_refresh_batch(self):
+        """执行一批刷新操作"""
+        if not self._is_valid():
+            return
+        
+        if not hasattr(self, '_refresh_queue') or not self._refresh_queue:
+            return
+        
+        # 取出一批
+        batch = self._refresh_queue[:self._refresh_batch_size]
+        self._refresh_queue = self._refresh_queue[self._refresh_batch_size:]
+        
+        # 刷新这一批
+        for info in batch:
+            web_view = info.get('web_view')
+            if web_view:
+                try:
+                    # ⚡️ 刷新时禁用自动填充
+                    web_view.setProperty("is_auto_fill_active", False)
+                    web_view.setProperty("auto_fill_after_load", False)
+                    web_view.setProperty("auto_fill_after_switch", False)
+                    web_view.reload()
+                    web_view.setProperty("status", "loading")
+                except Exception as e:
+                    print(f"⚠️ 刷新 WebView 失败: {e}")
+        
+        # 处理事件队列，保持 UI 响应
+        QApplication.processEvents()
+        
+        # 如果还有剩余，延迟继续刷新
+        if self._refresh_queue:
+            QTimer.singleShot(300, self._do_refresh_batch)
+    
+    def _show_toast(self, message: str, duration: int = 2000):
+        """显示非阻塞的轻量级提示（Toast风格）"""
+        # ⚡️ 使用 QLabel 作为轻量级提示，不阻塞 UI
+        if not self._is_valid():
+            return
+        
+        # 如果已有提示正在显示，先移除
+        if hasattr(self, '_toast_label') and self._toast_label:
+            try:
+                self._toast_label.deleteLater()
+            except:
+                pass
+        
+        # 创建提示标签
+        toast = QLabel(message, self)
+        toast.setStyleSheet(f"""
+            QLabel {{
+                background: rgba(0, 0, 0, 0.75);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+        """)
+        toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        toast.adjustSize()
+        
+        # 居中显示
+        x = (self.width() - toast.width()) // 2
+        y = self.height() // 2 - toast.height() // 2
+        toast.move(x, y)
+        toast.show()
+        toast.raise_()
+        
+        self._toast_label = toast
+        
+        # 自动隐藏
+        QTimer.singleShot(duration, lambda: self._hide_toast(toast))
+    
+    def _hide_toast(self, toast):
+        """隐藏提示"""
+        try:
+            if toast:
+                toast.hide()
+                toast.deleteLater()
+            if hasattr(self, '_toast_label') and self._toast_label == toast:
+                self._toast_label = None
+        except:
+            pass
     
     def create_card_list_item(self, card) -> QPushButton:
         """创建名片列表项"""
@@ -2072,6 +2277,10 @@ class NewFillWindow(QDialog):
     
     def on_tab_changed(self, index: int):
         """标签页切换时的处理"""
+        # ⚡️ 安全检查：窗口是否已关闭
+        if not self._is_valid():
+            return
+        
         if index == 0:
             # 点击了首页，关闭窗口
             self.close()
@@ -2121,23 +2330,39 @@ class NewFillWindow(QDialog):
              
     def unload_inactive_tabs(self, active_link_id: str):
         """销毁非当前标签页的 WebView 以释放资源"""
+        # ⚡️ 安全检查
+        if not self._is_valid():
+            return
+        
         print(f"🧹 正在清理非当前标签页资源，保留: {active_link_id}")
         
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
         # 遍历所有链接的 WebView 信息
-        for link_id, webview_infos in self.web_views_by_link.items():
+        for link_id, webview_infos in list(self.web_views_by_link.items()):  # 使用 list() 避免迭代时修改
             if link_id == active_link_id:
                 continue
                 
             # 清理该链接下的所有 WebView
             destroyed_count = 0
             for info in webview_infos:
-                if info.get('web_view'):
-                    web_view = info['web_view']
+                web_view = info.get('web_view')
+                if web_view:
                     # 停止加载并销毁
                     try:
-                        web_view.stop()
-                        web_view.setParent(None)
-                        web_view.deleteLater()
+                        # 检查 WebView 是否已被销毁
+                        if not sip.isdeleted(web_view):
+                            # 先断开信号连接，防止回调触发
+                            try:
+                                web_view.loadFinished.disconnect()
+                            except:
+                                pass
+                            web_view.stop()
+                            web_view.setParent(None)
+                            web_view.deleteLater()
                     except Exception as e:
                         print(f"⚠️ 销毁 WebView 失败: {e}")
                     
@@ -2197,6 +2422,11 @@ class NewFillWindow(QDialog):
 
     def auto_fill_for_link(self, link_id: str):
         """为指定链接自动填充"""
+        # ⚡️ 安全检查：窗口是否已关闭
+        if not self._is_valid():
+            print("🛑 [auto_fill_for_link] 窗口已关闭，跳过自动填充")
+            return
+        
         # 检查用户是否可以继续使用（过期/次数限制）
         if self.current_user:
             from core.auth import check_user_can_use
@@ -2343,6 +2573,11 @@ class NewFillWindow(QDialog):
     
     def load_next_batch_for_link(self, link_id: str, batch_size: int):
         """为指定链接加载下一批WebView"""
+        # ⚡️ 安全检查：窗口是否已关闭
+        if not self._is_valid():
+            print("🛑 [load_next_batch_for_link] 窗口已关闭，停止加载")
+            return
+        
         if not hasattr(self, 'loading_queues') or link_id not in self.loading_queues:
             return
         
@@ -2422,6 +2657,20 @@ class NewFillWindow(QDialog):
     
     def on_batch_webview_loaded(self, web_view: QWebEngineView, success: bool):
         """批量加载时的回调"""
+        # ⚡️ 安全检查：窗口或 WebView 是否已销毁
+        if not self._is_valid():
+            print("🛑 [on_batch_webview_loaded] 窗口已关闭，跳过回调")
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            print("🛑 [on_batch_webview_loaded] WebView 已销毁，跳过回调")
+            return
+        
         card_data = web_view.property("card_data")
         link_data = web_view.property("link_data")
         index = web_view.property("index")
@@ -2504,6 +2753,20 @@ class NewFillWindow(QDialog):
     
     def on_webview_loaded(self, web_view: QWebEngineView, success: bool):
         """WebView加载完成"""
+        # ⚡️ 安全检查：窗口或 WebView 是否已销毁
+        if not self._is_valid():
+            print("🛑 [on_webview_loaded] 窗口已关闭，跳过回调")
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            print("🛑 [on_webview_loaded] WebView 已销毁，跳过回调")
+            return
+        
         card_data = web_view.property("card_data")
         link_data = web_view.property("link_data")
         index = web_view.property("index")
@@ -2574,6 +2837,20 @@ class NewFillWindow(QDialog):
     
     def execute_auto_fill_for_webview(self, web_view: QWebEngineView, card):
         """为单个WebView执行自动填写（参考 auto_fill_window.py）"""
+        # ⚡️ 安全检查：窗口或 WebView 是否已销毁
+        if not self._is_valid():
+            print("🛑 [execute_auto_fill_for_webview] 窗口已关闭，跳过填充")
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            print("🛑 [execute_auto_fill_for_webview] WebView 已销毁，跳过填充")
+            return
+        
         # ⚡️ 关键修复：每次填充前检查用户权限（防止多开模式绕过次数限制）
         if self.current_user:
             from core.auth import check_user_can_use
@@ -3393,6 +3670,12 @@ class NewFillWindow(QDialog):
                 from PyQt6 import sip
             except ImportError:
                 import sip
+            
+            # ⚡️ 安全检查：窗口是否已关闭
+            if not self._is_valid():
+                print("🛑 窗口已关闭，停止登录轮询")
+                timer.stop()
+                return
                 
             # ⚡️ 安全检查：如果 WebView 已被删除，停止定时器并退出
             if sip.isdeleted(web_view):
@@ -3439,6 +3722,11 @@ class NewFillWindow(QDialog):
                 from PyQt6 import sip
             except ImportError:
                 import sip
+            
+            # ⚡️ 安全检查：窗口是否已关闭
+            if not self._is_valid():
+                timer.stop()
+                return
                 
             # 安全检查
             if sip.isdeleted(web_view) or not web_view.page():
@@ -3768,6 +4056,11 @@ class NewFillWindow(QDialog):
                 from PyQt6 import sip
             except ImportError:
                 import sip
+            
+            # ⚡️ 安全检查：窗口是否已关闭
+            if not self._is_valid():
+                timer.stop()
+                return
                 
             if sip.isdeleted(web_view) or not web_view.page():
                 timer.stop()
@@ -3777,7 +4070,7 @@ class NewFillWindow(QDialog):
             try:
                 web_view.page().runJavaScript(
                     "window.__submitReady__ === true",
-                    lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready and not sip.isdeleted(web_view) else None
+                    lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready and not sip.isdeleted(web_view) and self._is_valid() else None
                 )
             except RuntimeError:
                 timer.stop()
@@ -3792,6 +4085,18 @@ class NewFillWindow(QDialog):
     
     def handle_baoming_submit(self, web_view: QWebEngineView, filler, card, timer):
         """处理报名工具提交"""
+        # ⚡️ 安全检查
+        if not self._is_valid():
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            return
+        
         # 停止检查
         timer.stop()
         
@@ -3800,6 +4105,10 @@ class NewFillWindow(QDialog):
         
         # 获取提交数据
         def do_submit(data):
+            # ⚡️ 安全检查
+            if not self._is_valid() or sip.isdeleted(web_view):
+                return
+            
             if not data:
                 web_view.page().runJavaScript("showResult(false, '获取表单数据失败');")
                 self.start_baoming_submit_check(web_view, filler, card)
@@ -6447,6 +6756,20 @@ class NewFillWindow(QDialog):
     
     def get_fill_result(self, web_view: QWebEngineView, card, form_type: str):
         """获取填写结果"""
+        # ⚡️ 安全检查：窗口或 WebView 是否已销毁
+        if not self._is_valid():
+            print("🛑 [get_fill_result] 窗口已关闭，跳过结果获取")
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            print("🛑 [get_fill_result] WebView 已销毁，跳过结果获取")
+            return
+        
         # 根据表单类型选择结果获取脚本
         if form_type == 'tencent_docs':
             get_result_script = self.tencent_docs_engine.generate_get_result_script()
@@ -6481,6 +6804,12 @@ class NewFillWindow(QDialog):
             get_result_script = self.auto_fill_engine.generate_get_result_script()
         
         def handle_result(result):
+            # ⚡️ 安全检查：窗口或 WebView 是否已销毁
+            if not self._is_valid():
+                return
+            if sip.isdeleted(web_view):
+                return
+            
             link_data = web_view.property("link_data")
             
             if result and isinstance(result, dict):
@@ -6533,6 +6862,10 @@ class NewFillWindow(QDialog):
     
     def check_all_fills_completed(self):
         """检查是否所有填写完成"""
+        # ⚡️ 安全检查
+        if not self._is_valid():
+            return
+        
         current_index = self.tab_widget.currentIndex()
         if current_index <= 0: # 0是首页
             return
