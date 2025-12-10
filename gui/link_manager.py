@@ -1167,40 +1167,49 @@ class SmartAddLinkDialog(QDialog):
             self.result_list.add_row(name, url, category)
 
     def guess_category(self, url):
-        """根据 URL 猜测分类"""
+        """根据 URL 猜测分类 - 支持12个平台"""
         if "docs.qq.com" in url:
             return "腾讯文档"
+        elif "wj.qq.com" in url:
+            return "腾讯问卷"
         elif "shimo.im" in url:
             return "石墨文档"
         elif "wjx.cn" in url:
             return "问卷星"
-        elif "jinshuju" in url:
+        elif "jsj.top" in url or "jinshuju.net" in url:
             return "金数据"
         elif "feishu.cn" in url:
             return "飞书"
         elif "kdocs.cn" in url:
-            return "WPS"
+            return "金山文档"
         elif "wenjuan.com" in url:
             return "问卷网"
-        elif "baominggongju" in url or "p.baominggongju.com" in url:
+        elif "baominggongju.com" in url or "p.baominggongju.com" in url:
             return "报名工具"
+        elif "fanqier.cn" in url:
+            return "番茄表单"
+        elif "credamo.com" in url:
+            return "见数"
+        elif "mikecrm.com" in url:
+            return "麦客表单"
         return "其他"
     
     def is_supported_platform(self, url):
-        """检查链接是否为支持的平台"""
+        """检查链接是否为支持的平台 - 共12个"""
         supported_domains = [
-            "docs.qq.com",      # 腾讯文档
-            "wj.qq.com",        # 腾讯问卷
-            "shimo.im",         # 石墨文档
-            "wjx.cn",           # 问卷星
-            "jinshuju",         # 金数据
-            "feishu.cn",        # 飞书
-            "kdocs.cn",         # WPS
-            "wenjuan.com",      # 问卷网
-            "baominggongju",    # 报名工具
-            "fanqier.cn",       # 番茄表单
-            "credamo.com",      # 见数
-            "jsj.top",          # 金数据
+            "docs.qq.com",       # 1. 腾讯文档
+            "wj.qq.com",         # 2. 腾讯问卷
+            "shimo.im",          # 3. 石墨文档
+            "wjx.cn",            # 4. 问卷星
+            "jsj.top",           # 5. 金数据
+            "jinshuju.net",      # 5. 金数据（备用域名）
+            "feishu.cn",         # 6. 飞书
+            "kdocs.cn",          # 7. 金山文档/WPS
+            "wenjuan.com",       # 8. 问卷网
+            "baominggongju.com", # 9. 报名工具
+            "fanqier.cn",        # 10. 番茄表单
+            "credamo.com",       # 11. 见数
+            "mikecrm.com",       # 12. 麦客表单
         ]
         return any(domain in url for domain in supported_domains)
 
