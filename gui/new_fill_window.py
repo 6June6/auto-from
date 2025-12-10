@@ -12,8 +12,6 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 import qtawesome as qta
 import json
-import os
-import time
 from collections import defaultdict
 from database import DatabaseManager
 from core import AutoFillEngineV2, TencentDocsFiller
@@ -47,41 +45,6 @@ class NewFillWindow(QDialog):
             
         self.init_ui()
     
-    def get_baoming_token_path(self, card_id):
-        """获取报名工具Token文件路径"""
-        token_dir = "auth_data"
-        if not os.path.exists(token_dir):
-            os.makedirs(token_dir)
-        return os.path.join(token_dir, f"baoming_{card_id}.json")
-
-    def save_baoming_token(self, card_id, access_token, user_info):
-        """保存报名工具Token"""
-        try:
-            path = self.get_baoming_token_path(card_id)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'access_token': access_token,
-                    'user_info': user_info,
-                    'update_time': time.time()
-                }, f)
-            print(f"  💾 Token已保存: {path}")
-        except Exception as e:
-            print(f"  ⚠️ 保存Token失败: {e}")
-
-    def load_baoming_token(self, card_id):
-        """加载报名工具Token"""
-        try:
-            path = self.get_baoming_token_path(card_id)
-            if not os.path.exists(path):
-                return None
-            
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # 可以在这里检查过期时间，目前先假设不过期
-                return data
-        except Exception:
-            return None
-
     def init_ui(self):
         """初始化UI"""
         self.setWindowTitle("开始填充")
@@ -782,21 +745,10 @@ class NewFillWindow(QDialog):
         # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
-        # 识别平台类型，实现同平台共享登录状态
-        platform = self.detect_form_type(link.url)
-        # 如果是未知平台，尝试使用域名，避免所有未知链接混在一起
-        if platform == 'unknown':
-            from urllib.parse import urlparse
-            try:
-                # 使用域名作为标识
-                platform = urlparse(link.url).netloc.replace(':', '_')
-            except:
-                # 解析失败则回退到 link_id
-                platform = f"link_{link.id}"
-        
-        # 创建独立 Profile
-        # ⚡️ 修改：使用 card.id 和 平台标识 作为唯一标识
-        storage_name = f"profile_store_{card.id}_{platform}"
+        # 创建独立 Profile（参考 auto_fill_window.py）
+        # ⚡️ 修改：使用 card.id 和 平台类型 作为唯一标识，实现同平台共享登录状态
+        form_type = self.detect_form_type(link.url)
+        storage_name = f"profile_store_{card.id}_{form_type}"
         profile = QWebEngineProfile(storage_name, web_view)
         
         # ⚡️ 修改：设置为磁盘缓存模式（默认），允许持久化 Cookie
@@ -2343,18 +2295,10 @@ class NewFillWindow(QDialog):
         # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
-        # 识别平台类型，实现同平台共享登录状态
-        platform = self.detect_form_type(link.url)
-        if platform == 'unknown':
-            from urllib.parse import urlparse
-            try:
-                platform = urlparse(link.url).netloc.replace(':', '_')
-            except:
-                platform = f"link_{link.id}"
-
         # 创建独立 Profile
-        # ⚡️ 修改：使用 card.id 和 平台标识 作为唯一标识
-        storage_name = f"profile_store_{card.id}_{platform}"
+        # ⚡️ 修改：使用 card.id 和 平台类型 作为唯一标识，实现同平台共享登录状态
+        form_type = self.detect_form_type(link.url)
+        storage_name = f"profile_store_{card.id}_{form_type}"
         profile = QWebEngineProfile(storage_name, web_view)
         
         # ⚡️ 修改：设置为磁盘缓存模式（默认），允许持久化 Cookie
@@ -3194,31 +3138,6 @@ class NewFillWindow(QDialog):
             print(f"  ❌ [报名工具] 初始化失败: {msg}")
             self.show_baoming_error_page(web_view, msg)
             return
-        
-        # ⚡️ 尝试自动登录：加载本地Token
-        token_data = self.load_baoming_token(card.id)
-        if token_data:
-            print(f"  🔄 发现本地Token，尝试自动登录...")
-            filler.api.access_token = token_data.get('access_token')
-            filler.api.user_info = token_data.get('user_info')
-            
-            # 尝试加载表单（如果Token有效，这将成功）
-            success_load, msg_load = filler.load_form()
-            if success_load:
-                print(f"  ✅ 自动登录成功！")
-                # 自动匹配填充
-                filled_data = filler.match_and_fill(card_config)
-                # 直接显示表单页面
-                self.show_baoming_form_page(web_view, filler, filled_data, card)
-                return
-            else:
-                print(f"  ⚠️ 自动登录失效: {msg_load}")
-                # Token失效，清除本地文件
-                try:
-                    os.remove(self.get_baoming_token_path(card.id))
-                except:
-                    pass
-        
         print(f"  ✅ [报名工具] 初始化成功")
         
         # 获取二维码
@@ -3547,11 +3466,6 @@ class NewFillWindow(QDialog):
                 timer.stop()
                 uname = user_info.get('uname', '用户') if user_info else '用户'
                 print(f"  ✅ [报名工具] 登录成功: {uname}")
-                
-                # ⚡️ 保存 Token
-                if filler.api.access_token:
-                    self.save_baoming_token(card.id, filler.api.access_token, user_info)
-                
                 web_view.page().runJavaScript(
                     f"document.getElementById('status').textContent = '✅ 登录成功: {uname}';"
                     "document.getElementById('status').className = 'status success';"
