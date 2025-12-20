@@ -1063,7 +1063,7 @@ class SmartAddLinkDialog(QDialog):
         self.parse_timer.setSingleShot(True)
 
     def on_text_changed(self):
-        """文本变化时触发防抖解析"""
+        """文本变化时触发防抖解析（默认使用本地正则解析）"""
         if self.ai_thread and self.ai_thread.isRunning():
             return
         
@@ -1078,8 +1078,9 @@ class SmartAddLinkDialog(QDialog):
         except:
             pass
             
-        self.parse_timer.timeout.connect(self.start_ai_parse)
-        self.parse_timer.start(1500)
+        # 默认使用本地正则解析，更快速
+        self.parse_timer.timeout.connect(self.parse_content_regex)
+        self.parse_timer.start(800)
     
     def start_ai_parse(self):
         """开始 AI 解析"""
@@ -1141,20 +1142,51 @@ class SmartAddLinkDialog(QDialog):
             start, end = match.span()
             context = text[max(0, start - 50):min(len(text), end + 50)]
             
-            name = "新链接"
-            title_match = re.search(r'《(.*?)》', context)
-            if title_match:
-                name = title_match.group(1)
-            else:
-                title_match = re.search(r'【(.*?)】', context)
-                if title_match:
-                     if "腾讯文档" not in title_match.group(1) and "金山文档" not in title_match.group(1):
-                        name = title_match.group(1)
+            name = self._extract_link_name(text, start, context)
             
             category = self.guess_category(url)
             links.append({"name": name, "url": url, "category": category})
             
         self.populate_list(links)
+    
+    def _extract_link_name(self, text, url_start, context):
+        """从文本中提取链接名称"""
+        # 1. 尝试匹配《标题》格式
+        title_match = re.search(r'《(.*?)》', context)
+        if title_match:
+            return title_match.group(1)
+        
+        # 2. 尝试匹配【标题】格式
+        title_match = re.search(r'【(.*?)】', context)
+        if title_match:
+            title = title_match.group(1)
+            if "腾讯文档" not in title and "金山文档" not in title:
+                return title
+        
+        # 3. 尝试匹配 "名称：URL" 或 "名称: URL" 格式
+        # 找到URL前面最近的换行符位置
+        line_start = text.rfind('\n', 0, url_start)
+        line_start = line_start + 1 if line_start != -1 else 0
+        
+        # 获取URL前面的文本
+        prefix = text[line_start:url_start].strip()
+        
+        # 匹配 "名称：" 或 "名称:" 或 "名称 " 格式
+        # 支持中英文冒号、空格分隔
+        name_match = re.match(r'^(.+?)[：:]\s*$', prefix)
+        if name_match:
+            name = name_match.group(1).strip()
+            if name and len(name) <= 30:  # 名称长度限制
+                return name
+        
+        # 4. 如果前缀不含冒号，但有内容，也可以作为名称
+        if prefix and len(prefix) <= 20 and not prefix.startswith('http'):
+            # 去掉可能的序号前缀（如 "1. " "1、"）
+            clean_name = re.sub(r'^[\d]+[.、)\]】]\s*', '', prefix)
+            if clean_name:
+                return clean_name
+        
+        return "新链接"
 
     def populate_list(self, links):
         """填充列表"""

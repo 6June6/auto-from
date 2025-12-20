@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QPushBu
                              QLabel, QComboBox, QMessageBox, QFrame, QScrollArea,
                              QGraphicsDropShadowEffect, QApplication, QTabWidget,
                              QGridLayout, QSizePolicy, QStackedWidget, QLineEdit, QInputDialog)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize, QEvent
 from PyQt6.QtGui import QColor, QClipboard
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
@@ -19,6 +19,32 @@ from .baoming_tool_window import BaomingToolWindow
 from .styles import COLORS
 from .icons import Icons
 import config
+
+
+class ElidedLabel(QLabel):
+    """支持自动省略的标签"""
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+
+    def setText(self, text):
+        self._full_text = text
+        self._update_elided_text()
+        
+    def resizeEvent(self, event):
+        self._update_elided_text()
+        super().resizeEvent(event)
+
+    def _update_elided_text(self):
+        font_metrics = self.fontMetrics()
+        width = self.width()
+        # 留出一点余量防止抖动
+        if width <= 0: return
+        
+        elided = font_metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, width)
+        # 只有文本变化时才更新，避免循环
+        if super().text() != elided:
+            super().setText(elided)
 
 
 class NewFillWindow(QDialog):
@@ -293,15 +319,27 @@ class NewFillWindow(QDialog):
             }}
             QTabWidget::tab-bar {{
                 alignment: left;
+                left: 0;
+            }}
+            QTabBar {{
+                background: transparent;
+                qproperty-drawBase: 0;
             }}
             QTabBar::tab {{
                 background: transparent;
                 color: #6E6E73;
-                padding: 8px 20px;
-                min-width: 90px;
+                padding: 8px 16px;
+                margin-top: 4px;
+                margin-bottom: 4px;
+                margin-right: 4px;
+                margin-left: 0px;
+                
+                min-width: 80px;
+                max-width: 160px;
+                height: 32px; /* 固定高度 */
+                
                 font-size: 14px;
                 font-weight: 500;
-                margin: 8px 4px;
                 border-radius: 16px; /* 胶囊形状 */
             }}
             QTabBar::tab:selected {{
@@ -374,53 +412,18 @@ class NewFillWindow(QDialog):
         """创建单个链接的标签页内容 - 延迟加载优化"""
         container = QWidget()
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         container.setLayout(layout)
-        
-        # 链接标题容器
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        link_label = QLabel(f"链接: {link.name}")
-        link_label.setStyleSheet(f"""
-            font-size: 16px;
-            font-weight: 600;
-            color: {COLORS['text_primary']};
-            padding: 10px;
-        """)
-        header_layout.addWidget(link_label)
-        header_layout.addStretch()
-        
-        # 单开/多开 切换开关
-        self.mode_switch_btn = QPushButton("切换模式: 单开")
-        if self.fill_mode == "multi":
-             self.mode_switch_btn.setText("切换模式: 多开")
-             
-        self.mode_switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.mode_switch_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: {COLORS['text_primary']};
-            }}
-            QPushButton:hover {{
-                background: {COLORS['surface_hover']};
-            }}
-        """)
-        self.mode_switch_btn.clicked.connect(lambda: self.toggle_fill_mode(link))
-        header_layout.addWidget(self.mode_switch_btn)
-        
-        layout.addWidget(header_container)
         
         # 横向滚动区域（包含多个名片WebView占位符）
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # ⚡️ 设置尺寸策略为 Expanding，撑满可用空间
+        scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # ⚡️ 确保滚动区域不阻止鼠标事件传递给WebView
         scroll_area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -436,6 +439,9 @@ class NewFillWindow(QDialog):
         
         # ⚡️ 确保容器不阻止鼠标事件
         cards_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        
+        # ⚡️ 设置尺寸策略为 Expanding，让容器撑满可用空间
+        cards_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         cards_layout = QGridLayout()
         cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -516,12 +522,6 @@ class NewFillWindow(QDialog):
         
         print(f"🔄 切换模式: {self.fill_mode} -> {new_mode}")
         self.fill_mode = new_mode
-        
-        # 更新按钮文字
-        if self.fill_mode == "multi":
-            self.mode_switch_btn.setText("切换模式: 多开")
-        else:
-            self.mode_switch_btn.setText("切换模式: 单开")
             
         # ⚡️ 清空当前链接的 WebView 缓存信息，确保重新创建
         link_id = str(link.id)
@@ -868,11 +868,25 @@ class NewFillWindow(QDialog):
         user_agent = profile.httpUserAgent()
         if 'zh-CN' not in user_agent:
             profile.setHttpUserAgent(user_agent + " Language/zh-CN")
+            
+        # ⚡️ 事件过滤：点击卡片或Webview获得焦点时选中名片
+        container.installEventFilter(self)
+        header.installEventFilter(self)
+        web_view.installEventFilter(self)
         
-        # 禁用控制台消息输出
+        # 绑定 card 对象，方便 eventFilter 获取
+        container.setProperty("card_id", str(card.id))
+        header.setProperty("card_id", str(card.id))
+        web_view.setProperty("card_id", str(card.id))
+        
+        # 自定义 WebEnginePage，处理对话框和控制台消息
         class WebEnginePage(QWebEnginePage):
             def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
                 pass  # 不输出 JS 控制台消息
+            
+            def javaScriptConfirm(self, securityOrigin, msg):
+                """自动接受离开页面的确认对话框（如登录跳转时的 beforeunload）"""
+                return True
         
         web_view.setPage(WebEnginePage(profile, web_view))
         
@@ -927,7 +941,7 @@ class NewFillWindow(QDialog):
         top_toolbar = QHBoxLayout()
         top_toolbar.setSpacing(8)
         
-        # 折叠按钮
+        # 折叠按钮（仅多开模式显示）
         collapse_btn = QPushButton()
         collapse_btn.setIcon(Icons.chevron_right('gray'))
         collapse_btn.setFixedSize(32, 32)
@@ -944,13 +958,17 @@ class NewFillWindow(QDialog):
             }}
         """)
         collapse_btn.clicked.connect(self.hide_right_panel)
+        # 单开模式下隐藏收起按钮
+        if self.fill_mode == "single":
+            collapse_btn.setVisible(False)
         top_toolbar.addWidget(collapse_btn)
         
         top_toolbar.addStretch()
         
-        # 全部刷新按钮
-        refresh_all_btn = QPushButton("刷新")
-        refresh_all_btn.setIcon(Icons.refresh('gray'))
+        # 全部刷新按钮（现改为全局填充）
+        refresh_all_btn = QPushButton("填充")
+        refresh_all_btn.setIcon(Icons.edit('gray')) # 更换图标为编辑/填充相关
+        refresh_all_btn.setToolTip("对当前页面执行全局填充")
         refresh_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_all_btn.setStyleSheet(f"""
             QPushButton {{
@@ -972,7 +990,7 @@ class NewFillWindow(QDialog):
         
         layout.addLayout(top_toolbar)
         
-        # 类别选择区域 - 优化布局
+        # 类别选择区域 - 使用下拉框
         category_box = QFrame()
         category_box.setStyleSheet("""
             QFrame {
@@ -982,109 +1000,93 @@ class NewFillWindow(QDialog):
                 margin-bottom: 8px;
             }
         """)
-        cat_layout = QHBoxLayout()
-        cat_layout.setContentsMargins(0, 0, 0, 0)
-        cat_layout.setSpacing(12)
+        cat_layout = QVBoxLayout()
+        cat_layout.setContentsMargins(8, 8, 8, 8)
+        cat_layout.setSpacing(8)
         category_box.setLayout(cat_layout)
         
-        # 左侧占位
-        cat_layout.addStretch()
+        # 标题行
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         
-        # 中间：类别名称 + 下箭头 (合并在一个容器中，可点击)
-        center_container = QPushButton()
-        center_container.setCursor(Qt.CursorShape.PointingHandCursor)
-        # ⚡️ 加大高度到 50px
-        center_container.setFixedHeight(50)
-        center_container.setMinimumWidth(200)  # 加大最小宽度到 200px
-        center_container.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
-        center_container.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px; /* 加大圆角 */
-                padding: 0px 20px; /* 加大左右padding */
-                text-align: left;
-            }}
-            QPushButton:hover {{
-                border-color: {COLORS['primary']};
-                background: #F8F9FA;
-            }}
+        cat_title = QLabel("切换分类")
+        cat_title.setStyleSheet(f"""
+            font-size: 14px;
+            font-weight: 600;
+            color: {COLORS['text_primary']};
         """)
+        title_row.addWidget(cat_title)
+        title_row.addStretch()
+        cat_layout.addLayout(title_row)
         
-        center_layout = QHBoxLayout(center_container)
-        center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(16) # 加大间距
-        
-        # 1. 分类名称标签
-        self.category_label = QLabel("选择分类")
-        self.category_label.setFixedHeight(50) # 高度同步加大
-        self.category_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 18px; /* 字体加大 */
-                font-weight: 600;
-                color: {COLORS['text_primary']};
-                border: none;
-                background: transparent;
-            }}
-        """)
-        self.category_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        center_layout.addWidget(self.category_label, 1) # flex=1
-        
-        # 2. 下箭头图标
-        arrow_label = QLabel()
-        arrow_label.setPixmap(Icons.chevron_down('gray').pixmap(12, 12))
-        arrow_label.setStyleSheet("border: none; background: transparent;")
-        arrow_label.setFixedSize(12, 12)
-        center_layout.addWidget(arrow_label, 0) # flex=0
-        
-        self.category_selector_btn = center_container
-        cat_layout.addWidget(center_container)
-        
-        # 右侧：切换按钮
-        switch_cat_btn = QPushButton("切换")
-        switch_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        switch_cat_btn.setFixedSize(52, 30)
-        switch_cat_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                color: {COLORS['primary']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 4px;
-                font-size: 13px;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['primary']};
-                color: white;
-            }}
-        """)
-        
-        # 真正的类别选择器（隐藏）
+        # 下拉框 - 直接显示，样式统一
         self.category_combo = QComboBox()
+        self.category_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.category_combo.setFixedHeight(40)
+        self.category_combo.setIconSize(QSize(14, 14))  # 设置图标大小
         self.category_combo.setStyleSheet(f"""
             QComboBox {{
                 background: white;
                 color: {COLORS['text_primary']};
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                padding: 8px 12px;
+                padding-right: 32px;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            QComboBox:hover {{
+                border-color: #D1D5DB;
+                background: #FAFAFA;
+            }}
+            QComboBox:focus {{
+                border-color: {COLORS['primary']};
+                outline: none;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+                subcontrol-position: center right;
+                subcontrol-origin: padding;
+                right: 8px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9CA3AF;
+            }}
+            QComboBox::down-arrow:hover {{
+                border-top-color: #6B7280;
+            }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                padding: 6px 0;
+                margin-top: 2px;
+                outline: none;
+                selection-background-color: transparent;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 36px;
+                padding: 8px 12px;
+                color: #374151;
+                background: white;
+                border: none;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background: #F8FAFC;
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background: transparent;
+                color: #374151;
             }}
         """)
         self.category_combo.currentTextChanged.connect(self.on_category_changed)
-        
-        # 连接逻辑 - 点击分类选择区域或切换按钮都可以打开下拉
-        self.category_selector_btn.clicked.connect(self.category_combo.showPopup)
-        switch_cat_btn.clicked.connect(self.category_combo.showPopup)
-        self.category_combo.currentTextChanged.connect(lambda t: self.category_label.setText(t if t else "选择分类"))
-        
-        cat_layout.addWidget(switch_cat_btn)
-        cat_layout.addStretch() # 右侧也加弹簧，保持居中
+        cat_layout.addWidget(self.category_combo)
         
         layout.addWidget(category_box)
-        layout.addWidget(self.category_combo)
-        # ⚡️ 修复：不能使用 hide()，否则无法弹出下拉框。改为设为0大小
-        # 同时要确保它在布局中不占据额外空间，但必须 visible
-        self.category_combo.setFixedSize(0, 0)
-        # 将其父对象设为 self，而不是添加到布局中，这样它就不会影响布局
-        # 但这样会导致无法弹出，所以还是得在布局里，但是尺寸为0
-        self.category_combo.setVisible(True)
         
         # 名片列表（可滚动）
         scroll = QScrollArea()
@@ -1133,10 +1135,6 @@ class NewFillWindow(QDialog):
         self.category_combo.blockSignals(True)
         self.load_categories()
         self.category_combo.blockSignals(False)
-        
-        # 手动更新标签文字
-        if self.category_combo.count() > 0:
-            self.category_label.setText(self.category_combo.currentText())
         
         # 只调用一次 load_cards_list
         self.load_cards_list()
@@ -1447,20 +1445,27 @@ class NewFillWindow(QDialog):
         if categories:
             for category in sorted(categories):
                 self.category_combo.addItem(category)
-            
-            # 默认选中第一个分类
-            if self.category_combo.count() > 0:
-                current_cat = self.category_combo.itemText(0)
-                self.category_label.setText(current_cat)
         else:
             self.category_combo.addItem("默认分类")
-            self.category_label.setText("默认分类")
+        
+        # 更新勾选图标
+        self._update_category_icons()
             
     def on_category_changed(self, category: str):
         """类别改变时"""
-        if category:
-            self.category_label.setText(category)
+        self._update_category_icons()
         self.load_cards_list()
+    
+    def _update_category_icons(self):
+        """更新分类下拉框的勾选图标"""
+        current_index = self.category_combo.currentIndex()
+        for i in range(self.category_combo.count()):
+            if i == current_index:
+                # 选中项显示勾选图标
+                self.category_combo.setItemIcon(i, qta.icon('fa5s.check', color='#6B7280'))
+            else:
+                # 其他项显示空白图标（保持对齐）
+                self.category_combo.setItemIcon(i, qta.icon('fa5s.check', color='transparent'))
     
     def load_cards_list(self, target_card_id=None):
         """加载名片列表（仅显示已选名片）"""
@@ -1502,7 +1507,27 @@ class NewFillWindow(QDialog):
                 first_item.widget().click()
                 
     def refresh_all_webviews(self):
-        """刷新当前页面的所有WebView - 优化版本，避免卡顿"""
+        """[修改为] 对当前页面的所有表单执行全局填充（不刷新页面）"""
+        current_index = self.tab_widget.currentIndex()
+        # 0是首页
+        if current_index <= 0:
+            # ⚡️ 使用非阻塞提示
+            self._show_toast("请先进入某个链接页面")
+            return
+            
+        real_index = current_index - 1
+        if real_index >= len(self.selected_links):
+            return
+            
+        link = self.selected_links[real_index]
+        self._show_toast("正在为当前页面执行全局填充...")
+        print(f"🚀 手动触发全局填充: {link.name}")
+        
+        # 调用自动填充逻辑
+        self.auto_fill_for_link(str(link.id))
+
+    def _unused_refresh_all_webviews(self):
+        """[保留原逻辑] 刷新当前页面的所有WebView - 优化版本，避免卡顿"""
         current_index = self.tab_widget.currentIndex()
         # 0是首页
         if current_index <= 0:
@@ -1765,7 +1790,7 @@ class NewFillWindow(QDialog):
         # 字段名（垂直布局中的上方或左侧）
         # 这里使用更紧凑的布局：左侧 Label，右侧 Value + Copy
         
-        key_label = QLabel(key)
+        key_label = ElidedLabel(key)
         key_label.setFixedWidth(90)
         key_label.setStyleSheet(f"""
             font-size: 12px;
@@ -1786,7 +1811,9 @@ class NewFillWindow(QDialog):
         
         # 值
         value_text = value if value else "（空）"
-        value_label = QLabel(value_text)
+        value_label = ElidedLabel(value_text)
+        # 设置策略，允许水平方向收缩，确保长文本能被截断而不是撑开布局
+        value_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         value_label.setStyleSheet(f"""
             font-size: 13px;
             color: {COLORS['text_primary']};
@@ -1946,7 +1973,6 @@ class NewFillWindow(QDialog):
                 index = self.category_combo.findText(category)
                 if index >= 0:
                     self.category_combo.setCurrentIndex(index)
-                    self.category_label.setText(category)
             finally:
                 self.category_combo.blockSignals(False)
                 
@@ -2109,6 +2135,56 @@ class NewFillWindow(QDialog):
         
         QMessageBox.warning(self, "提示", "未找到该名片对应的表单")
 
+    def select_card_by_id(self, target_card_id: str):
+        """通过ID选中名片列表项"""
+        target_card = None
+        
+        # 1. 更新列表项视觉状态
+        if hasattr(self, 'cards_list_layout'):
+            for i in range(self.cards_list_layout.count()):
+                item = self.cards_list_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if isinstance(widget, QPushButton):
+                        card_id = widget.property("card_id")
+                        if card_id == target_card_id:
+                            widget.setChecked(True)
+                            widget.setIcon(Icons.check_circle('primary'))
+                            
+                            # Find the card object
+                            for c in self.selected_cards:
+                                if str(c.id) == target_card_id:
+                                    target_card = c
+                                    break
+                        else:
+                            widget.setChecked(False)
+                            widget.setIcon(Icons.get('fa5s.user-circle', COLORS['text_secondary']))
+        
+        # 2. 触发业务逻辑
+        if target_card:
+            # 如果在单开模式下切换，才调用 switch_card_single_mode
+            if self.fill_mode == "single" and self.current_card != target_card:
+                 self.switch_card_single_mode(target_card)
+            
+            # 始终刷新右侧面板
+            self.show_card_info(target_card)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：处理点击选中"""
+        if event.type() == QEvent.Type.MouseButtonPress:
+             # 点击容器或标题栏选中
+             card_id = obj.property("card_id")
+             if card_id:
+                 self.select_card_by_id(card_id)
+                 
+        elif event.type() == QEvent.Type.FocusIn:
+             # WebView获得焦点时选中
+             card_id = obj.property("card_id")
+             if card_id:
+                 self.select_card_by_id(card_id)
+        
+        return super().eventFilter(obj, event)
+
     def create_card_list_item(self, card) -> QPushButton:
         """创建名片列表项 - 一比一还原设计图"""
         btn = QPushButton(card.name)
@@ -2145,24 +2221,7 @@ class NewFillWindow(QDialog):
         
         # 点击逻辑：处理选中状态互斥
         def on_click():
-            # 取消其他按钮的选中状态
-            for i in range(self.cards_list_layout.count()):
-                item = self.cards_list_layout.itemAt(i)
-                if item and item.widget():
-                    widget = item.widget()
-                    if isinstance(widget, QPushButton) and widget != btn:
-                        widget.setChecked(False)
-                        widget.setIcon(Icons.get('fa5s.user-circle', COLORS['text_secondary']))
-
-            btn.setChecked(True)
-            # 选中时图标变色
-            btn.setIcon(Icons.check_circle('primary'))
-            
-            # 单开模式下，点击切换WebView内容
-            if self.fill_mode == "single" and self.current_card != card:
-                self.switch_card_single_mode(card)
-                
-            self.show_card_info(card)
+            self.select_card_by_id(str(card.id))
             
         btn.clicked.connect(on_click)
         return btn
@@ -2546,6 +2605,10 @@ class NewFillWindow(QDialog):
         class WebEnginePage(QWebEnginePage):
             def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
                 pass
+            
+            def javaScriptConfirm(self, securityOrigin, msg):
+                """自动接受离开页面的确认对话框（如登录跳转时的 beforeunload）"""
+                return True
         
         web_view.setPage(WebEnginePage(profile, web_view))
         
@@ -3832,19 +3895,12 @@ class NewFillWindow(QDialog):
             field_key = field.get('field_key', '')
             field_value = field.get('field_value', '')
             
-            # 检查是否已填充
-            is_filled = bool(field_value)
-            status_icon = '✅' if is_filled else '⚠️'
-            input_class = 'filled' if is_filled else ''
-            
             fields_html += f'''
             <div class="field-group">
                 <div class="field-header">
                     <label>{field_name}</label>
-                    <span class="field-status">{status_icon}</span>
                 </div>
                 <input type="text" 
-                       class="{input_class}"
                        id="field_{i}" 
                        data-key="{field_key}" 
                        data-name="{field_name}"
@@ -3852,10 +3908,6 @@ class NewFillWindow(QDialog):
                        placeholder="请输入{field_name}">
             </div>
             '''
-        
-        # 计算填充数量
-        filled_count = sum(1 for f in filled_data if f.get('field_value'))
-        total_count = len(filled_data)
         
         html = f'''
         <!DOCTYPE html>
@@ -3885,14 +3937,6 @@ class NewFillWindow(QDialog):
                     color: #1a1a1a;
                     margin-bottom: 8px;
                 }}
-                .subtitle {{
-                    color: #666;
-                    font-size: 14px;
-                    display: inline-block;
-                    background: #f5f5f5;
-                    padding: 4px 12px;
-                    border-radius: 12px;
-                }}
                 .form-container {{
                     max-width: 600px;
                     margin: 0 auto;
@@ -3915,9 +3959,6 @@ class NewFillWindow(QDialog):
                     font-weight: 600;
                     color: #444;
                 }}
-                .field-status {{
-                    font-size: 12px;
-                }}
                 input {{
                     width: 100%;
                     padding: 12px 16px;
@@ -3932,10 +3973,6 @@ class NewFillWindow(QDialog):
                 input:focus {{
                     border-color: #1890ff;
                     box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
-                }}
-                input.filled {{
-                    background: #f6ffed;
-                    border-color: #b7eb8f;
                 }}
                 input::placeholder {{
                     color: #bfbfbf;
@@ -3988,7 +4025,6 @@ class NewFillWindow(QDialog):
         <body>
             <div class="header">
                 <div class="title">📋 报名工具表单</div>
-                <div class="subtitle">✅ 已自动填充 {filled_count}/{total_count} 个字段</div>
             </div>
             <div class="form-container">
                 {fields_html}
@@ -4740,6 +4776,44 @@ class NewFillWindow(QDialog):
 (function() {{
     console.log('🚀 开始填写石墨文档表单...');
     
+    // 🔧 自动适配移动端视口
+    (function adaptViewport() {{
+        // 移除现有 viewport
+        const existingViewport = document.querySelector('meta[name="viewport"]');
+        if (existingViewport) {{
+            existingViewport.remove();
+        }}
+        
+        // 添加适配的 viewport
+        const viewport = document.createElement('meta');
+        viewport.name = 'viewport';
+        viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        document.head.appendChild(viewport);
+        
+        // 注入移动端适配样式
+        const style = document.createElement('style');
+        style.textContent = `
+            body {{
+                width: 100% !important;
+                min-width: 100% !important;
+                max-width: 100% !important;
+                overflow-x: hidden !important;
+            }}
+            main, .FormFillPageWrapper-sc-8cs2d7, form {{
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 15px !important;
+                box-sizing: border-box !important;
+            }}
+            input, textarea {{
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }}
+        `;
+        document.head.appendChild(style);
+        console.log('📱 已适配移动端视口');
+    }})();
+    
     const fillData = {fill_data_json};
     let fillCount = 0;
     const results = [];
@@ -4773,212 +4847,415 @@ class NewFillWindow(QDialog):
         return inputs;
     }}
     
-    // 【核心】获取输入框的所有可能标识 - 参考AutoFillEngineV2
-    function getInputIdentifiers(input) {{
-        const identifiers = [];
+    // 【核心】石墨文档专用：按DOM顺序提取问题标题并与输入框配对
+    // 这个函数会被缓存，只执行一次
+    let _questionLabelsCache = null;
+    function getQuestionLabels() {{
+        if (_questionLabelsCache) return _questionLabelsCache;
         
-        // 1. aria-labelledby 查找
+        // 获取整个页面文本，提取所有问题标题
+        const pageText = document.body.innerText || '';
+        const labels = [];
+        
+        // 匹配所有 "序号. * 标签" 或 "序号. 标签" 格式
+        // 注意：序号后面可能有空格、星号、空格，然后是标签
+        const regex = /(\\d{{1,2}})\\.\\s*\\*?\\s*([^\\d\\n]{{1,30}})(?=\\d{{1,2}}\\.|$|\\n)/g;
+        let match;
+        
+        while ((match = regex.exec(pageText)) !== null) {{
+            const num = parseInt(match[1]);
+            let label = match[2].trim();
+            // 清理标签末尾的特殊字符
+            label = label.replace(/[\\s*]+$/, '').trim();
+            if (label && label.length > 0 && label.length <= 30) {{
+                labels.push({{ num: num, label: label }});
+            }}
+        }}
+        
+        // 按序号排序
+        labels.sort((a, b) => a.num - b.num);
+        _questionLabelsCache = labels;
+        console.log('📋 提取到的问题标题:', labels.map(l => `${{l.num}}.${{l.label}}`).join(', '));
+        return labels;
+    }}
+    
+    // 获取输入框对应的问题标签（基于DOM顺序）
+    function getInputIdentifiers(input, inputIndex) {{
+        const identifiers = [];
+        const MAX_LABEL_LENGTH = 30;
+        
+        // 辅助函数：添加标识符
+        function addIdentifier(text, priority = 0) {{
+            if (!text) return;
+            let cleaned = text.trim();
+            cleaned = cleaned.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
+            cleaned = cleaned.replace(/^[\\s*]+|[\\s*]+$/g, '').trim();
+            if (cleaned && cleaned.length > 0 && cleaned.length <= MAX_LABEL_LENGTH) {{
+                if (!identifiers.some(item => item.text === cleaned)) {{
+                    identifiers.push({{ text: cleaned, priority: priority }});
+                }}
+            }}
+        }}
+        
+        // 1. 【最高优先级】按索引获取对应的问题标签
+        const questionLabels = getQuestionLabels();
+        if (inputIndex !== undefined && inputIndex < questionLabels.length) {{
+            addIdentifier(questionLabels[inputIndex].label, 100);
+        }}
+        
+        // 2. aria-labelledby 查找
         const ariaLabelledBy = input.getAttribute('aria-labelledby');
         if (ariaLabelledBy) {{
             ariaLabelledBy.split(' ').forEach(id => {{
                 const el = document.getElementById(id);
                 if (el) {{
-                    const text = (el.innerText || el.textContent || '').trim();
-                    if (text && text !== '.') identifiers.push(text);
+                    addIdentifier(el.innerText || el.textContent, 90);
                 }}
             }});
         }}
         
-        // 2. Label 标签
+        // 3. Label 标签
         if (input.labels && input.labels.length > 0) {{
             input.labels.forEach(label => {{
-                const text = (label.innerText || label.textContent || '').trim();
-                if (text) identifiers.push(text);
+                addIdentifier(label.innerText || label.textContent, 90);
             }});
         }}
         
-        // 3. 通过 for 属性查找 label
-        if (input.id) {{
-            const label = document.querySelector(`label[for="${{input.id}}"]`);
-            if (label) {{
-                const text = (label.innerText || label.textContent || '').trim();
-                if (text) identifiers.push(text);
-            }}
-        }}
+        // 4. placeholder, title, aria-label
+        if (input.placeholder) addIdentifier(input.placeholder, 80);
+        if (input.title) addIdentifier(input.title, 80);
+        if (input.getAttribute('aria-label')) addIdentifier(input.getAttribute('aria-label'), 80);
         
-        // 4. placeholder, name, id, title, aria-label
-        if (input.placeholder) identifiers.push(input.placeholder.trim());
-        if (input.name) identifiers.push(input.name.trim());
-        if (input.id) identifiers.push(input.id.trim());
-        if (input.title) identifiers.push(input.title.trim());
-        if (input.getAttribute('aria-label')) identifiers.push(input.getAttribute('aria-label').trim());
-        
-        // 5. 【石墨文档特殊】向上查找包含序号的问题容器
+        // 5. 向上查找包含单个问题的容器
         let parent = input.parentElement;
-        for (let depth = 0; depth < 10 && parent; depth++) {{
+        for (let depth = 0; depth < 6 && parent; depth++) {{
             const parentText = (parent.innerText || '').trim();
-            // 匹配 "01.* 小红书名字" 格式
-            const match = parentText.match(/^(\\d{{1,2}})\\.\\s*\\*?\\s*([^\\n]+)/);
-            if (match) {{
-                const labelText = match[2].trim();
-                if (labelText && !identifiers.includes(labelText)) {{
-                    identifiers.push(labelText);
-                }}
-                break; // 找到就停止
-            }}
-            parent = parent.parentElement;
-        }}
-        
-        // 6. 父元素中的 label 和直接文本
-        parent = input.parentElement;
-        for (let depth = 0; depth < 5 && parent; depth++) {{
-            // 查找 label 元素
-            const labelEl = parent.querySelector('label');
-            if (labelEl) {{
-                const text = (labelEl.innerText || labelEl.textContent || '').trim();
-                if (text && !identifiers.includes(text)) identifiers.push(text);
-            }}
-            
-            // 获取父元素的直接文本内容
-            Array.from(parent.childNodes).forEach(node => {{
-                if (node.nodeType === Node.TEXT_NODE) {{
-                    const text = node.textContent.trim();
-                    if (text && text.length > 0 && text.length < 50 && !identifiers.includes(text)) {{
-                        identifiers.push(text);
+            if (parentText.length <= 60) {{
+                const matches = parentText.match(/(\\d{{1,2}})\\.\\s*\\*?/g);
+                if (matches && matches.length === 1) {{
+                    const labelMatch = parentText.match(/^(\\d{{1,2}})\\.\\s*\\*?\\s*([^\\n]+)/);
+                    if (labelMatch && labelMatch[2]) {{
+                        const label = labelMatch[2].trim().split(/[\\n\\d]/)[0].trim();
+                        addIdentifier(label, 70);
+                        break;
                     }}
                 }}
-            }});
-            
+            }}
             parent = parent.parentElement;
         }}
         
-        // 7. 前置兄弟元素
+        // 6. 前置兄弟元素
         let sibling = input.previousElementSibling;
-        let siblingCount = 0;
-        while (sibling && siblingCount < 3) {{
+        if (sibling) {{
             const text = (sibling.innerText || sibling.textContent || '').trim();
-            // 清理序号
-            const cleanText = text.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
-            if (cleanText && cleanText.length < 50 && !identifiers.includes(cleanText)) {{
-                identifiers.push(cleanText);
+            if (text.length <= MAX_LABEL_LENGTH) {{
+                addIdentifier(text, 50);
             }}
-            sibling = sibling.previousElementSibling;
-            siblingCount++;
         }}
         
-        // 8. 向上遍历查找前置兄弟
-        parent = input.parentElement;
-        for (let depth = 0; depth < 8 && parent; depth++) {{
-            const prevSib = parent.previousElementSibling;
-            if (prevSib) {{
-                const text = (prevSib.innerText || prevSib.textContent || '').trim();
-                // 清理序号
-                const cleanText = text.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
-                if (cleanText && cleanText.length > 1 && cleanText.length < 50 && !identifiers.includes(cleanText)) {{
-                    identifiers.push(cleanText);
-                    break;
-                }}
-            }}
-            parent = parent.parentElement;
-        }}
+        // 按优先级排序
+        identifiers.sort((a, b) => {{
+            if (b.priority !== a.priority) return b.priority - a.priority;
+            return a.text.length - b.text.length;
+        }});
         
-        return identifiers;
+        return identifiers.map(item => item.text);
     }}
     
-    // 清理文本用于匹配
+    // 清理文本用于匹配 - 增强版
     function cleanText(text) {{
         if (!text) return '';
         return String(text)
             .toLowerCase()
-            .replace(/[：:*？?！!。.、，,\\s\\-_\\(\\)（）【】\\[\\]]/g, '')
+            .replace(/[：:*？?！!。.、，,\\s\\-_\\(\\)（）【】\\[\\]\\n\\r\\t\\/／\\\\|｜;；\\u0027\\u0022\\u2795+]+/g, '')
             .trim();
     }}
     
-    // 【核心】匹配关键词 - 评分系统
+    // 标准化文本 - 处理常见变体
+    function normalizeText(text) {{
+        if (!text) return '';
+        let normalized = cleanText(text);
+        // ID 变体统一
+        normalized = normalized.replace(/id/gi, 'id');
+        // 中英文混合处理
+        normalized = normalized.replace(/vx/gi, '微信');
+        normalized = normalized.replace(/wx/gi, '微信');
+        return normalized;
+    }}
+    
+    // 分割关键词为子关键词数组 - 支持多种分隔符
+    function splitKeywords(keyword) {{
+        if (!keyword) return [];
+        // 支持：顿号、逗号、竖线、分号、换行、斜杠、加号 等分隔符
+        return keyword
+            .split(/[|,;，；、\\n\\r\\t/／\\\\｜\\u2795+]+/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+    }}
+    
+    // 提取核心词（2个字及以上的有意义词汇）
+    function extractCoreWords(text) {{
+        const cleaned = cleanText(text);
+        // 常见的核心词汇 - 按优先级排序
+        const corePatterns = [
+            // 平台相关
+            '小红书', '蒲公英', '微信', '微博',
+            // ID相关
+            'id', '账号', '昵称', '主页', '名字', '名称',
+            // 数据相关  
+            '粉丝', '点赞', '赞藏', '互动', '阅读', '播放', '曝光', '收藏',
+            '中位数', '均赞', 'cpm', 'cpe',
+            // 价格相关
+            '价格', '报价', '报备', '返点', '裸价',
+            // 内容类型
+            '视频', '图文', '链接',
+            // 联系方式
+            '手机', '电话', '地址',
+            // 个人信息
+            '姓名', '年龄', '性别', '城市', '地区', 'ip',
+            // 合作相关
+            '档期', '类别', '类型', '领域', '备注', '授权', '分发', '排竞',
+            // 特殊
+            '平台', '健康', '等级', '保价', '配合'
+        ];
+        const found = [];
+        for (const pattern of corePatterns) {{
+            if (cleaned.includes(pattern)) {{
+                found.push(pattern);
+            }}
+        }}
+        return found;
+    }}
+    
+    // 计算最长公共子序列长度 (LCS)
+    function lcsLength(s1, s2) {{
+        const m = s1.length, n = s2.length;
+        if (m === 0 || n === 0) return 0;
+        const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+        for (let i = 1; i <= m; i++) {{
+            for (let j = 1; j <= n; j++) {{
+                if (s1[i-1] === s2[j-1]) {{
+                    dp[i][j] = dp[i-1][j-1] + 1;
+                }} else {{
+                    dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+                }}
+            }}
+        }}
+        return dp[m][n];
+    }}
+    
+    // 计算最长连续公共子串长度
+    function longestCommonSubstring(s1, s2) {{
+        const m = s1.length, n = s2.length;
+        if (m === 0 || n === 0) return 0;
+        let maxLen = 0;
+        const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+        for (let i = 1; i <= m; i++) {{
+            for (let j = 1; j <= n; j++) {{
+                if (s1[i-1] === s2[j-1]) {{
+                    dp[i][j] = dp[i-1][j-1] + 1;
+                    maxLen = Math.max(maxLen, dp[i][j]);
+                }}
+            }}
+        }}
+        return maxLen;
+    }}
+    
+    // 【核心】匹配关键词 - 增强版评分系统
     function matchKeyword(identifiers, keyword) {{
-        const cleanKeyword = cleanText(keyword);
-        if (!cleanKeyword) return {{ matched: false, identifier: null, score: 0 }};
+        if (!keyword) return {{ matched: false, identifier: null, score: 0 }};
         
-        // 支持顿号、逗号、竖线分隔的多个关键词
-        const subKeywords = keyword.split(/[|,;，；、]/).map(k => cleanText(k)).filter(k => k);
-        if (subKeywords.length === 0) subKeywords.push(cleanKeyword);
+        // 分割成子关键词
+        const subKeywords = splitKeywords(keyword);
+        if (subKeywords.length === 0) return {{ matched: false, identifier: null, score: 0 }};
         
         let bestScore = 0;
         let bestIdentifier = null;
+        let bestSubKey = null;
         
         for (const subKey of subKeywords) {{
+            const cleanSubKey = normalizeText(subKey);
+            if (!cleanSubKey || cleanSubKey.length < 1) continue;
+            
+            // 提取子关键词的核心词
+            const subKeyCoreWords = extractCoreWords(subKey);
+            
             for (const identifier of identifiers) {{
-                const cleanIdentifier = cleanText(identifier);
-                if (!cleanIdentifier) continue;
+                const cleanIdentifier = normalizeText(identifier);
+                if (!cleanIdentifier || cleanIdentifier.length < 1) continue;
+                
+                // 提取标识符的核心词
+                const identifierCoreWords = extractCoreWords(identifier);
                 
                 let currentScore = 0;
                 
-                // 1. 完全匹配 (最高优先级)
-                if (cleanIdentifier === subKey) {{
+                // 1. 完全匹配 (最高优先级) - 100分
+                if (cleanIdentifier === cleanSubKey) {{
                     currentScore = 100;
                 }} 
-                // 2. 包含匹配 (次高优先级)
-                else if (cleanIdentifier.includes(subKey)) {{
-                    const ratio = subKey.length / cleanIdentifier.length;
-                    currentScore = 80 + (ratio * 10); 
-                }}
-                else if (subKey.includes(cleanIdentifier)) {{
-                    currentScore = 70;
-                }}
-                // 3. 部分字符匹配
-                else {{
-                    let commonChars = 0;
-                    for (const char of subKey) {{
-                        if (cleanIdentifier.includes(char)) commonChars++;
+                // 2. 标识符完全包含子关键词（如 "小红书昵称" 包含 "昵称"）
+                else if (cleanIdentifier.includes(cleanSubKey) && cleanSubKey.length >= 2) {{
+                    const ratio = cleanSubKey.length / cleanIdentifier.length;
+                    // 长度占比越高分数越高
+                    if (ratio >= 0.8) {{
+                        currentScore = 95;
+                    }} else if (ratio >= 0.5) {{
+                        currentScore = 88 + Math.floor(ratio * 10);
+                    }} else {{
+                        currentScore = 78 + Math.floor(ratio * 15);
                     }}
-                    const similarity = commonChars / subKey.length;
-                    if (similarity >= 0.5) {{
-                        currentScore = Math.floor(similarity * 60);
+                }}
+                // 3. 子关键词完全包含标识符（如 "小红书账号昵称" 包含 "昵称"）
+                else if (cleanSubKey.includes(cleanIdentifier) && cleanIdentifier.length >= 2) {{
+                    const ratio = cleanIdentifier.length / cleanSubKey.length;
+                    if (ratio >= 0.5) {{
+                        currentScore = 75 + Math.floor(ratio * 15);
+                    }} else if (ratio >= 0.3) {{
+                        currentScore = 65 + Math.floor(ratio * 15);
+                    }} else {{
+                        currentScore = 55 + Math.floor(ratio * 20);
+                    }}
+                }}
+                // 4. 核心词匹配 - 检查是否有相同的核心词
+                else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
+                    const commonCoreWords = subKeyCoreWords.filter(w => identifierCoreWords.includes(w));
+                    if (commonCoreWords.length > 0) {{
+                        // 核心词匹配数量和占比
+                        const coreMatchRatio = commonCoreWords.length / Math.max(subKeyCoreWords.length, identifierCoreWords.length);
+                        
+                        // 如果核心词完全一致
+                        if (commonCoreWords.length === subKeyCoreWords.length && 
+                            commonCoreWords.length === identifierCoreWords.length) {{
+                            currentScore = 90;
+                        }}
+                        // 单核心词匹配
+                        else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1 && 
+                            commonCoreWords.length === 1) {{
+                            currentScore = 85;
+                        }}
+                        // 多核心词部分匹配
+                        else {{
+                            currentScore = 60 + Math.floor(coreMatchRatio * 25);
+                        }}
+                    }}
+                }}
+                
+                // 5. 连续子串匹配（如果上面分数不够高）
+                if (currentScore < 60 && cleanSubKey.length >= 2 && cleanIdentifier.length >= 2) {{
+                    const lcsStrLen = longestCommonSubstring(cleanSubKey, cleanIdentifier);
+                    const minLen = Math.min(cleanSubKey.length, cleanIdentifier.length);
+                    if (lcsStrLen >= 2) {{
+                        const lcsRatio = lcsStrLen / minLen;
+                        let substrScore = 0;
+                        if (lcsRatio >= 0.8) {{
+                            substrScore = 70 + Math.floor(lcsRatio * 15);
+                        }} else if (lcsRatio >= 0.6 && lcsStrLen >= 3) {{
+                            substrScore = 55 + Math.floor(lcsRatio * 20);
+                        }} else if (lcsRatio >= 0.5 && lcsStrLen >= 3) {{
+                            substrScore = 50 + Math.floor(lcsRatio * 15);
+                        }}
+                        currentScore = Math.max(currentScore, substrScore);
+                    }}
+                }}
+                
+                // 6. 序列匹配（LCS）作为最后的模糊匹配手段
+                if (currentScore < 50 && cleanSubKey.length >= 3 && cleanIdentifier.length >= 3) {{
+                    const lcs = lcsLength(cleanSubKey, cleanIdentifier);
+                    const lcsRatio = lcs / Math.min(cleanSubKey.length, cleanIdentifier.length);
+                    // 要求至少80%的字符按顺序匹配
+                    if (lcsRatio >= 0.8 && lcs >= 3) {{
+                        const seqScore = 45 + Math.floor(lcsRatio * 15);
+                        currentScore = Math.max(currentScore, seqScore);
                     }}
                 }}
                 
                 if (currentScore > bestScore) {{
                     bestScore = currentScore;
                     bestIdentifier = identifier;
+                    bestSubKey = subKey;
                 }}
             }}
         }}
         
-        return {{ matched: bestScore > 0, identifier: bestIdentifier, score: bestScore }};
+        // 提高匹配阈值，避免过多误匹配
+        const threshold = 55;
+        return {{ 
+            matched: bestScore >= threshold, 
+            identifier: bestIdentifier, 
+            score: bestScore,
+            matchedKey: bestSubKey
+        }};
     }}
     
-    // 填充输入框 - React 兼容
+    // 填充输入框 - React 深度兼容（修复石墨文档提交问题）
     function fillInput(input, value) {{
+        // 1. 聚焦输入框
         input.focus();
-        input.value = value;
+        input.click();
         
-        // 触发所有事件
-        ['input', 'change', 'blur', 'keyup', 'keydown'].forEach(eventName => {{
-            input.dispatchEvent(new Event(eventName, {{ bubbles: true, cancelable: true }}));
+        // 2. 清空现有内容
+        input.value = '';
+        
+        // 3. 使用原生 setter 设置值（React 关键）
+        const isTextArea = input.tagName === 'TEXTAREA';
+        const proto = isTextArea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        
+        try {{
+            const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            nativeValueSetter.call(input, value);
+        }} catch (e) {{
+            input.value = value;
+        }}
+        
+        // 4. 触发 React 合成事件 - 使用 InputEvent（关键！）
+        const inputEvent = new InputEvent('input', {{
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: value
+        }});
+        input.dispatchEvent(inputEvent);
+        
+        // 5. 触发 change 事件
+        const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
+        input.dispatchEvent(changeEvent);
+        
+        // 6. 模拟键盘事件序列
+        const keyboardEvents = ['keydown', 'keypress', 'keyup'];
+        keyboardEvents.forEach(eventName => {{
+            const keyEvent = new KeyboardEvent(eventName, {{
+                bubbles: true,
+                cancelable: true,
+                key: value.slice(-1) || 'a',
+                code: 'KeyA'
+            }});
+            input.dispatchEvent(keyEvent);
         }});
         
-        // React/Vue 原生 setter
+        // 7. 再次确认值已设置
+        if (input.value !== value) {{
+            input.value = value;
+            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }}
+        
+        // 8. 触发 blur 完成编辑
+        input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+        
+        // 9. 尝试触发 React 内部状态更新
         try {{
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 'value'
-            ).set;
-            if (nativeInputValueSetter) {{
-                nativeInputValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            // React Fiber 节点查找
+            const reactKey = Object.keys(input).find(key => 
+                key.startsWith('__reactFiber$') || 
+                key.startsWith('__reactInternalInstance$') ||
+                key.startsWith('__reactProps$')
+            );
+            if (reactKey && input[reactKey]) {{
+                const props = input[reactKey].memoizedProps || input[reactKey].pendingProps || {{}};
+                if (props.onChange) {{
+                    props.onChange({{ target: input, currentTarget: input }});
+                }}
             }}
         }} catch (e) {{}}
-        
-        try {{
-            const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, 'value'
-            ).set;
-            if (nativeTextAreaValueSetter && input.tagName === 'TEXTAREA') {{
-                nativeTextAreaValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}
-        }} catch (e) {{}}
-        
-        input.blur();
     }}
     
     // 主执行函数 - 以输入框为主体，为每个输入框找最佳匹配的名片字段
@@ -5001,37 +5278,55 @@ class NewFillWindow(QDialog):
         
         // 打印所有输入框的标识信息
         allInputs.forEach((input, index) => {{
-            const identifiers = getInputIdentifiers(input);
-            console.log(`\\n输入框 ${{index + 1}}: ${{identifiers.slice(0, 3).join(' | ')}}`);
+            const identifiers = getInputIdentifiers(input, index);
+            console.log(`\\n输入框 ${{index + 1}}: ${{identifiers.slice(0, 5).join(' | ')}}`);
         }});
         
         console.log('\\n🎯 开始匹配和填写...');
         
         // 以输入框为主体遍历，为每个输入框找最佳匹配的名片字段
+        const usedCards = new Set(); // 记录已使用的名片字段，避免重复使用
+        
         allInputs.forEach((input, index) => {{
-            const identifiers = getInputIdentifiers(input);
-            let bestMatch = {{ item: null, score: 0, identifier: null }};
+            const identifiers = getInputIdentifiers(input, index);
+            let bestMatch = {{ item: null, score: 0, identifier: null, matchedKey: null }};
             
-            // 在所有名片字段中找最佳匹配
+            console.log(`\\n🔍 输入框${{index + 1}} 标识符: ${{JSON.stringify(identifiers.slice(0, 5))}}`);
+            
+            // 在所有名片字段中找最佳匹配（优先未使用的字段）
             fillData.forEach(item => {{
                 const matchResult = matchKeyword(identifiers, item.key);
-                if (matchResult.matched && matchResult.score > bestMatch.score) {{
-                    bestMatch = {{ item: item, score: matchResult.score, identifier: matchResult.identifier }};
+                if (matchResult.matched) {{
+                    // 如果该字段已被使用，需要更高的分数才能覆盖
+                    const effectiveScore = usedCards.has(item.key) ? matchResult.score - 10 : matchResult.score;
+                    
+                    if (effectiveScore > bestMatch.score) {{
+                        bestMatch = {{ 
+                            item: item, 
+                            score: matchResult.score,
+                            identifier: matchResult.identifier,
+                            matchedKey: matchResult.matchedKey
+                        }};
+                    }}
                 }}
             }});
             
-            // 如果找到匹配且分数足够高，填写
-            if (bestMatch.item && bestMatch.score >= 50) {{
+            // 如果找到匹配且分数足够高，填写（阈值 55）
+            if (bestMatch.item && bestMatch.score >= 55) {{
                 fillInput(input, bestMatch.item.value);
-                console.log(`✅ 填写输入框${{index + 1}}: "${{bestMatch.item.key}}" = "${{bestMatch.item.value}}" (匹配: "${{bestMatch.identifier}}", 分数: ${{bestMatch.score}})`);
+                usedCards.add(bestMatch.item.key);
+                console.log(`✅ 填写${{index + 1}}: "${{bestMatch.identifier}}" -> "${{bestMatch.matchedKey}}" = "${{bestMatch.item.value}}" (分数:${{bestMatch.score}})`);
                 fillCount++;
                 results.push({{
                     key: bestMatch.item.key,
                     value: bestMatch.item.value,
                     matched: bestMatch.identifier,
+                    matchedKey: bestMatch.matchedKey,
                     score: bestMatch.score,
                     success: true
                 }});
+            }} else {{
+                console.log(`⚠️ 输入框${{index + 1}} 未匹配 (最高分:${{bestMatch.score}}, 标识符:"${{bestMatch.identifier || '无'}}")`);
             }}
         }});
         
@@ -5039,17 +5334,14 @@ class NewFillWindow(QDialog):
         const filledKeys = new Set(results.filter(r => r.success).map(r => r.key));
         fillData.forEach(item => {{
             if (!filledKeys.has(item.key)) {{
-                const hasResult = results.some(r => r.key === item.key);
-                if (!hasResult) {{
-                    console.warn(`⚠️ 名片字段未使用: "${{item.key}}"`);
-                    results.push({{
-                        key: item.key,
-                        value: item.value,
-                        matched: null,
-                        score: 0,
-                        success: false
-                    }});
-                }}
+                console.warn(`⚠️ 名片字段未使用: "${{item.key.substring(0, 30)}}..."`);
+                results.push({{
+                    key: item.key,
+                    value: item.value,
+                    matched: null,
+                    score: 0,
+                    success: false
+                }});
             }}
         }});
         
@@ -6538,6 +6830,48 @@ class NewFillWindow(QDialog):
 (function() {{
     console.log('🐧 开始填写腾讯问卷...');
     
+    // 🔧 自动适配移动端视口
+    (function adaptViewport() {{
+        // 移除现有 viewport
+        const existingViewport = document.querySelector('meta[name="viewport"]');
+        if (existingViewport) {{
+            existingViewport.remove();
+        }}
+        
+        // 添加适配的 viewport
+        const viewport = document.createElement('meta');
+        viewport.name = 'viewport';
+        viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        document.head.appendChild(viewport);
+        
+        // 注入移动端适配样式
+        const style = document.createElement('style');
+        style.textContent = `
+            body {{
+                width: 100% !important;
+                min-width: 100% !important;
+                max-width: 100% !important;
+                overflow-x: hidden !important;
+            }}
+            .form-wrapper, .question-form, .survey-wrapper {{
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 10px !important;
+                box-sizing: border-box !important;
+            }}
+            .question {{
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }}
+            .inputs-input {{
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }}
+        `;
+        document.head.appendChild(style);
+        console.log('📱 已适配移动端视口');
+    }})();
+    
     const fillData = {fill_data_json};
     let fillCount = 0;
     const results = [];
@@ -6560,29 +6894,102 @@ class NewFillWindow(QDialog):
         }});
     }}
     
+    // 【腾讯文档专用】按DOM顺序提取问题标题
+    let _questionLabelsCache = null;
+    function getQuestionLabels() {{
+        if (_questionLabelsCache) return _questionLabelsCache;
+        
+        const pageText = document.body.innerText || '';
+        const labels = [];
+        
+        // 匹配腾讯文档格式: "0 1 * 小红书账号" 或 "01 * 小红书账号" 或 "1 * 小红书账号"
+        // 也兼容: "01. * 标签" 或 "1. 标签" 格式
+        const patterns = [
+            // 格式1: "0 1 * 标签" (数字之间有空格)
+            /(\\d)\\s+(\\d)\\s*\\*?\\s*([^\\d\\n*]{{1,30}})(?=\\d\\s+\\d|$|\\n)/g,
+            // 格式2: "01 * 标签" (两位数字连在一起)
+            /(\\d{{1,2}})\\s*\\*\\s*([^\\d\\n*]{{1,30}})(?=\\d{{1,2}}\\s*\\*|$|\\n)/g,
+            // 格式3: "01. * 标签" (带点号)
+            /(\\d{{1,2}})\\.\\s*\\*?\\s*([^\\d\\n]{{1,30}})(?=\\d{{1,2}}\\.|$|\\n)/g
+        ];
+        
+        // 尝试所有格式
+        for (const regex of patterns) {{
+            let match;
+            while ((match = regex.exec(pageText)) !== null) {{
+                let num, label;
+                if (match.length === 4) {{
+                    // 格式1: 两个数字分开
+                    num = parseInt(match[1] + match[2]);
+                    label = match[3].trim();
+                }} else {{
+                    // 格式2/3: 数字连在一起
+                    num = parseInt(match[1]);
+                    label = match[2].trim();
+                }}
+                
+                // 清理标签
+                label = label.replace(/[\\s*]+$/, '').trim();
+                label = label.split(/[\\n此题]/)[0].trim(); // 去掉"此题涉及隐私"等后缀
+                
+                if (label && label.length > 0 && label.length <= 30) {{
+                    // 避免重复添加
+                    if (!labels.some(l => l.num === num)) {{
+                        labels.push({{ num: num, label: label }});
+                    }}
+                }}
+            }}
+            
+            // 如果找到了问题，就不再尝试其他格式
+            if (labels.length > 0) break;
+        }}
+        
+        // 按序号排序
+        labels.sort((a, b) => a.num - b.num);
+        _questionLabelsCache = labels;
+        console.log('📋 提取到的问题标题:', labels.map(l => `${{l.num}}.${{l.label}}`).join(', '));
+        return labels;
+    }}
+    
     // 获取所有问题字段
     function getAllFields() {{
         const fields = [];
+        const questionLabels = getQuestionLabels();
         
-        // 腾讯问卷使用 .question 作为问题容器
+        // 方式1: 查找腾讯问卷标准结构 .question
         document.querySelectorAll('.question').forEach((question, index) => {{
-            // 获取问题标题 - 在 .question-title .text .pe-line 中
             const titleEl = question.querySelector('.question-title .text .pe-line');
             const title = titleEl ? titleEl.innerText.trim() : '';
-            
-            // 获取输入框 - .inputs-input
-            const input = question.querySelector('.inputs-input');
+            const input = question.querySelector('.inputs-input, input, textarea');
             
             if (title && input) {{
-                fields.push({{
-                    index: index,
-                    title: title,
-                    input: input,
-                    question: question
-                }});
+                fields.push({{ index: index, title: title, input: input, question: question }});
                 console.log(`  字段 ${{index + 1}}: "${{title}}"`);
             }}
         }});
+        
+        // 方式2: 如果没找到标准结构，使用通用查找
+        if (fields.length === 0) {{
+            const allInputs = [];
+            document.querySelectorAll('input[type="text"], input:not([type]), textarea').forEach(input => {{
+                const style = window.getComputedStyle(input);
+                if (style.display !== 'none' && style.visibility !== 'hidden' && input.offsetParent !== null) {{
+                    if (!input.disabled && !input.readOnly) {{
+                        allInputs.push(input);
+                    }}
+                }}
+            }});
+            
+            // 按索引与问题标题配对
+            allInputs.forEach((input, index) => {{
+                let title = '';
+                if (index < questionLabels.length) {{
+                    title = questionLabels[index].label;
+                }}
+                fields.push({{ index: index, title: title, input: input, question: null }});
+                console.log(`  字段 ${{index + 1}}: "${{title}}"`);
+            }});
+        }}
         
         return fields;
     }}
@@ -6640,28 +7047,82 @@ class NewFillWindow(QDialog):
         return {{ matched: bestScore >= 50, score: bestScore }};
     }}
     
-    // 填充输入框
+    // 填充输入框 - React/Vue 深度兼容（修复提交问题）
     function fillInput(input, value) {{
         try {{
+            // 1. 聚焦输入框
             input.focus();
-            input.value = '';
-            input.value = value;
+            input.click();
             
-            // 触发事件
-            ['input', 'change', 'blur', 'keyup', 'keydown'].forEach(e => {{
-                input.dispatchEvent(new Event(e, {{ bubbles: true, cancelable: true }}));
+            // 2. 清空现有内容
+            input.value = '';
+            
+            // 3. 使用原生 setter 设置值（React 关键）
+            const isTextArea = input.tagName === 'TEXTAREA';
+            const proto = isTextArea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+            
+            try {{
+                const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                nativeValueSetter.call(input, value);
+            }} catch (e) {{
+                input.value = value;
+            }}
+            
+            // 4. 触发 React 合成事件 - 使用 InputEvent（关键！）
+            const inputEvent = new InputEvent('input', {{
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertText',
+                data: value
+            }});
+            input.dispatchEvent(inputEvent);
+            
+            // 5. 触发 change 事件
+            const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
+            input.dispatchEvent(changeEvent);
+            
+            // 6. 模拟键盘事件序列
+            ['keydown', 'keypress', 'keyup'].forEach(eventName => {{
+                const keyEvent = new KeyboardEvent(eventName, {{
+                    bubbles: true,
+                    cancelable: true,
+                    key: value.slice(-1) || 'a',
+                    code: 'KeyA'
+                }});
+                input.dispatchEvent(keyEvent);
             }});
             
-            // React 兼容
+            // 7. 再次确认值已设置
+            if (input.value !== value) {{
+                input.value = value;
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}
+            
+            // 8. 触发 blur 完成编辑
+            input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+            
+            // 9. 尝试触发 React/Vue 内部状态更新
             try {{
-                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                if (setter) {{
-                    setter.call(input, value);
-                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                const reactKey = Object.keys(input).find(key => 
+                    key.startsWith('__reactFiber$') || 
+                    key.startsWith('__reactInternalInstance$') ||
+                    key.startsWith('__reactProps$')
+                );
+                if (reactKey && input[reactKey]) {{
+                    const props = input[reactKey].memoizedProps || input[reactKey].pendingProps || {{}};
+                    if (props.onChange) {{
+                        props.onChange({{ target: input, currentTarget: input }});
+                    }}
                 }}
             }} catch (e) {{}}
             
-            input.blur();
+            // 10. Vue 兼容 - 触发 v-model 更新
+            try {{
+                if (input.__vue__) {{
+                    input.__vue__.$emit('input', value);
+                }}
+            }} catch (e) {{}}
+            
             console.log(`    ✅ 已填入: "${{value}}"`);
             return true;
         }} catch (e) {{
@@ -7020,25 +7481,63 @@ class EditFieldRow(QWidget):
             
     def append_key_segment(self):
         """追加字段名片段"""
-        text, ok = QInputDialog.getText(
-            self,
-            "新增字段别名",
-            "请输入要追加的别名（将自动用顿号拼接）:",
-            QLineEdit.EchoMode.Normal,
-            ""
-        )
+        # 使用实例方式创建对话框，以便设置样式修复按钮不可见的问题
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("新增字段别名")
+        dialog.setLabelText("请输入要追加的别名（将自动用顿号拼接）:")
+        dialog.setTextEchoMode(QLineEdit.EchoMode.Normal)
+        dialog.setOkButtonText("确定")
+        dialog.setCancelButtonText("取消")
         
-        if ok and text.strip():
-            current_val = self.key_input.text().strip()
-            new_segment = text.strip()
-            
-            if current_val:
-                # 使用中文顿号拼接
-                new_val = f"{current_val}、{new_segment}"
-            else:
-                new_val = new_segment
+        # 修复样式：确保按钮和输入框清晰可见
+        dialog.setStyleSheet("""
+            QInputDialog {
+                background-color: white;
+            }
+            QLabel {
+                color: #333333;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QLineEdit {
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 6px;
+                color: #333333;
+                background-color: white;
+                selection-background-color: #007AFF;
+            }
+            QPushButton {
+                color: #333333;
+                background-color: #F5F5F7;
+                border: 1px solid #D1D1D6;
+                border-radius: 6px;
+                padding: 6px 16px;
+                min-width: 80px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #E5E5EA;
+                border-color: #C7C7CC;
+            }
+            QPushButton:pressed {
+                background-color: #D1D1D6;
+            }
+        """)
+        
+        if dialog.exec():
+            text = dialog.textValue()
+            if text.strip():
+                current_val = self.key_input.text().strip()
+                new_segment = text.strip()
                 
-            self.key_input.setText(new_val)
+                if current_val:
+                    # 使用中文顿号拼接
+                    new_val = f"{current_val}、{new_segment}"
+                else:
+                    new_val = new_segment
+                    
+                self.key_input.setText(new_val)
         
     def get_data(self):
         return self.key_input.text().strip(), self.value_input.text().strip(), self.fixed_template_id

@@ -597,7 +597,8 @@ class DatabaseManager:
 
     @staticmethod
     def create_user(username: str, password: str, role: str = 'user', is_active: bool = True, 
-                    expire_time=None, max_usage_count: int = -1) -> User:
+                    expire_time=None, max_usage_count: int = -1, max_device_count: int = 2,
+                    max_card_count: int = -1) -> User:
         """
         创建用户
         
@@ -608,6 +609,8 @@ class DatabaseManager:
             is_active: 是否激活
             expire_time: 过期时间
             max_usage_count: 最大使用次数
+            max_device_count: 最大设备数（-1 表示使用全局配置）
+            max_card_count: 最大名片数（-1 表示不限制）
         
         Returns:
             创建的用户对象
@@ -622,7 +625,9 @@ class DatabaseManager:
                 role=role,
                 is_active=is_active,
                 expire_time=expire_time,
-                max_usage_count=max_usage_count
+                max_usage_count=max_usage_count,
+                max_device_count=max_device_count,
+                max_card_count=max_card_count
             )
             user.set_password(password)
             user.save()
@@ -633,7 +638,8 @@ class DatabaseManager:
 
     @staticmethod
     def update_user(user_id: str, password: str = None, role: str = None, 
-                   is_active: bool = None, expire_time=None, max_usage_count: int = None) -> bool:
+                   is_active: bool = None, expire_time=None, max_usage_count: int = None,
+                   max_device_count: int = None, max_card_count: int = None) -> bool:
         """
         更新用户
         
@@ -644,6 +650,8 @@ class DatabaseManager:
             is_active: 新状态
             expire_time: 过期时间
             max_usage_count: 最大使用次数
+            max_device_count: 最大设备数（-1 表示使用全局配置）
+            max_card_count: 最大名片数（-1 表示不限制）
         
         Returns:
             是否成功
@@ -667,6 +675,12 @@ class DatabaseManager:
                 
             if max_usage_count is not None:
                 user.max_usage_count = max_usage_count
+            
+            if max_device_count is not None:
+                user.max_device_count = max_device_count
+            
+            if max_card_count is not None:
+                user.max_card_count = max_card_count
             
             user.save()
             return True
@@ -762,7 +776,12 @@ class DatabaseManager:
                 
             if keyword:
                 from mongoengine.queryset.visitor import Q
-                query = query.filter(Q(title__icontains=keyword) | Q(brand__icontains=keyword))
+                # 搜索内容、标题、品牌字段
+                query = query.filter(
+                    Q(content__icontains=keyword) | 
+                    Q(title__icontains=keyword) | 
+                    Q(brand__icontains=keyword)
+                )
             
             notices = list(query.order_by('-publish_date', '-created_at').limit(limit))
             
@@ -806,25 +825,22 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def create_notice(title: str, platform: str, link: str, **kwargs) -> Notice:
+    def create_notice(platform: str, **kwargs) -> Notice:
         """
-        创建通告
+        创建通告（简化版）
         
         Args:
-            title: 标题
-            platform: 平台
-            link: 链接
-            **kwargs: 其他字段 (category, brand, product_info, requirements, min_fans, reward, 
-                             publish_date, start_date, end_date, created_by)
+            platform: 平台（必需）
+            **kwargs: 其他字段 (category, content, status, publish_date,
+                             以及兼容旧数据的: title, link, brand, product_info, requirements, min_fans, reward,
+                             start_date, end_date, created_by)
         
         Returns:
             创建的通告对象
         """
         try:
             notice = Notice(
-                title=title,
                 platform=platform,
-                link=link,
                 **kwargs
             )
             notice.save()
@@ -1150,8 +1166,8 @@ class DatabaseManager:
 
     @staticmethod
     def create_fixed_template(field_name: str, field_value: str, category: str = '通用',
-                             description: str = None, order: int = 0, 
-                             created_by=None) -> FixedTemplate:
+                             description: str = None, placeholder: str = None,
+                             order: int = 0, created_by=None) -> FixedTemplate:
         """
         创建固定模板
         
@@ -1160,6 +1176,7 @@ class DatabaseManager:
             field_value: 字段值
             category: 分类
             description: 说明
+            placeholder: 占位提示（用于前端显示输入提示）
             order: 排序
             created_by: 创建人
         
@@ -1170,6 +1187,7 @@ class DatabaseManager:
             template = FixedTemplate(
                 field_name=field_name,
                 field_value=field_value,
+                placeholder=placeholder,
                 category=category,
                 description=description,
                 order=order,
@@ -1380,6 +1398,9 @@ class DatabaseManager:
                 success_records = FillRecord.objects(card__in=card_ids, success=True).count()
                 today_records = FillRecord.objects(card__in=card_ids, created_at__gte=today_start).count()
                 
+                # 今日新增通告数（从通告表查询）
+                today_notices = Notice.objects(created_at__gte=today_start).count()
+                
                 return {
                     'total_cards': user_cards.count(),
                     'total_links': Link.objects(user=user).count(),
@@ -1388,6 +1409,7 @@ class DatabaseManager:
                     'success_records': success_records,
                     'active_links': Link.objects(user=user, status='active').count(),
                     'today_records': today_records,
+                    'today_notices': today_notices,
                     'success_rate': round(success_records / total_records * 100) if total_records > 0 else 0
                 }
             else:
@@ -1395,6 +1417,9 @@ class DatabaseManager:
                 total_records = FillRecord.objects.count()
                 success_records = FillRecord.objects(success=True).count()
                 today_records = FillRecord.objects(created_at__gte=today_start).count()
+                
+                # 今日新增通告数（从通告表查询）
+                today_notices = Notice.objects(created_at__gte=today_start).count()
                 
                 # 计算昨日数据，用于环比
                 yesterday_start = today_start - timedelta(days=1)
@@ -1412,6 +1437,7 @@ class DatabaseManager:
                     'success_records': success_records,
                     'active_links': Link.objects(status='active').count(),
                     'today_records': today_records,
+                    'today_notices': today_notices,
                     'yesterday_records': yesterday_records,
                     'success_rate': round(success_records / total_records * 100) if total_records > 0 else 0
                 }

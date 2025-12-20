@@ -104,6 +104,8 @@ class User(Document):
     expire_time = DateTimeField(verbose_name="过期时间")
     usage_count = IntField(default=0, verbose_name="已使用次数")
     max_usage_count = IntField(default=-1, verbose_name="最大使用次数")  # -1 表示不限制
+    max_device_count = IntField(default=2, verbose_name="最大设备数")  # -1 表示使用全局配置，默认2台
+    max_card_count = IntField(default=-1, verbose_name="最大名片数")  # -1 表示不限制
     created_at = DateTimeField(default=datetime.now, verbose_name="创建时间")
     last_login = DateTimeField(verbose_name="最后登录时间")
     
@@ -139,6 +141,8 @@ class User(Document):
             'expire_time': self.expire_time.strftime('%Y-%m-%d %H:%M:%S') if self.expire_time else None,
             'usage_count': self.usage_count,
             'max_usage_count': self.max_usage_count,
+            'max_device_count': self.max_device_count,
+            'max_card_count': self.max_card_count,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
             'last_login': self.last_login.strftime('%Y-%m-%d %H:%M:%S') if self.last_login else None
         }
@@ -227,7 +231,7 @@ class Category(Document):
 
 class CardConfigItem(EmbeddedDocument):
     """名片配置项（嵌入式文档）"""
-    key = StringField(required=True, max_length=100, verbose_name="字段名")
+    key = StringField(required=True, verbose_name="字段名")  # 无长度限制，支持多别名组合
     value = StringField(required=True, verbose_name="字段值")
     order = IntField(default=0, verbose_name="排序")
     fixed_template_id = StringField(verbose_name="固定模板ID")  # 来源模板ID，用户自己添加的为空
@@ -476,20 +480,20 @@ class Notification(Document):
 
 
 class Notice(Document):
-    """通告广场-通告模型"""
-    title = StringField(required=True, max_length=200, verbose_name="标题")
-    subject = StringField(max_length=200, verbose_name="主题")  # 新增主题字段
+    """通告广场-通告模型（简化版）"""
+    # 核心字段
     platform = StringField(required=True, max_length=50, verbose_name="平台")
     category = StringField(max_length=50, verbose_name="类目")
-    brand = StringField(max_length=100, verbose_name="品牌")
+    content = StringField(verbose_name="通告内容")  # 长文本，包含所有信息和链接
     
-    # 详情信息
+    # 以下字段保留用于兼容旧数据，新数据主要使用 content 字段
+    title = StringField(max_length=200, verbose_name="标题")
+    subject = StringField(max_length=200, verbose_name="主题")
+    brand = StringField(max_length=100, verbose_name="品牌")
     product_info = StringField(verbose_name="产品情况")
     requirements = StringField(verbose_name="粉丝要求")
     min_fans = IntField(default=0, verbose_name="最低粉丝数")
     reward = StringField(max_length=100, verbose_name="报酬")
-    
-    # 链接
     link = StringField(verbose_name="报名链接")
     
     # 时间
@@ -527,10 +531,11 @@ class Notice(Document):
         """转换为字典"""
         return {
             'id': str(self.id),
-            'title': self.title,
-            'subject': self.subject,
             'platform': self.platform,
             'category': self.category,
+            'content': self.content,
+            'title': self.title,
+            'subject': self.subject,
             'brand': self.brand,
             'product_info': self.product_info,
             'requirements': self.requirements,
@@ -689,7 +694,8 @@ class FixedTemplate(Document):
     与字段库不同的是，这里存储的是完整的字段名和对应的固定值。
     """
     field_name = StringField(required=True, max_length=200, verbose_name="字段名（支持别名，用顿号分隔）")
-    field_value = StringField(required=True, verbose_name="字段值")
+    field_value = StringField(default='', verbose_name="字段值")
+    placeholder = StringField(verbose_name="占位提示")  # 用于前端显示输入提示
     category = StringField(default='通用', max_length=50, verbose_name="分类")
     description = StringField(verbose_name="说明")
     order = IntField(default=0, verbose_name="排序")
@@ -720,6 +726,7 @@ class FixedTemplate(Document):
             'id': str(self.id),
             'field_name': self.field_name,
             'field_value': self.field_value,
+            'placeholder': self.placeholder,
             'category': self.category,
             'description': self.description,
             'order': self.order,

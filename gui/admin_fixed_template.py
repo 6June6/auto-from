@@ -250,12 +250,12 @@ class AddTemplateDialog(QDialog):
         value_layout.setContentsMargins(0, 0, 0, 0)
         value_layout.setSpacing(6)
         
-        value_label = QLabel("字段值")
+        value_label = QLabel("字段值 (选填)")
         value_label.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_body']};")
         value_layout.addWidget(value_label)
         
         self.value_input = QTextEdit()
-        self.value_input.setPlaceholderText("填写固定的字段值...")
+        self.value_input.setPlaceholderText("填写固定的字段值 (选填)...")
         self.value_input.setMinimumHeight(80)
         self.value_input.setMaximumHeight(120)
         self.value_input.setStyleSheet(f"""
@@ -297,6 +297,10 @@ class AddTemplateDialog(QDialog):
         cat_label.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_body']};")
         form_layout.addWidget(cat_label)
         form_layout.addWidget(self.category_combo)
+        
+        # 占位提示
+        self.placeholder_input = self._create_input_field("占位提示", "用户添加名片时的输入提示（选填）")
+        form_layout.addWidget(self.placeholder_input)
         
         # 说明
         self.desc_input = self._create_input_field("说明", "模板用途说明（选填）")
@@ -348,6 +352,7 @@ class AddTemplateDialog(QDialog):
             self.name_input.input.setText(self.template.field_name)
             self.value_input.setText(self.template.field_value)
             self.category_combo.setCurrentText(self.template.category)
+            self.placeholder_input.input.setText(self.template.placeholder or '')
             self.desc_input.input.setText(self.template.description or '')
             self.order_input.input.setText(str(self.template.order))
             
@@ -389,10 +394,6 @@ class AddTemplateDialog(QDialog):
             QMessageBox.warning(self, "提示", "请输入字段名称")
             return
             
-        if not field_value:
-            QMessageBox.warning(self, "提示", "请输入字段值")
-            return
-            
         try:
             order = int(self.order_input.input.text().strip() or "0")
         except ValueError:
@@ -401,6 +402,7 @@ class AddTemplateDialog(QDialog):
         data = {
             'field_name': field_name,
             'field_value': field_value,
+            'placeholder': self.placeholder_input.input.text().strip(),
             'category': self.category_combo.currentText().strip() or '通用',
             'description': self.desc_input.input.text().strip(),
             'order': order

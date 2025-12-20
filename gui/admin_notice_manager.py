@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QLineEdit, QDialog, QComboBox, QFrame,
     QCheckBox, QGraphicsDropShadowEffect, QAbstractItemView, 
     QDateTimeEdit, QSpinBox, QScrollArea, QTabWidget, QTabBar,
-    QDateEdit, QLayout
+    QDateEdit, QLayout, QTextEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDateTime, QDate
 from PyQt6.QtGui import QFont, QColor, QIcon, QPainter, QLinearGradient, QPen, QBrush
@@ -22,13 +22,11 @@ from datetime import datetime
 
 # ========== 通告列表自定义组件 ==========
 
-# 列宽配置
+# 列宽配置（简化版）
 NOTICE_LIST_COLUMNS = {
-    'title': 200,
     'platform': 80,
     'category': 80,
-    'brand': 100,
-    'date': 100,
+    'content': 400,  # 内容预览
     'status': 80,
     'actions': 100,
 }
@@ -55,11 +53,9 @@ class NoticeListHeader(QFrame):
         layout.setSpacing(0)
         
         headers = [
-            ('标题', NOTICE_LIST_COLUMNS['title']),
             ('平台', NOTICE_LIST_COLUMNS['platform']),
             ('类目', NOTICE_LIST_COLUMNS['category']),
-            ('品牌', NOTICE_LIST_COLUMNS['brand']),
-            ('日期范围', NOTICE_LIST_COLUMNS['date']),
+            ('内容预览', NOTICE_LIST_COLUMNS['content']),
             ('状态', NOTICE_LIST_COLUMNS['status']),
             ('操作', NOTICE_LIST_COLUMNS['actions']),
         ]
@@ -80,7 +76,7 @@ class NoticeListHeader(QFrame):
 
 
 class NoticeRowWidget(QFrame):
-    """通告行组件"""
+    """通告行组件（简化版）"""
     
     edit_clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(object)
@@ -108,35 +104,18 @@ class NoticeRowWidget(QFrame):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(0)
         
-        # 1. 标题
-        self._add_title(layout)
-        # 2. 平台
+        # 1. 平台
         self._add_platform(layout)
-        # 3. 类目
+        # 2. 类目
         self._add_category(layout)
-        # 4. 品牌
-        self._add_brand(layout)
-        # 5. 发布时间
-        self._add_date(layout)
-        # 6. 状态
+        # 3. 内容预览
+        self._add_content(layout)
+        # 4. 状态
         self._add_status(layout)
-        # 7. 操作
+        # 5. 操作
         self._add_actions(layout)
         
         layout.addStretch()
-    
-    def _add_title(self, layout):
-        container = QWidget()
-        container.setFixedWidth(NOTICE_LIST_COLUMNS['title'])
-        c_layout = QHBoxLayout(container)
-        c_layout.setContentsMargins(0, 0, 8, 0)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        
-        title_lbl = QLabel(self.notice.title)
-        title_lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-        title_lbl.setToolTip(self.notice.title)
-        c_layout.addWidget(title_lbl)
-        layout.addWidget(container)
     
     def _add_platform(self, layout):
         container = QWidget()
@@ -164,49 +143,28 @@ class NoticeRowWidget(QFrame):
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        lbl = QLabel(self.notice.category)
+        lbl = QLabel(self.notice.category or "-")
         lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
         c_layout.addWidget(lbl)
         layout.addWidget(container)
     
-    def _add_brand(self, layout):
+    def _add_content(self, layout):
+        """内容预览"""
         container = QWidget()
-        container.setFixedWidth(NOTICE_LIST_COLUMNS['brand'])
+        container.setFixedWidth(NOTICE_LIST_COLUMNS['content'])
         c_layout = QHBoxLayout(container)
-        c_layout.setContentsMargins(0, 0, 4, 0)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setContentsMargins(0, 0, 8, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        lbl = QLabel(self.notice.brand)
-        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
-        c_layout.addWidget(lbl)
-        layout.addWidget(container)
-    
-    def _add_date(self, layout):
-        container = QWidget()
-        container.setFixedWidth(NOTICE_LIST_COLUMNS['date'])
-        c_layout = QVBoxLayout(container)
-        c_layout.setContentsMargins(0, 0, 4, 0)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        c_layout.setSpacing(2)
+        # 优先显示 content 字段，否则回退到 title
+        content = self.notice.content if self.notice.content else (self.notice.title or "")
+        # 截取前100个字符作为预览
+        preview = content[:100].replace('\n', ' ') + ('...' if len(content) > 100 else '')
         
-        start_date = self.notice.start_date
-        end_date = self.notice.end_date
-        publish_date = self.notice.publish_date
-
-        if start_date and end_date:
-            date_str = f"{start_date.strftime('%Y-%m-%d')}\n至\n{end_date.strftime('%Y-%m-%d')}"
-            lbl = QLabel(date_str)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 11px; line-height: 12px;")
-        elif publish_date:
-            date_str = publish_date.strftime('%Y-%m-%d')
-            lbl = QLabel(date_str)
-            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
-        else:
-            lbl = QLabel("-")
-            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
-            
-        c_layout.addWidget(lbl)
+        content_lbl = QLabel(preview)
+        content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        content_lbl.setToolTip(content[:500])  # 悬停显示更多
+        c_layout.addWidget(content_lbl)
         layout.addWidget(container)
     
     def _add_status(self, layout):
@@ -1282,6 +1240,7 @@ class CategoryDialog(BaseDialog):
         return data
 
 class NoticeDialog(BaseDialog):
+    """简化版通告对话框 - 只需要平台、类目、内容"""
     def __init__(self, parent, db_manager, notice=None):
         self.db_manager = db_manager
         self.notice = notice
@@ -1289,30 +1248,14 @@ class NoticeDialog(BaseDialog):
         self.setup_ui()
         
     def setup_ui(self):
-        self.setFixedSize(600, 700)
-        
-        # 滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        self.setFixedSize(650, 600)
         
         # 内部容器
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet(self.input_style)
-        form_layout = QVBoxLayout(scroll_content)
-        form_layout.setContentsMargins(32, 20, 32, 20)
+        form_widget = QWidget()
+        form_widget.setStyleSheet(self.input_style)
+        form_layout = QVBoxLayout(form_widget)
+        form_layout.setContentsMargins(32, 24, 32, 20)
         form_layout.setSpacing(20)
-        
-        # 标题
-        self.title_input = QLineEdit(self.notice.title if self.notice else "")
-        self.title_input.setPlaceholderText("请输入通告完整标题")
-        form_layout.addLayout(self.create_field("通告标题", self.title_input))
-        
-        # 主题
-        self.subject_input = QLineEdit(self.notice.subject if self.notice and hasattr(self.notice, 'subject') else "")
-        self.subject_input.setPlaceholderText("例如：探店打卡、新品试色、日常种草")
-        form_layout.addLayout(self.create_field("通告主题", self.subject_input))
         
         # 平台 & 类目 (一行两列)
         row1 = QHBoxLayout()
@@ -1336,116 +1279,83 @@ class NoticeDialog(BaseDialog):
         row1.addLayout(self.create_field("通告类目", self.category_combo))
         form_layout.addLayout(row1)
         
-        # 品牌 & 产品 (一行两列)
-        row2 = QHBoxLayout()
-        row2.setSpacing(20)
-        
-        self.brand_input = QLineEdit(self.notice.brand if self.notice else "")
-        self.brand_input.setPlaceholderText("品牌名称")
-        row2.addLayout(self.create_field("品牌", self.brand_input))
-        
-        self.product_input = QLineEdit(self.notice.product_info if self.notice else "")
-        self.product_input.setPlaceholderText("产品简要描述")
-        row2.addLayout(self.create_field("产品情况", self.product_input))
-        form_layout.addLayout(row2)
-        
-        # 要求 & 粉丝 (一行两列)
-        row3 = QHBoxLayout()
-        row3.setSpacing(20)
-        
-        self.req_input = QLineEdit(self.notice.requirements if self.notice else "")
-        self.req_input.setPlaceholderText("例如：图文直发，无需寄回")
-        row3.addLayout(self.create_field("粉丝要求描述", self.req_input))
-        
-        self.min_fans_spin = QSpinBox()
-        self.min_fans_spin.setRange(0, 99999999)
-        self.min_fans_spin.setValue(self.notice.min_fans if self.notice else 0)
-        self.min_fans_spin.setSingleStep(1000)
-        row3.addLayout(self.create_field("最低粉丝数", self.min_fans_spin))
-        form_layout.addLayout(row3)
-        
-        # 报酬 & 链接
-        self.reward_input = QLineEdit(self.notice.reward if self.notice else "")
-        self.reward_input.setPlaceholderText("例如：300-500元")
-        form_layout.addLayout(self.create_field("预计报酬", self.reward_input))
-        
-        self.link_input = QLineEdit(self.notice.link if self.notice else "")
-        self.link_input.setPlaceholderText("https://...")
-        form_layout.addLayout(self.create_field("报名链接", self.link_input))
-        
-        # 日期 & 状态 (一行两列)
-        row4 = QHBoxLayout()
-        row4.setSpacing(20)
-        
-        # 日期范围选择
-        date_range_widget = QWidget()
-        date_range_layout = QHBoxLayout(date_range_widget)
-        date_range_layout.setContentsMargins(0, 0, 0, 0)
-        date_range_layout.setSpacing(8)
-        
-        self.start_date = QDateEdit()
-        self.start_date.setDisplayFormat("yyyy-MM-dd")
-        self.start_date.setCalendarPopup(True)
-        
-        separator = QLabel("至")
-        separator.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-weight: bold;")
-        
-        self.end_date = QDateEdit()
-        self.end_date.setDisplayFormat("yyyy-MM-dd")
-        self.end_date.setCalendarPopup(True)
-        
-        # 初始化日期
-        if self.notice:
-            if self.notice.start_date:
-                self.start_date.setDate(self.notice.start_date.date())
-            elif self.notice.publish_date:
-                self.start_date.setDate(self.notice.publish_date.date())
-            else:
-                self.start_date.setDate(QDate.currentDate())
-                
-            if self.notice.end_date:
-                self.end_date.setDate(self.notice.end_date.date())
-            else:
-                self.end_date.setDate(QDate.currentDate().addDays(30))
-        else:
-            self.start_date.setDate(QDate.currentDate())
-            self.end_date.setDate(QDate.currentDate().addDays(30))
-            
-        date_range_layout.addWidget(self.start_date)
-        date_range_layout.addWidget(separator)
-        date_range_layout.addWidget(self.end_date)
+        # 状态选择
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(20)
         
         self.status_combo = QComboBox()
         self.status_combo.addItems(['active', 'expired', 'closed'])
         if self.notice:
             self.status_combo.setCurrentText(self.notice.status)
-            
-        row4.addLayout(self.create_field("有效期", date_range_widget))
-        row4.addLayout(self.create_field("当前状态", self.status_combo))
-        form_layout.addLayout(row4)
+        status_layout.addLayout(self.create_field("状态", self.status_combo))
+        status_layout.addStretch()
+        form_layout.addLayout(status_layout)
         
-        scroll.setWidget(scroll_content)
-        self.add_content(scroll, stretch=1)
+        # 通告内容（长文本）
+        content_label = QLabel("通告内容")
+        content_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-weight: 600; font-size: 13px;")
+        form_layout.addWidget(content_label)
+        
+        self.content_edit = QTextEdit()
+        self.content_edit.setPlaceholderText("请输入完整的通告信息，包括：\n• 通告标题/主题\n• 品牌名称\n• 产品情况\n• 粉丝要求\n• 报酬说明\n• 报名链接\n• 其他备注...")
+        self.content_edit.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 10px;
+                padding: 12px;
+                background: #f8fafc;
+                font-size: 14px;
+                color: {PREMIUM_COLORS['text_heading']};
+                line-height: 1.6;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {PREMIUM_COLORS['gradient_blue_start']};
+                background: white;
+            }}
+        """)
+        self.content_edit.setMinimumHeight(280)
+        
+        # 加载现有内容
+        if self.notice:
+            if self.notice.content:
+                self.content_edit.setPlainText(self.notice.content)
+            else:
+                # 兼容旧数据：拼接旧字段为内容
+                old_content = self._build_content_from_old_fields()
+                self.content_edit.setPlainText(old_content)
+        
+        form_layout.addWidget(self.content_edit)
+        
+        self.add_content(form_widget, stretch=1)
         self.create_bottom_buttons()
+    
+    def _build_content_from_old_fields(self):
+        """从旧字段构建内容（兼容旧数据）"""
+        parts = []
+        if self.notice.title:
+            parts.append(f"【标题】{self.notice.title}")
+        if self.notice.subject:
+            parts.append(f"【主题】{self.notice.subject}")
+        if self.notice.brand:
+            parts.append(f"【品牌】{self.notice.brand}")
+        if self.notice.product_info:
+            parts.append(f"【产品】{self.notice.product_info}")
+        if self.notice.requirements:
+            parts.append(f"【要求】{self.notice.requirements}")
+        if self.notice.min_fans:
+            parts.append(f"【粉丝要求】{self.notice.min_fans}")
+        if self.notice.reward:
+            parts.append(f"【报酬】{self.notice.reward}")
+        if self.notice.link:
+            parts.append(f"【链接】{self.notice.link}")
+        return "\n".join(parts)
         
     def get_data(self):
-        start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
-        end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time().replace(microsecond=0))
-        
         data = {
-            'title': self.title_input.text(),
-            'subject': self.subject_input.text(),
             'platform': self.platform_combo.currentText(),
             'category': self.category_combo.currentText(),
-            'brand': self.brand_input.text(),
-            'product_info': self.product_input.text(),
-            'requirements': self.req_input.text(),
-            'min_fans': self.min_fans_spin.value(),
-            'reward': self.reward_input.text(),
-            'link': self.link_input.text(),
-            'publish_date': start_date,  # 兼容旧字段
-            'start_date': start_date,
-            'end_date': end_date,
-            'status': self.status_combo.currentText()
+            'content': self.content_edit.toPlainText(),
+            'status': self.status_combo.currentText(),
+            'publish_date': datetime.now(),
         }
         return data

@@ -674,21 +674,22 @@ class MessageCenterDialog(QDialog):
         footer_layout.addStretch()
         
         close_btn = QPushButton("关闭")
-        close_btn.setFixedSize(80, 36)
+        close_btn.setMinimumWidth(120)
+        close_btn.setFixedHeight(40)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #6B7280;
+                background: #F3F4F6;
+                color: #374151;
                 border: 1px solid #E5E7EB;
-                border-radius: 18px;
+                border-radius: 8px;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 14px;
+                padding: 8px 24px;
             }
             QPushButton:hover { 
-                background: white; 
+                background: #E5E7EB; 
                 color: #111827;
-                border-color: #D1D5DB;
             }
         """)
         close_btn.clicked.connect(self.accept)

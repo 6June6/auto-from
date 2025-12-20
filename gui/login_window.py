@@ -5,16 +5,107 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QFrame, QMessageBox,
     QGraphicsDropShadowEffect, QApplication, QWidget,
-    QCheckBox, QGridLayout, QSizePolicy
+    QCheckBox, QGridLayout, QSizePolicy, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QTimer, QPoint, 
-    QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+    Qt, pyqtSignal, QTimer, QPoint, QRectF,
+    QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
+    QVariantAnimation
 )
-from PyQt6.QtGui import QFont, QColor, QCursor, QLinearGradient, QPalette, QBrush
+from PyQt6.QtGui import QFont, QColor, QCursor, QLinearGradient, QPalette, QBrush, QPainter, QPen
 from database import User
-from core.auth import login_with_password, get_device_id
+from core.auth import login_with_password, login_with_token, get_device_id
 from pathlib import Path
+
+
+class ModernSpinner(QWidget):
+    """现代风格加载动画组件 - 双环科技感设计"""
+    
+    def __init__(self, parent=None, size=80, color="#3B82F6"):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._color = QColor(color)
+        
+        # 动画参数
+        self._angle_outer = 0
+        self._angle_inner = 0
+        self._scale = 1.0
+        self._scale_direction = 1
+        
+        # 呼吸动画定时器
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        
+    def start(self):
+        self._timer.start(16)  # ~60fps
+        
+    def stop(self):
+        self._timer.stop()
+        
+    def _animate(self):
+        # 外环顺时针
+        self._angle_outer = (self._angle_outer + 4) % 360
+        # 内环逆时针
+        self._angle_inner = (self._angle_inner - 6) % 360
+        
+        # 中心呼吸效果
+        if self._scale > 1.2:
+            self._scale_direction = -1
+        elif self._scale < 0.8:
+            self._scale_direction = 1
+        self._scale += 0.01 * self._scale_direction
+        
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = self.rect().center()
+        w, h = self.width(), self.height()
+        
+        # --- 1. 绘制外环 (动态断开的弧线) ---
+        radius_outer = min(w, h) / 2 - 4
+        rect_outer = QRectF(center.x() - radius_outer, center.y() - radius_outer, 
+                           radius_outer * 2, radius_outer * 2)
+        
+        pen_outer = QPen(self._color, 4)
+        pen_outer.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen_outer)
+        
+        # 两条追逐的弧线
+        start_angle = self._angle_outer * 16
+        painter.drawArc(rect_outer, start_angle, 100 * 16)
+        painter.drawArc(rect_outer, start_angle + 180 * 16, 60 * 16)
+        
+        # --- 2. 绘制内环 (半透明虚线) ---
+        radius_inner = radius_outer - 12
+        rect_inner = QRectF(center.x() - radius_inner, center.y() - radius_inner,
+                           radius_inner * 2, radius_inner * 2)
+                           
+        pen_inner = QPen(self._color)
+        pen_inner.setWidth(3)
+        pen_inner.setCapStyle(Qt.PenCapStyle.RoundCap)
+        # 降低不透明度
+        c = QColor(self._color)
+        c.setAlpha(120)
+        pen_inner.setColor(c)
+        painter.setPen(pen_inner)
+        
+        start_angle_in = self._angle_inner * 16
+        painter.drawArc(rect_inner, start_angle_in, 280 * 16)
+        
+        # --- 3. 绘制中心呼吸点 ---
+        radius_center = 6 * self._scale
+        painter.setPen(Qt.PenStyle.NoPen)
+        c.setAlpha(255) # 恢复不透明
+        painter.setBrush(QBrush(c))
+        painter.drawEllipse(QPoint(int(center.x()), int(center.y())), int(radius_center), int(radius_center))
+        
+        # --- 4. 绘制外部微弱光晕 (可选) ---
+        c.setAlpha(30)
+        painter.setBrush(QBrush(c))
+        painter.drawEllipse(center, radius_outer + 2, radius_outer + 2)
 
 # -----------------------------------------------------------------------------
 # Design System
@@ -103,10 +194,13 @@ class InputGroup(QWidget):
 class LoginWindow(QDialog):
     """登录窗口 - 左右分栏高端布局"""
     login_success = pyqtSignal(object)
+    ready_to_show_main = pyqtSignal(object)  # 新增：主窗口准备好后发出
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, auto_login=True):
         super().__init__(parent)
         self.current_user = None
+        self.auto_login_enabled = auto_login
+        self.main_window_ready = False  # 主窗口是否准备好
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)  # 无边框模式，自己画标题栏
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) # 透明背景用于圆角
         self.init_ui()
@@ -392,8 +486,74 @@ class LoginWindow(QDialog):
         self.update()
         self.repaint()
         
-        # 聚焦输入框
-        self.username_input.setFocus()
+        # 检查是否需要自动登录
+        if self.auto_login_enabled:
+            QTimer.singleShot(100, self._try_auto_login)
+        else:
+            # 聚焦输入框
+            self.username_input.setFocus()
+    
+    def _try_auto_login(self):
+        """尝试使用保存的 token 自动登录"""
+        try:
+            # 读取保存的 token
+            auth_dir = Path.home() / '.auto-form-filler'
+            token_file = auth_dir / '.token'
+            
+            if not token_file.exists():
+                # 没有保存的 token，让用户手动登录
+                self.username_input.setFocus()
+                return
+            
+            token = token_file.read_text().strip()
+            if not token:
+                self.username_input.setFocus()
+                return
+            
+            # 显示自动登录加载状态
+            self.show_loading_state(message="正在自动登录...")
+            
+            # 延迟执行自动登录
+            QTimer.singleShot(100, lambda: self._perform_auto_login(token))
+            
+        except Exception as e:
+            print(f"⚠️ 自动登录检查异常: {e}")
+            self.username_input.setFocus()
+    
+    def _perform_auto_login(self, token):
+        """执行自动登录"""
+        try:
+            success, message, user = login_with_token(token)
+            
+            if success and user:
+                self.current_user = user
+                
+                # 更新加载文字
+                self.loading_text.setText("登录成功，正在进入...")
+                
+                # 延迟关闭窗口
+                QTimer.singleShot(800, self._finish_login)
+            else:
+                # 自动登录失败，删除无效 token
+                try:
+                    auth_dir = Path.home() / '.auto-form-filler'
+                    token_file = auth_dir / '.token'
+                    if token_file.exists():
+                        token_file.unlink()
+                except:
+                    pass
+                
+                # 隐藏加载状态，让用户手动登录
+                self.hide_loading_state()
+                self.username_input.setFocus()
+                
+                # 可选：显示提示信息
+                # QMessageBox.information(self, "提示", f"自动登录失败：{message}\n请重新登录。")
+                
+        except Exception as e:
+            print(f"⚠️ 自动登录异常: {e}")
+            self.hide_loading_state()
+            self.username_input.setFocus()
 
     # -------------------------------------------------------------------------
     # Window Drag Logic
@@ -444,20 +604,156 @@ class LoginWindow(QDialog):
             self.password_input.setFocus()
             return
         
+        # 显示加载状态
+        self.show_loading_state()
+        
+        # 使用定时器延迟执行登录，让UI有时间更新
+        QTimer.singleShot(100, lambda: self._perform_login(username, password))
+    
+    def _perform_login(self, username, password):
+        """实际执行登录逻辑"""
         try:
             success, message, token, user = login_with_password(username, password)
             if not success:
+                self.hide_loading_state()
                 QMessageBox.warning(self, "验证失败", message)
                 return
             if token:
                 self.save_token(token)
             
             self.current_user = user
-            self.login_success.emit(user)
-            self.accept()
+            
+            # 更新加载文字
+            self.loading_text.setText("登录成功，正在进入...")
+            
+            # 延迟关闭窗口，让用户看到成功状态
+            QTimer.singleShot(800, self._finish_login)
             
         except Exception as e:
+            self.hide_loading_state()
             QMessageBox.critical(self, "错误", str(e))
+    
+    def _finish_login(self):
+        """完成登录，关闭窗口"""
+        # 更新文字提示
+        if hasattr(self, 'loading_text'):
+            self.loading_text.setText("正在加载主界面...")
+        if hasattr(self, 'sub_loading_text'):
+            self.sub_loading_text.setText("请稍候...")
+        
+        # 发出信号，让 main.py 开始创建主窗口
+        self.login_success.emit(self.current_user)
+        
+        # 不立即关闭，等待外部调用 close_after_ready()
+        # 如果 1.5 秒后还没被关闭，则自动关闭（兜底）
+        QTimer.singleShot(1500, self._safe_close)
+    
+    def close_after_ready(self):
+        """主窗口准备好后调用此方法关闭登录窗口"""
+        self.main_window_ready = True
+        # 短暂延迟后关闭，让过渡更平滑
+        QTimer.singleShot(200, self.accept)
+    
+    def _safe_close(self):
+        """兜底关闭（如果主窗口创建失败等情况）"""
+        if not self.main_window_ready:
+            self.accept()
+    
+    def show_loading_state(self, message="正在验证..."):
+        """显示加载遮罩 - 增强设计感"""
+        # 禁用输入
+        self.login_btn.setEnabled(False)
+        self.username_input.input.setEnabled(False)
+        self.password_input.input.setEnabled(False)
+        
+        # 创建遮罩层
+        self.loading_overlay = QFrame(self.main_frame)
+        self.loading_overlay.setGeometry(0, 0, self.main_frame.width(), self.main_frame.height())
+        # 使用渐变背景，营造现代感
+        self.loading_overlay.setStyleSheet("""
+            QFrame {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 rgba(255, 255, 255, 0.98), 
+                    stop:1 rgba(240, 249, 255, 0.95));
+                border-radius: 16px;
+            }
+        """)
+        
+        # 初始透明度为0，用于渐入动画
+        opacity_effect = QGraphicsOpacityEffect(self.loading_overlay)
+        opacity_effect.setOpacity(0)
+        self.loading_overlay.setGraphicsEffect(opacity_effect)
+        
+        # 遮罩内容布局
+        overlay_layout = QVBoxLayout(self.loading_overlay)
+        overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 内容容器
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vbox.setSpacing(25) # 增加间距
+        
+        # 1. 现代 Loading 动画
+        self.spinner = ModernSpinner(
+            size=72, 
+            color=DesignToken.BRAND_PRIMARY
+        )
+        self.spinner.start()
+        vbox.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
+        
+        # 文字区域
+        text_container = QWidget()
+        text_layout = QVBoxLayout(text_container)
+        text_layout.setSpacing(8)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 2. 主标题
+        self.loading_text = QLabel(message)
+        self.loading_text.setFont(QFont(DesignToken.FONT_FAMILY, 15, QFont.Weight.Bold))
+        self.loading_text.setStyleSheet(f"color: {DesignToken.TEXT_TITLE};")
+        self.loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_layout.addWidget(self.loading_text)
+        
+        # 3. 副标题 (提示语)
+        self.sub_loading_text = QLabel("正在连接安全服务器...")
+        self.sub_loading_text.setFont(QFont(DesignToken.FONT_FAMILY, 11))
+        self.sub_loading_text.setStyleSheet(f"color: {DesignToken.TEXT_BODY};")
+        self.sub_loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_layout.addWidget(self.sub_loading_text)
+        
+        vbox.addWidget(text_container)
+        
+        overlay_layout.addWidget(container)
+        
+        self.loading_overlay.show()
+        self.loading_overlay.raise_()
+        
+        # 启动渐入动画
+        self.fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        self.fade_anim.setDuration(250)
+        self.fade_anim.setStartValue(0)
+        self.fade_anim.setEndValue(1)
+        self.fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.fade_anim.start()
+    
+    def hide_loading_state(self):
+        """隐藏加载遮罩"""
+        if hasattr(self, 'spinner'):
+            self.spinner.stop()
+        
+        # 渐出动画
+        if hasattr(self, 'loading_overlay'):
+            # 这里简单直接隐藏，如果需要渐出可以再加动画逻辑
+            # 为了响应速度，直接隐藏通常更好
+            self.loading_overlay.hide()
+            self.loading_overlay.deleteLater()
+        
+        # 恢复输入
+        self.login_btn.setEnabled(True)
+        self.username_input.input.setEnabled(True)
+        self.password_input.input.setEnabled(True)
 
     def shake_window(self):
         original_pos = self.pos()

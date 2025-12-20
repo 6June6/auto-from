@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDateTime, QPropertyAnimation, QEasingCurve, QTimer, QRect
 from PyQt6.QtGui import QFont, QColor, QIcon, QPainter, QLinearGradient, QPen, QBrush, QPainterPath
-from database import DatabaseManager, User, Device
+from database import DatabaseManager, User, Device, Card
 from gui.styles import COLORS
 from gui.icons import Icons
 import datetime
@@ -318,6 +318,60 @@ class UserEditDialog(QDialog):
         
         form_layout.addLayout(row2)
         
+        # 最大设备数 & 最大名片数 (一行两列)
+        row3 = QHBoxLayout()
+        row3.setSpacing(20)
+        
+        # 左：最大设备数
+        device_container = QWidget()
+        device_box = QVBoxLayout(device_container)
+        device_box.setContentsMargins(0, 0, 0, 0)
+        device_box.setSpacing(8)
+        device_label = QLabel("最大设备数")
+        device_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-weight: 600; font-size: 13px;")
+        
+        self.device_spin = QSpinBox()
+        self.device_spin.setRange(-1, 100)
+        self.device_spin.setValue(2)  # 新用户默认 2 台设备
+        if self.user:
+            max_dev = getattr(self.user, 'max_device_count', 2)
+            if max_dev is not None:
+                self.device_spin.setValue(max_dev)
+            
+        device_hint = QLabel("默认2台，-1表示使用全局配置")
+        device_hint.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 11px;")
+            
+        device_box.addWidget(device_label)
+        device_box.addWidget(self.device_spin)
+        device_box.addWidget(device_hint)
+        row3.addWidget(device_container, 1)
+        
+        # 右：最大名片数
+        card_container = QWidget()
+        card_box = QVBoxLayout(card_container)
+        card_box.setContentsMargins(0, 0, 0, 0)
+        card_box.setSpacing(8)
+        card_label = QLabel("最大名片数")
+        card_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-weight: 600; font-size: 13px;")
+        
+        self.card_spin = QSpinBox()
+        self.card_spin.setRange(-1, 999999)
+        self.card_spin.setValue(-1)  # 新用户默认不限制
+        if self.user:
+            max_card = getattr(self.user, 'max_card_count', -1)
+            if max_card is not None:
+                self.card_spin.setValue(max_card)
+            
+        card_hint = QLabel("填写 -1 表示不限制")
+        card_hint.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 11px;")
+            
+        card_box.addWidget(card_label)
+        card_box.addWidget(self.card_spin)
+        card_box.addWidget(card_hint)
+        row3.addWidget(card_container, 1)
+        
+        form_layout.addLayout(row3)
+        
         # 状态开关
         status_layout = QHBoxLayout()
         
@@ -556,6 +610,8 @@ class UserEditDialog(QDialog):
             expire_time = self.expire_edit.dateTime().toPyDateTime()
             
         max_usage_count = self.usage_spin.value()
+        max_device_count = self.device_spin.value()
+        max_card_count = self.card_spin.value()
         
         if not self.user and not username:
             QMessageBox.warning(self, "提示", "请输入用户名")
@@ -573,7 +629,9 @@ class UserEditDialog(QDialog):
                     role,
                     is_active,
                     expire_time=expire_time,
-                    max_usage_count=max_usage_count
+                    max_usage_count=max_usage_count,
+                    max_device_count=max_device_count,
+                    max_card_count=max_card_count
                 )
             else:
                 DatabaseManager.create_user(
@@ -582,7 +640,9 @@ class UserEditDialog(QDialog):
                     role, 
                     is_active,
                     expire_time=expire_time,
-                    max_usage_count=max_usage_count
+                    max_usage_count=max_usage_count,
+                    max_device_count=max_device_count,
+                    max_card_count=max_card_count
                 )
             
             self.accept()
@@ -888,13 +948,14 @@ class CompactStatWidget(QFrame):
 # 列宽配置 (固定宽度，确保对齐)
 USER_LIST_COLUMNS = {
     'avatar': 50,
-    'user': 160,
-    'role': 80,
+    'user': 140,
+    'role': 70,
     'device': 70,
+    'cards': 80,
     'usage': 100,
     'expire': 110,
-    'status': 80,
-    'activity': 110,
+    'status': 60,
+    'activity': 100,
     'actions': 180,
 }
 
@@ -924,6 +985,7 @@ class UserListHeader(QFrame):
             ('用户', USER_LIST_COLUMNS['user']),
             ('角色', USER_LIST_COLUMNS['role']),
             ('设备', USER_LIST_COLUMNS['device']),
+            ('名片', USER_LIST_COLUMNS['cards']),
             ('额度', USER_LIST_COLUMNS['usage']),
             ('有效期', USER_LIST_COLUMNS['expire']),
             ('状态', USER_LIST_COLUMNS['status']),
@@ -956,10 +1018,11 @@ class UserRowWidget(QFrame):
     toggle_clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(object)
     
-    def __init__(self, user, device_count, parent=None):
+    def __init__(self, user, device_count, card_count=0, parent=None):
         super().__init__(parent)
         self.user = user
         self.device_count = device_count
+        self.card_count = card_count
         self.setFixedHeight(64)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._is_hovered = False
@@ -993,19 +1056,22 @@ class UserRowWidget(QFrame):
         # 4. 设备
         self._add_device(layout)
         
-        # 5. 使用额度
+        # 5. 名片
+        self._add_cards(layout)
+        
+        # 6. 使用额度
         self._add_usage(layout)
         
-        # 6. 有效期
+        # 7. 有效期
         self._add_expire(layout)
         
-        # 7. 状态
+        # 8. 状态
         self._add_status(layout)
         
-        # 8. 最近活动
+        # 9. 最近活动
         self._add_activity(layout)
         
-        # 9. 操作按钮
+        # 10. 操作按钮
         self._add_actions(layout)
         
         layout.addStretch()
@@ -1108,7 +1174,7 @@ class UserRowWidget(QFrame):
         layout.addWidget(container)
     
     def _add_device(self, layout):
-        """添加设备数"""
+        """添加设备数 - 显示 当前数/限制数"""
         container = QWidget()
         container.setFixedWidth(USER_LIST_COLUMNS['device'])
         c_layout = QHBoxLayout(container)
@@ -1118,11 +1184,45 @@ class UserRowWidget(QFrame):
         
         d_icon = QLabel("💻")
         d_icon.setStyleSheet("font-size: 14px;")
-        d_text = QLabel(str(self.device_count))
-        d_text.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+        
+        # 获取最大设备数限制
+        max_device = getattr(self.user, 'max_device_count', 2)
+        if max_device == -1:
+            # -1 表示使用全局配置，显示为无限
+            d_text = QLabel(f"{self.device_count}")
+        else:
+            d_text = QLabel(f"{self.device_count}/{max_device}")
+        
+        d_text.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 12px;")
         
         c_layout.addWidget(d_icon)
         c_layout.addWidget(d_text)
+        layout.addWidget(container)
+    
+    def _add_cards(self, layout):
+        """添加名片数 - 显示 当前数/限制数"""
+        container = QWidget()
+        container.setFixedWidth(USER_LIST_COLUMNS['cards'])
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 4, 0)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setSpacing(4)
+        
+        c_icon = QLabel("📇")
+        c_icon.setStyleSheet("font-size: 14px;")
+        
+        # 获取最大名片数限制
+        max_card = getattr(self.user, 'max_card_count', -1)
+        if max_card == -1:
+            # -1 表示无限制
+            c_text = QLabel(f"∞ ({self.card_count})")
+        else:
+            c_text = QLabel(f"{self.card_count}/{max_card}")
+        
+        c_text.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 12px;")
+        
+        c_layout.addWidget(c_icon)
+        c_layout.addWidget(c_text)
         layout.addWidget(container)
     
     def _add_usage(self, layout):
@@ -1448,8 +1548,11 @@ class UserListWidget(QWidget):
         self.scroll_area.setWidget(self.content_widget)
         layout.addWidget(self.scroll_area, 1)
     
-    def set_users(self, users, device_counts):
+    def set_users(self, users, device_counts, card_counts=None):
         """设置用户列表数据"""
+        if card_counts is None:
+            card_counts = {}
+        
         # 清空现有行
         for widget in self.row_widgets:
             widget.deleteLater()
@@ -1471,7 +1574,8 @@ class UserListWidget(QWidget):
         # 添加用户行
         for user in users:
             device_count = device_counts.get(str(user.id), 0)
-            row = UserRowWidget(user, device_count)
+            card_count = card_counts.get(str(user.id), 0)
+            row = UserRowWidget(user, device_count, card_count)
             
             # 连接信号
             row.edit_clicked.connect(self.edit_user.emit)
@@ -1797,13 +1901,15 @@ class UserManagementWidget(QWidget):
         
     def update_user_list(self, users):
         """更新用户列表显示"""
-        # 预先计算每个用户的设备数，避免在组件中逐个查询
+        # 预先计算每个用户的设备数和名片数，避免在组件中逐个查询
         device_counts = {}
+        card_counts = {}
         for user in users:
             device_counts[str(user.id)] = Device.objects(user=user).count()
+            card_counts[str(user.id)] = Card.objects(user=user).count()
         
         # 调用用户列表组件的方法
-        self.user_list.set_users(users, device_counts)
+        self.user_list.set_users(users, device_counts, card_counts)
 
     def show_device_list(self, user):
         dialog = DeviceListDialog(self, user)

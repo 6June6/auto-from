@@ -18,6 +18,7 @@ from .admin_link_manager import AdminLinkManager
 from .admin_field_library import AdminFieldLibraryManager
 from .admin_fixed_template import AdminFixedTemplateManager
 from .admin_notice_manager import AdminNoticeManager
+from .admin_message_manager import AdminMessageManager
 from .link_manager import LinkManagerDialog
 from .admin_user_manager import UserManagementWidget
 from .admin_dictionary_manager import AdminDictionaryManager
@@ -282,6 +283,7 @@ class AdminMainWindow(QMainWindow):
             ("固定模板", Icons.copy('white'), 7),
             ("通告管理", Icons.broadcast('white'), 8),
             ("字典管理", Icons.settings('white'), 9),
+            ("系统消息", Icons.bell('white'), 10),
         ]
         
         for text, icon, index in menu_items:
@@ -496,6 +498,10 @@ class AdminMainWindow(QMainWindow):
         # 9. 字典管理页面
         self.dictionary_page = AdminDictionaryManager()
         self.content_stack.addWidget(self.dictionary_page)
+
+        # 10. 系统消息页面
+        self.message_page = AdminMessageManager(current_admin=self.current_user)
+        self.content_stack.addWidget(self.message_page)
 
     def change_page(self, index):
         """切换页面"""

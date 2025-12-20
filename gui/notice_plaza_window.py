@@ -55,7 +55,7 @@ class TagButton(QPushButton):
             """)
 
 class NoticeCardWidget(QFrame):
-    """通告卡片组件 - 现代悬浮卡片"""
+    """通告卡片组件 - 简化版，直接显示内容"""
     
     join_clicked = pyqtSignal(object)  # 链接信号，传递整个 notice 对象
     
@@ -66,7 +66,8 @@ class NoticeCardWidget(QFrame):
         self.init_ui()
         
     def init_ui(self):
-        self.setFixedWidth(280) # 固定宽度使排版更整齐
+        self.setFixedWidth(320)  # 稍宽一点以容纳更多内容
+        self.setMinimumHeight(200)
         
         # 阴影效果
         self.shadow = QGraphicsDropShadowEffect()
@@ -92,7 +93,7 @@ class NoticeCardWidget(QFrame):
         layout.setSpacing(12)
         self.setLayout(layout)
         
-        # 1. 头部：徽标信息
+        # 1. 头部：平台 + 类目
         header_layout = QHBoxLayout()
         header_layout.setSpacing(8)
         
@@ -102,105 +103,54 @@ class NoticeCardWidget(QFrame):
             background-color: #EEF2FF;
             color: {COLORS['primary']};
             border-radius: 4px;
-            padding: 4px 8px;
+            padding: 4px 10px;
             font-size: 12px;
             font-weight: 600;
         """)
         header_layout.addWidget(platform_tag)
         
+        # 类目标签
+        if self.notice.category:
+            category_tag = QLabel(self.notice.category)
+            category_tag.setStyleSheet(f"""
+                background-color: #FEF3C7;
+                color: #D97706;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            header_layout.addWidget(category_tag)
+        
         header_layout.addStretch()
         
-        # 显示日期范围（如果有），否则显示发布日期
-        if hasattr(self.notice, 'start_date') and self.notice.start_date and self.notice.end_date:
-            date_str = f"{self.notice.start_date.strftime('%m-%d')}~{self.notice.end_date.strftime('%m-%d')}"
-        elif self.notice.publish_date:
+        # 发布日期
+        if self.notice.publish_date:
             date_str = self.notice.publish_date.strftime('%m-%d')
-        else:
-            date_str = ""
-        date_label = QLabel(date_str)
-        date_label.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 12px;")
-        header_layout.addWidget(date_label)
+            date_label = QLabel(date_str)
+            date_label.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 12px;")
+            header_layout.addWidget(date_label)
         
         layout.addLayout(header_layout)
         
-        # 2. 标题与品牌
-        title_label = QLabel(self.notice.title)
-        title_label.setWordWrap(True)
-        title_label.setStyleSheet(f"""
-            font-size: 16px;
-            font-weight: 700;
+        # 2. 通告内容
+        # 优先使用 content 字段，否则回退到旧字段
+        content = self._get_display_content()
+        
+        content_label = QLabel(content)
+        content_label.setWordWrap(True)
+        content_label.setStyleSheet(f"""
+            font-size: 14px;
             color: {COLORS['text_primary']};
-            line-height: 1.4;
+            line-height: 1.5;
         """)
-        layout.addWidget(title_label)
-        
-        brand_layout = QHBoxLayout()
-        brand_icon = QLabel("🏢") # 临时图标
-        brand_label = QLabel(self.notice.brand)
-        brand_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px; font-weight: 500;")
-        brand_layout.addWidget(brand_icon)
-        brand_layout.addWidget(brand_label)
-        brand_layout.addStretch()
-        layout.addLayout(brand_layout)
-        
-        # 增加主题显示
-        if hasattr(self.notice, 'subject') and self.notice.subject:
-            subject_label = QLabel(f"【主题】{self.notice.subject}")
-            subject_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px; margin-top: 2px;")
-            layout.addWidget(subject_label)
-        
-        # 3. 关键数据卡片
-        data_container = QWidget()
-        data_container.setStyleSheet(f"""
-            background-color: #F9FAFB;
-            border-radius: 8px;
-        """)
-        data_layout = QHBoxLayout(data_container)
-        data_layout.setContentsMargins(12, 12, 12, 12)
-        
-        # 粉丝要求
-        fans_layout = QVBoxLayout()
-        fans_layout.setSpacing(2)
-        fans_val = QLabel(f"{self.notice.min_fans}")
-        fans_val.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 700; font-size: 14px;")
-        fans_lbl = QLabel("粉丝要求")
-        fans_lbl.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 11px;")
-        fans_layout.addWidget(fans_val)
-        fans_layout.addWidget(fans_lbl)
-        
-        # 报酬
-        reward_layout = QVBoxLayout()
-        reward_layout.setSpacing(2)
-        reward_val = QLabel(self.notice.reward)
-        reward_val.setStyleSheet(f"color: {COLORS['danger']}; font-weight: 700; font-size: 14px;")
-        reward_lbl = QLabel("预估报酬")
-        reward_lbl.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 11px;")
-        reward_layout.addWidget(reward_val)
-        reward_layout.addWidget(reward_lbl)
-        
-        data_layout.addLayout(fans_layout)
-        # 分割线
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.VLine)
-        line.setStyleSheet(f"background-color: {COLORS['border']}; max-width: 1px;")
-        data_layout.addWidget(line)
-        data_layout.addLayout(reward_layout)
-        
-        layout.addWidget(data_container)
-        
-        # 4. 产品信息摘要
-        product_info = self.notice.product_info or ""
-        if len(product_info) > 35:
-            product_info = product_info[:33] + "..."
-        info_label = QLabel(product_info)
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px; margin-top: 4px;")
-        layout.addWidget(info_label)
+        content_label.setToolTip(self._get_full_content())  # 悬停显示完整内容
+        layout.addWidget(content_label)
         
         layout.addStretch()
         
-        # 5. 底部按钮
-        join_btn = QPushButton("加入链接")
+        # 3. 底部按钮
+        join_btn = QPushButton("查看详情 / 加入链接")
         join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         join_btn.setFixedHeight(36)
         join_btn.setStyleSheet(f"""
@@ -221,6 +171,32 @@ class NoticeCardWidget(QFrame):
         """)
         join_btn.clicked.connect(lambda: self.join_clicked.emit(self.notice))
         layout.addWidget(join_btn)
+    
+    def _get_display_content(self):
+        """获取用于显示的内容（截取）"""
+        full_content = self._get_full_content()
+        # 截取前150个字符
+        if len(full_content) > 150:
+            return full_content[:147] + "..."
+        return full_content
+    
+    def _get_full_content(self):
+        """获取完整内容"""
+        if self.notice.content:
+            return self.notice.content
+        # 兼容旧数据
+        parts = []
+        if self.notice.title:
+            parts.append(self.notice.title)
+        if self.notice.brand:
+            parts.append(f"品牌：{self.notice.brand}")
+        if self.notice.product_info:
+            parts.append(f"产品：{self.notice.product_info}")
+        if self.notice.reward:
+            parts.append(f"报酬：{self.notice.reward}")
+        if self.notice.link:
+            parts.append(f"链接：{self.notice.link}")
+        return "\n".join(parts) if parts else "暂无内容"
 
     def enterEvent(self, event):
         # 鼠标悬停效果
@@ -315,75 +291,54 @@ class NoticePlazaWindow(QMainWindow):
         platform_layout.addStretch()
         filter_layout.addLayout(platform_layout)
         
-        # 3. 高级筛选 (时间、粉丝、报酬)
-        advanced_layout = QHBoxLayout()
-        advanced_layout.setSpacing(20)
+        # 3. 搜索和刷新按钮
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(16)
         
-        # 样式化输入框
-        input_style = f"""
-            background: #F3F4F6;
-            border: 1px solid transparent;
-            border-radius: 8px;
-            padding: 6px 10px;
-            color: {COLORS['text_primary']};
-        """
-        
-        # 有效时间
-        time_label = QLabel("有效时间")
-        time_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_secondary']};")
-        advanced_layout.addWidget(time_label)
-        
-        self.start_date = QDateEdit()
-        self.start_date.setCalendarPopup(True)
-        self.start_date.setDisplayFormat("yyyy-MM-dd")
-        self.start_date.setDate(QDate.currentDate().addDays(-60))  # 默认从60天前开始
-        self.start_date.setFixedWidth(130)
-        self.start_date.setStyleSheet(f"""
-            QDateEdit {{ {input_style} }}
-            QDateEdit::drop-down {{ border: none; width: 20px; }}
+        # 搜索框
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("搜索通告内容...")
+        self.search_input.setFixedWidth(300)
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: #F3F4F6;
+                border: 1px solid transparent;
+                border-radius: 8px;
+                padding: 8px 12px;
+                color: {COLORS['text_primary']};
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                background: white;
+                border-color: {COLORS['primary']};
+            }}
         """)
+        self.search_input.returnPressed.connect(self.refresh_notices)
+        action_layout.addWidget(self.search_input)
         
-        self.end_date = QDateEdit()
-        self.end_date.setCalendarPopup(True)
-        self.end_date.setDisplayFormat("yyyy-MM-dd")
-        self.end_date.setDate(QDate.currentDate().addDays(60))  # 默认到60天后
-        self.end_date.setFixedWidth(130)
-        self.end_date.setStyleSheet(f"""
-            QDateEdit {{ {input_style} }}
-            QDateEdit::drop-down {{ border: none; width: 20px; }}
+        action_layout.addStretch()
+        
+        # 刷新按钮
+        refresh_btn = QPushButton("🔄 刷新")
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.setFixedSize(80, 36)
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {COLORS['text_secondary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['background']};
+                color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
         """)
-        
-        advanced_layout.addWidget(self.start_date)
-        advanced_layout.addWidget(QLabel("-"))
-        advanced_layout.addWidget(self.end_date)
-        
-        # 粉丝要求
-        fans_label = QLabel("粉丝要求")
-        fans_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_secondary']}; margin-left: 10px;")
-        advanced_layout.addWidget(fans_label)
-        self.fans_combo = QComboBox()
-        self.fans_combo.addItems(["不限", "1000+", "5000+", "1w+", "5w+", "10w+"])
-        self.fans_combo.setFixedWidth(130)
-        self.fans_combo.setStyleSheet(f"""
-            QComboBox {{ {input_style} }}
-            QComboBox::drop-down {{ border: none; width: 20px; }}
-        """)
-        advanced_layout.addWidget(self.fans_combo)
-        
-        # 最高报酬
-        reward_label = QLabel("最高报酬")
-        reward_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_secondary']}; margin-left: 10px;")
-        advanced_layout.addWidget(reward_label)
-        self.reward_combo = QComboBox()
-        self.reward_combo.addItems(["不限", "500以下", "500-1000", "1000-3000", "3000以上"])
-        self.reward_combo.setFixedWidth(130)
-        self.reward_combo.setStyleSheet(f"""
-            QComboBox {{ {input_style} }}
-            QComboBox::drop-down {{ border: none; width: 20px; }}
-        """)
-        advanced_layout.addWidget(self.reward_combo)
-        
-        advanced_layout.addStretch()
+        refresh_btn.clicked.connect(self.refresh_notices)
+        action_layout.addWidget(refresh_btn)
         
         # 搜索按钮
         search_btn = QPushButton("筛选")
@@ -405,9 +360,9 @@ class NoticePlazaWindow(QMainWindow):
             }}
         """)
         search_btn.clicked.connect(self.refresh_notices)
-        advanced_layout.addWidget(search_btn)
+        action_layout.addWidget(search_btn)
         
-        filter_layout.addLayout(advanced_layout)
+        filter_layout.addLayout(action_layout)
         
         main_layout.addWidget(filter_container)
         
@@ -533,33 +488,14 @@ class NoticePlazaWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
         
-        # 获取筛选条件
-        # 1. 粉丝要求
-        min_fans = None
-        fans_text = self.fans_combo.currentText()
-        if fans_text != "不限":
-            if "1000+" in fans_text: min_fans = 1000
-            elif "5000+" in fans_text: min_fans = 5000
-            elif "1w+" in fans_text: min_fans = 10000
-            elif "5w+" in fans_text: min_fans = 50000
-            elif "10w+" in fans_text: min_fans = 100000
-        
-        # 2. 时间区间
-        from datetime import datetime
-        start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
-        end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time().replace(microsecond=0))
-        
-        # 3. 报酬筛选
-        max_reward = self.reward_combo.currentText()
+        # 获取搜索关键词
+        keyword = self.search_input.text().strip() if hasattr(self, 'search_input') else None
         
         # 获取数据
         notices = self.db_manager.get_all_notices(
             category=self.current_category,
             platform=self.current_platform,
-            min_fans=min_fans,
-            start_date=start_date,
-            end_date=end_date,
-            max_reward=max_reward
+            keyword=keyword if keyword else None
         )
         
         # 简单的分页逻辑
@@ -594,39 +530,213 @@ class NoticePlazaWindow(QMainWindow):
         self.refresh_notices()
         
     def add_to_my_links(self, notice):
-        """将通告添加到我的链接"""
-        try:
+        """将通告添加到我的链接（简化版：显示详情弹窗）"""
+        import re
+        
+        # 获取完整内容
+        content = notice.content if notice.content else ""
+        if not content and notice.title:
+            # 兼容旧数据
+            parts = []
+            if notice.title:
+                parts.append(f"标题：{notice.title}")
+            if notice.brand:
+                parts.append(f"品牌：{notice.brand}")
+            if notice.product_info:
+                parts.append(f"产品：{notice.product_info}")
+            if notice.reward:
+                parts.append(f"报酬：{notice.reward}")
+            if notice.link:
+                parts.append(f"链接：{notice.link}")
+            content = "\n".join(parts)
+        
+        # 尝试从内容中提取链接
+        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+        links = re.findall(url_pattern, content)
+        
+        # 创建详情弹窗
+        from PyQt6.QtWidgets import QDialog, QTextEdit
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"通告详情 - {notice.platform}")
+        dialog.setFixedSize(500, 450)
+        dialog.setStyleSheet("QDialog { background: white; }")
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # 标签
+        tag_layout = QHBoxLayout()
+        platform_tag = QLabel(notice.platform)
+        platform_tag.setStyleSheet(f"""
+            background-color: #EEF2FF;
+            color: {COLORS['primary']};
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        """)
+        tag_layout.addWidget(platform_tag)
+        
+        if notice.category:
+            category_tag = QLabel(notice.category)
+            category_tag.setStyleSheet(f"""
+                background-color: #FEF3C7;
+                color: #D97706;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            tag_layout.addWidget(category_tag)
+        tag_layout.addStretch()
+        layout.addLayout(tag_layout)
+        
+        # 内容显示
+        content_edit = QTextEdit()
+        content_edit.setPlainText(content)
+        content_edit.setReadOnly(True)
+        content_edit.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 14px;
+                line-height: 1.6;
+                background: #FAFAFA;
+            }}
+        """)
+        layout.addWidget(content_edit)
+        
+        # 底部按钮
+        btn_layout = QHBoxLayout()
+        
+        # 复制内容按钮
+        copy_btn = QPushButton("📋 复制全部内容")
+        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {COLORS['text_secondary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['background']};
+                color: {COLORS['primary']};
+            }}
+        """)
+        copy_btn.clicked.connect(lambda: (QApplication.clipboard().setText(content), QMessageBox.information(dialog, "成功", "内容已复制到剪贴板！")))
+        btn_layout.addWidget(copy_btn)
+        
+        # 如果有链接，添加复制链接按钮
+        if links:
+            copy_link_btn = QPushButton("🔗 复制链接")
+            copy_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_link_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: white;
+                    color: {COLORS['text_secondary']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background: {COLORS['background']};
+                    color: {COLORS['primary']};
+                }}
+            """)
+            copy_link_btn.clicked.connect(lambda: (QApplication.clipboard().setText(links[0]), QMessageBox.information(dialog, "成功", "链接已复制到剪贴板！")))
+            btn_layout.addWidget(copy_link_btn)
+        
+        # 加入链接库按钮
+        def do_add_to_links():
+            if not links:
+                QMessageBox.warning(dialog, "提示", "未在通告内容中检测到有效链接！\n\n请确认通告内容中包含 http:// 或 https:// 开头的链接。")
+                return
+            
             # 获取当前用户
             user = self.parent().current_user if self.parent() else None
-            
-            # 检查链接是否已存在（按用户筛选）
-            existing_link = self.db_manager.get_link_by_url(notice.link, user=user)
-            if existing_link:
-                QMessageBox.information(self, "提示", "该链接已存在于您的链接库中！")
+            if not user:
+                QMessageBox.warning(dialog, "提示", "请先登录后再添加链接！")
                 return
-
+            
+            # 使用第一个匹配到的链接
+            link_url = links[0]
+            
+            # 检查链接是否已存在
+            existing_link = self.db_manager.get_link_by_url(link_url, user=user)
+            if existing_link:
+                QMessageBox.information(dialog, "提示", "该链接已存在于您的链接库中！")
+                return
+            
             # 创建新链接
-            # 链接名称格式：【平台】标题
-            link_name = f"【{notice.platform}】{notice.title}"
+            # 链接名称：取内容前30个字符
+            link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
+            link_name = link_name.replace('\n', ' ')
             
-            self.db_manager.create_link(
-                name=link_name,
-                url=notice.link,
-                user=user,
-                status='active',
-                category=notice.category,  # 使用通告的分类
-                description=f"来自通告广场：{notice.brand} - {notice.product_info}"
-            )
-            
-            QMessageBox.information(self, "成功", "已成功添加到“我的链接”！")
-            
-            # 尝试刷新主窗口的数据
-            if self.parent():
-                if hasattr(self.parent(), 'refresh_data'):
+            try:
+                self.db_manager.create_link(
+                    name=link_name,
+                    url=link_url,
+                    user=user,
+                    status='active',
+                    category=notice.category or '默认分类',
+                    description=f"来自通告广场"
+                )
+                QMessageBox.information(dialog, "成功", f"已成功添加到「我的链接」！\n\n链接：{link_url[:50]}...")
+                
+                # 尝试刷新主窗口的数据
+                if self.parent() and hasattr(self.parent(), 'refresh_data'):
                     self.parent().refresh_data()
-                    
-        except Exception as e:
-            QMessageBox.warning(self, "失败", f"添加链接失败：{str(e)}")
+            except Exception as e:
+                QMessageBox.warning(dialog, "失败", f"添加链接失败：{str(e)}")
+        
+        add_link_btn = QPushButton("➕ 加入链接库")
+        add_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_link_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {COLORS['primary']};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['primary_light']};
+            }}
+        """)
+        add_link_btn.clicked.connect(do_add_to_links)
+        btn_layout.addWidget(add_link_btn)
+        
+        btn_layout.addStretch()
+        
+        close_btn = QPushButton("关闭")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #F3F4F6;
+                color: {COLORS['text_secondary']};
+                border: none;
+                border-radius: 8px;
+                padding: 8px 20px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: #E5E7EB;
+            }}
+        """)
+        close_btn.clicked.connect(dialog.close)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        dialog.exec()
 
     def copy_link(self, link):
         QApplication.clipboard().setText(link)

@@ -110,7 +110,13 @@ def check_device_limit(user: User, device_id: str) -> Tuple[bool, str]:
         return True, "设备已绑定"
     
     # 检查是否超过设备数量限制
-    max_devices = int(SystemConfig.get('MAX_DEVICES_PER_USER', '2'))
+    # 优先使用用户独立的设备数限制，如果为 -1 则使用全局配置
+    user_max_devices = getattr(user, 'max_device_count', -1) or -1
+    if user_max_devices == -1:
+        max_devices = int(SystemConfig.get('MAX_DEVICES_PER_USER', '2'))
+    else:
+        max_devices = user_max_devices
+    
     if active_devices.count() >= max_devices:
         return False, f"该账号已达到最大设备数量限制（{max_devices}台），请在后台解绑其他设备后重试"
     
