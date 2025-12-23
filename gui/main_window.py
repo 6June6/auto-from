@@ -1030,22 +1030,86 @@ class AddCardDialog(QDialog):
 
     def add_field_alias(self, key_input):
         """添加字段别名"""
-        from PyQt6.QtWidgets import QInputDialog
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
         
-        text, ok = QInputDialog.getText(
-            self,
-            "添加字段别名",
-            "请输入新的字段名（将用顿号拼接到现有字段名后）:",
-            QLineEdit.EchoMode.Normal
-        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加字段别名")
+        dialog.setFixedWidth(400)
+        dialog.setStyleSheet("""
+            QDialog { background: white; }
+            QLabel { color: #374151; font-size: 13px; }
+            QLineEdit { 
+                padding: 8px 12px; 
+                border: 2px solid #3B82F6; 
+                border-radius: 6px; 
+                font-size: 14px;
+            }
+            QLineEdit:focus { border-color: #2563EB; }
+        """)
         
-        if ok and text.strip():
-            current_text = key_input.text().strip()
-            if current_text:
-                new_text = f"{current_text}、{text.strip()}"
-            else:
-                new_text = text.strip()
-            key_input.setText(new_text)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        label = QLabel("请输入新的字段名（将用顿号拼接到现有字段名后）：")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        
+        input_field = QLineEdit()
+        input_field.setPlaceholderText("输入字段别名")
+        layout.addWidget(input_field)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch()
+        
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedSize(80, 36)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #2563EB; }
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedSize(80, 36)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #2563EB; }
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        input_field.setFocus()
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            text = input_field.text().strip()
+            if text:
+                current_text = key_input.text().strip()
+                if current_text:
+                    new_text = f"{current_text}、{text}"
+                else:
+                    new_text = text
+                key_input.setText(new_text)
     
     def move_field_row(self, from_index, to_index):
         """移动字段行位置"""
@@ -1171,7 +1235,12 @@ class AddCardDialog(QDialog):
                     user=self.current_user,
                     category=category
                 )
-                QMessageBox.information(self, "成功", "名片创建成功！")
+                msg = QMessageBox(self)
+                msg.setWindowTitle("成功")
+                msg.setText("名片创建成功！")
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                msg.exec()
             self.accept()
         except Exception as e:
             QMessageBox.warning(self, "失败", f"保存名片失败：{str(e)}")
@@ -3196,23 +3265,29 @@ class AllRecordsDialog(QDialog):
         self.load_records()
 
 
-class UserAvatarMenu(QPushButton):
-    """用户头像菜单组件 - 文字+图标样式"""
+class UserAvatarMenu(QWidget):
+    """用户头像菜单组件 - 使用自定义下拉面板，更稳定可靠"""
     
     def __init__(self, user, parent_window):
         super().__init__()
         self.user = user
         self.parent_window = parent_window
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.popup = None
+        self._init_ui()
         
-        # 设置内容: 图标 + 用户名
-        self.setText(f" {self.user.username if self.user else '未登录'}")
-        self.setIcon(Icons.user('#1D1D1F'))
-        self.setIconSize(QSize(20, 20))
+    def _init_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # 样式
-        self.setStyleSheet("""
-            UserAvatarMenu {
+        # 主按钮
+        self.btn = QPushButton()
+        self.btn.setText(f" {self.user.username if self.user else '未登录'}")
+        self.btn.setIcon(Icons.user('#1D1D1F'))
+        self.btn.setIconSize(QSize(20, 20))
+        self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn.setStyleSheet("""
+            QPushButton {
                 background: transparent;
                 color: #1D1D1F;
                 font-size: 14px;
@@ -3222,117 +3297,159 @@ class UserAvatarMenu(QPushButton):
                 border-radius: 6px;
                 text-align: left;
             }
-            UserAvatarMenu:hover {
+            QPushButton:hover {
                 background: #F5F5F7;
             }
-            UserAvatarMenu::menu-indicator {
-                image: none;
+            QPushButton:pressed {
+                background: #E8E8ED;
             }
         """)
+        self.btn.clicked.connect(self._toggle_popup)
+        layout.addWidget(self.btn)
         
-        # 初始化菜单
-        self.menu_just_closed = False
-        self.menu = QMenu(self)
-        self.init_menu()
-        
-    def init_menu(self):
-        # 设置菜单样式
-        self.menu.setStyleSheet("""
-            QMenu {
-                background-color: white;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
-                padding: 8px 0;
-            }
-            QMenu::item {
-                padding: 10px 24px;
-                font-size: 14px;
-                color: #374151;
-            }
-            QMenu::item:selected {
-                background-color: #F3F4F6;
-                color: #111827;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #E5E7EB;
-                margin: 6px 0;
-            }
-            QMenu::icon {
-                padding-left: 12px;
-            }
-        """)
-        self.menu.setWindowFlags(self.menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
-        self.menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        # 添加阴影效果
-        shadow = QGraphicsDropShadowEffect(self.menu)
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 30))
-        shadow.setOffset(0, 4)
-        self.menu.setGraphicsEffect(shadow)
-        
-        # 用户信息头部 (Disabled Item as Header)
-        header = QAction(f"👤 {self.user.username}", self.menu)
-        header.setEnabled(False)
-        self.menu.addAction(header)
-        
-        self.menu.addSeparator()
-        
-        # 修改密码
-        action_pwd = QAction(Icons.lock('#666'), "修改密码", self.menu)
-        action_pwd.triggered.connect(self.change_password)
-        self.menu.addAction(action_pwd)
-        
-        # 切换账号
-        action_switch = QAction(Icons.refresh('#666'), "切换账号", self.menu)
-        action_switch.triggered.connect(self.parent_window.switch_account)
-        self.menu.addAction(action_switch)
-        
-        self.menu.addSeparator()
-        
-        # 退出系统
-        from PyQt6.QtWidgets import QApplication
-        action_exit = QAction(Icons.sign_out('#FF3B30'), "退出系统", self.menu)
-        action_exit.triggered.connect(QApplication.instance().quit)
-        self.menu.addAction(action_exit)
-        
-        # Windows 兼容：使用 aboutToHide 和 triggered 信号来跟踪菜单状态
-        self.menu.aboutToHide.connect(self._on_menu_close)
-        
-    def _on_menu_close(self):
-        """菜单关闭时设置标志，防止立即重新弹出"""
-        self.menu_just_closed = True
-        # Windows 下需要更长的延迟，并使用更可靠的方式重置
-        QTimer.singleShot(300, self._reset_menu_closed)
-        
-    def _reset_menu_closed(self):
-        """重置菜单关闭标志"""
-        self.menu_just_closed = False
-        
-    def _show_menu(self):
-        """显示菜单的通用方法"""
-        if self.menu.isVisible():
+    def _toggle_popup(self):
+        """切换弹出面板显示/隐藏"""
+        if self.popup and self.popup.isVisible():
+            self.popup.close()
+            self.popup = None
             return
-        if self.menu_just_closed:
-            return
-        # 计算位置：在头像正下方
-        pos = self.mapToGlobal(QPoint(0, self.height() + 5))
-        self.menu.popup(pos)
+            
+        # 创建新的弹出面板
+        self.popup = UserMenuPopup(self.user, self.parent_window, self)
         
-    def mousePressEvent(self, event):
-        """点击显示/隐藏菜单"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            # 如果菜单可见，先隐藏
-            if self.menu.isVisible():
-                self.menu.hide()
-            elif not self.menu_just_closed:
-                self._show_menu()
-        event.accept()
-
+        # 计算位置：在按钮正下方
+        btn_pos = self.btn.mapToGlobal(QPoint(0, self.btn.height()))
+        self.popup.move(btn_pos.x(), btn_pos.y() + 5)
+        self.popup.show()
+        
     def change_password(self):
         dialog = ChangePasswordDialog(self.user, self.parent_window)
         dialog.exec()
+
+
+class UserMenuPopup(QWidget):
+    """用户菜单弹出面板 - 独立窗口，点击外部自动关闭"""
+    
+    def __init__(self, user, parent_window, avatar_menu):
+        super().__init__(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.user = user
+        self.parent_window = parent_window
+        self.avatar_menu = avatar_menu
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._init_ui()
+        
+    def _init_ui(self):
+        # 主容器
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        
+        # 内容卡片
+        card = QFrame()
+        card.setObjectName("menuCard")
+        card.setStyleSheet("""
+            #menuCard {
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+            }
+        """)
+        
+        # 添加阴影
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(24)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        shadow.setOffset(0, 6)
+        card.setGraphicsEffect(shadow)
+        
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 12, 8, 12)
+        card_layout.setSpacing(4)
+        
+        # 用户信息头部
+        header = QLabel(f"👤 {self.user.username}")
+        header.setStyleSheet("""
+            QLabel {
+                color: #9CA3AF;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 8px 12px;
+            }
+        """)
+        card_layout.addWidget(header)
+        
+        # 分隔线
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("background: #F3F4F6; border: none; max-height: 1px;")
+        card_layout.addWidget(sep1)
+        
+        # 菜单项
+        self._add_menu_item(card_layout, Icons.lock('#6B7280'), "修改密码", self._change_password)
+        self._add_menu_item(card_layout, Icons.refresh('#6B7280'), "切换账号", self._switch_account)
+        
+        # 分隔线
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("background: #F3F4F6; border: none; max-height: 1px;")
+        card_layout.addWidget(sep2)
+        
+        # 退出按钮
+        self._add_menu_item(card_layout, Icons.sign_out('#EF4444'), "退出系统", self._exit_app, danger=True)
+        
+        main_layout.addWidget(card)
+        
+        # 设置固定宽度
+        self.setFixedWidth(180)
+        
+    def _add_menu_item(self, layout, icon, text, callback, danger=False):
+        """添加菜单项"""
+        btn = QPushButton(text)
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(18, 18))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        text_color = "#EF4444" if danger else "#374151"
+        hover_bg = "#FEF2F2" if danger else "#F9FAFB"
+        
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {text_color};
+                font-size: 14px;
+                font-weight: 400;
+                border: none;
+                padding: 10px 12px;
+                border-radius: 8px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background: {hover_bg};
+            }}
+            QPushButton:pressed {{
+                background: #F3F4F6;
+            }}
+        """)
+        btn.clicked.connect(callback)
+        layout.addWidget(btn)
+        
+    def _change_password(self):
+        """修改密码"""
+        self.close()
+        self.avatar_menu.popup = None
+        dialog = ChangePasswordDialog(self.user, self.parent_window)
+        dialog.exec()
+        
+    def _switch_account(self):
+        """切换账号"""
+        self.close()
+        self.avatar_menu.popup = None
+        self.parent_window.switch_account()
+        
+    def _exit_app(self):
+        """退出应用"""
+        self.close()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
 
 
@@ -5296,14 +5413,16 @@ class MainWindow(QMainWindow):
     
     def switch_account(self):
         """切换账号"""
-        reply = QMessageBox.question(
-            self,
-            "切换账号",
-            "确定要切换账号吗？\n\n当前账号将退出登录，您需要重新登录。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("切换账号")
+        msg.setText("确定要切换账号吗？")
+        msg.setInformativeText("当前账号将退出登录，您需要重新登录。")
+        msg.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msg.addButton("是", QMessageBox.ButtonRole.YesRole)
+        msg.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msg.exec()
         
-        if reply == QMessageBox.StandardButton.Yes:
+        if msg.clickedButton() == yes_btn:
             # 清除保存的 token
             from core.auth import clear_token
             clear_token()
@@ -5563,21 +5682,33 @@ class MainWindow(QMainWindow):
     
     def delete_card(self, card):
         """删除名片"""
-        reply = QMessageBox.question(
-            self,
-            "确认删除",
-            f"确定要删除名片 \"{card.name}\" 吗？\n\n删除后无法恢复。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("确认删除")
+        msg.setText(f"确定要删除名片 \"{card.name}\" 吗？")
+        msg.setInformativeText("删除后无法恢复。")
+        msg.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msg.addButton("是", QMessageBox.ButtonRole.YesRole)
+        msg.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msg.exec()
         
-        if reply == QMessageBox.StandardButton.Yes:
+        if msg.clickedButton() == yes_btn:
             # 转换 ObjectId 为字符串
             card_id = str(card.id)
             if self.db_manager.delete_card(card_id):
-                QMessageBox.information(self, "成功", "名片删除成功！")
+                success_msg = QMessageBox(self)
+                success_msg.setWindowTitle("成功")
+                success_msg.setText("名片删除成功！")
+                success_msg.setIcon(QMessageBox.Icon.Information)
+                success_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                success_msg.exec()
                 self.refresh_data()
             else:
-                QMessageBox.warning(self, "失败", "名片删除失败！")
+                fail_msg = QMessageBox(self)
+                fail_msg.setWindowTitle("失败")
+                fail_msg.setText("名片删除失败！")
+                fail_msg.setIcon(QMessageBox.Icon.Warning)
+                fail_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                fail_msg.exec()
     
     def rename_category(self, old_name: str):
         """重命名分类"""
@@ -5597,13 +5728,14 @@ class MainWindow(QMainWindow):
             # 检查新名称是否已存在
             existing_cards = Card.objects(user=self.current_user, category=new_name).count()
             if existing_cards > 0:
-                reply = QMessageBox.question(
-                    self,
-                    "分类已存在",
-                    f"分类 '{new_name}' 已存在，是否合并到该分类？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+                msg = QMessageBox(self)
+                msg.setWindowTitle("分类已存在")
+                msg.setText(f"分类 '{new_name}' 已存在，是否合并到该分类？")
+                msg.setIcon(QMessageBox.Icon.Question)
+                yes_btn = msg.addButton("是", QMessageBox.ButtonRole.YesRole)
+                msg.addButton("否", QMessageBox.ButtonRole.NoRole)
+                msg.exec()
+                if msg.clickedButton() != yes_btn:
                     return
             
             try:
@@ -5691,22 +5823,33 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "错误", f"删除分类失败: {str(e)}")
         else:
             # 空分类，确认后直接删除
-            reply = QMessageBox.question(
-                self,
-                "确认删除",
-                f"确定要删除空分类 '{category_name}' 吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            msg = QMessageBox(self)
+            msg.setWindowTitle("确认删除")
+            msg.setText(f"确定要删除空分类 '{category_name}' 吗？")
+            msg.setIcon(QMessageBox.Icon.Question)
+            yes_btn = msg.addButton("是", QMessageBox.ButtonRole.YesRole)
+            msg.addButton("否", QMessageBox.ButtonRole.NoRole)
+            msg.exec()
             
-            if reply == QMessageBox.StandardButton.Yes:
+            if msg.clickedButton() == yes_btn:
                 try:
                     category_obj = Category.objects(user=self.current_user, name=category_name).first()
                     if category_obj:
                         category_obj.delete()
-                    QMessageBox.information(self, "成功", f"分类 '{category_name}' 已删除")
+                    success_msg = QMessageBox(self)
+                    success_msg.setWindowTitle("成功")
+                    success_msg.setText(f"分类 '{category_name}' 已删除")
+                    success_msg.setIcon(QMessageBox.Icon.Information)
+                    success_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                    success_msg.exec()
                     self.refresh_data()
                 except Exception as e:
-                    QMessageBox.critical(self, "错误", f"删除分类失败: {str(e)}")
+                    error_msg = QMessageBox(self)
+                    error_msg.setWindowTitle("错误")
+                    error_msg.setText(f"删除分类失败: {str(e)}")
+                    error_msg.setIcon(QMessageBox.Icon.Critical)
+                    error_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                    error_msg.exec()
     
     def on_card_selection_changed(self, card, is_selected):
         """名片选中状态变化"""
@@ -5794,14 +5937,16 @@ class MainWindow(QMainWindow):
             return
         
         # 确认删除
-        reply = QMessageBox.question(
-            self,
-            "确认删除",
-            f"确定要删除选中的 {len(selected_links)} 个链接吗？\n\n此操作不可恢复！",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("确认删除")
+        msg.setText(f"确定要删除选中的 {len(selected_links)} 个链接吗？")
+        msg.setInformativeText("此操作不可恢复！")
+        msg.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msg.addButton("是", QMessageBox.ButtonRole.YesRole)
+        msg.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msg.exec()
         
-        if reply == QMessageBox.StandardButton.Yes:
+        if msg.clickedButton() == yes_btn:
             success_count = 0
             fail_count = 0
             
@@ -5818,9 +5963,19 @@ class MainWindow(QMainWindow):
             self.update_statistics()
             
             if fail_count == 0:
-                QMessageBox.information(self, "成功", f"已成功删除 {success_count} 个链接")
+                success_msg = QMessageBox(self)
+                success_msg.setWindowTitle("成功")
+                success_msg.setText(f"已成功删除 {success_count} 个链接")
+                success_msg.setIcon(QMessageBox.Icon.Information)
+                success_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                success_msg.exec()
             else:
-                QMessageBox.warning(self, "部分成功", f"成功删除 {success_count} 个链接，{fail_count} 个删除失败")
+                warn_msg = QMessageBox(self)
+                warn_msg.setWindowTitle("部分成功")
+                warn_msg.setText(f"成功删除 {success_count} 个链接，{fail_count} 个删除失败")
+                warn_msg.setIcon(QMessageBox.Icon.Warning)
+                warn_msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+                warn_msg.exec()
     
     def copy_selected_links(self):
         """复制选中链接的URL到剪贴板"""

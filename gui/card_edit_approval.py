@@ -237,13 +237,15 @@ class CardEditApprovalDialog(QDialog):
             footer_layout.addWidget(status_lbl)
             
             close_btn = QPushButton("关闭")
-            close_btn.setFixedSize(80, 36)
+            close_btn.setFixedSize(100, 40)
             close_btn.setStyleSheet("""
                 QPushButton {
                     background: white;
                     border: 1px solid #E5E7EB;
                     border-radius: 8px;
                     color: #374151;
+                    font-size: 13px;
+                    font-weight: 600;
                 }
                 QPushButton:hover { background: #F9FAFB; }
             """)

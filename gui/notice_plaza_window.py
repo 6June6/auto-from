@@ -613,16 +613,19 @@ class NoticePlazaWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         
         # 复制内容按钮
-        copy_btn = QPushButton("📋 复制全部内容")
+        copy_btn = QPushButton("复制全部内容")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setMinimumWidth(110)
+        copy_btn.setFixedHeight(36)
         copy_btn.setStyleSheet(f"""
             QPushButton {{
                 background: white;
                 color: {COLORS['text_secondary']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
-                padding: 8px 16px;
+                padding: 8px 12px;
                 font-weight: 600;
+                font-size: 13px;
             }}
             QPushButton:hover {{
                 background: {COLORS['background']};
@@ -634,16 +637,19 @@ class NoticePlazaWindow(QMainWindow):
         
         # 如果有链接，添加复制链接按钮
         if links:
-            copy_link_btn = QPushButton("🔗 复制链接")
+            copy_link_btn = QPushButton("复制链接")
             copy_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_link_btn.setMinimumWidth(90)
+            copy_link_btn.setFixedHeight(36)
             copy_link_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: white;
                     color: {COLORS['text_secondary']};
                     border: 1px solid {COLORS['border']};
                     border-radius: 8px;
-                    padding: 8px 16px;
+                    padding: 8px 12px;
                     font-weight: 600;
+                    font-size: 13px;
                 }}
                 QPushButton:hover {{
                     background: {COLORS['background']};
@@ -696,16 +702,19 @@ class NoticePlazaWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(dialog, "失败", f"添加链接失败：{str(e)}")
         
-        add_link_btn = QPushButton("➕ 加入链接库")
+        add_link_btn = QPushButton("加入链接库")
         add_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_link_btn.setMinimumWidth(100)
+        add_link_btn.setFixedHeight(36)
         add_link_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']};
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 8px 16px;
+                padding: 8px 12px;
                 font-weight: 600;
+                font-size: 13px;
             }}
             QPushButton:hover {{
                 background: {COLORS['primary_light']};
@@ -718,14 +727,17 @@ class NoticePlazaWindow(QMainWindow):
         
         close_btn = QPushButton("关闭")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setMinimumWidth(70)
+        close_btn.setFixedHeight(36)
         close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: #F3F4F6;
                 color: {COLORS['text_secondary']};
                 border: none;
                 border-radius: 8px;
-                padding: 8px 20px;
+                padding: 8px 16px;
                 font-weight: 600;
+                font-size: 13px;
             }}
             QPushButton:hover {{
                 background: #E5E7EB;
