@@ -483,8 +483,8 @@ class AddFieldDialog(QDialog):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(15)
         
-        # 字段名称
-        self.name_input = self._create_input_field("字段名称", "支持别名，用顿号分隔 (e.g. 手机号、电话)")
+        # 字段名称（带加号按钮）
+        self.name_input = self._create_input_field_with_add_btn("字段名称", "支持别名，用顿号分隔 (e.g. 手机号、电话)")
         form_layout.addWidget(self.name_input)
         
         # 分类
@@ -597,6 +597,171 @@ class AddFieldDialog(QDialog):
         container.input = input_field
         layout.addWidget(input_field)
         return container
+    
+    def _create_input_field_with_add_btn(self, label_text, placeholder="", default_val=""):
+        """创建带加号按钮的输入框（用于添加别名）"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        
+        label = QLabel(label_text)
+        label.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_body']};")
+        layout.addWidget(label)
+        
+        # 输入框容器（包含输入框和内嵌加号按钮）
+        input_container = QWidget()
+        input_container.setMinimumHeight(40)
+        input_layout = QHBoxLayout(input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(0)
+        
+        input_field = QLineEdit()
+        input_field.setPlaceholderText(placeholder)
+        input_field.setText(default_val)
+        input_field.setMinimumHeight(40)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 40px 0 10px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 8px;
+                background: #f8fafc;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {PREMIUM_COLORS['primary']};
+                background: white;
+            }}
+        """)
+        input_layout.addWidget(input_field)
+        
+        # 加号按钮（内嵌在输入框右侧）
+        add_btn = QPushButton("+")
+        add_btn.setFixedSize(28, 28)
+        add_btn.setToolTip("添加字段别名（用顿号分隔）")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['gradient_blue_start']};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['gradient_blue_end']};
+            }}
+            QPushButton:pressed {{
+                background: #4338ca;
+            }}
+        """)
+        add_btn.clicked.connect(lambda: self._add_field_alias(input_field))
+        
+        # 将加号按钮定位在输入框内部右侧
+        add_btn.setParent(input_container)
+        add_btn.raise_()
+        
+        # 更新按钮位置
+        def update_add_btn_pos():
+            add_btn.move(input_container.width() - 34, (input_container.height() - 28) // 2)
+        
+        # 监听容器大小变化
+        input_container.resizeEvent = lambda e: update_add_btn_pos()
+        
+        layout.addWidget(input_container)
+        container.input = input_field
+        return container
+    
+    def _add_field_alias(self, input_field):
+        """添加字段别名"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加字段别名")
+        dialog.setFixedWidth(400)
+        dialog.setStyleSheet(f"""
+            QDialog {{ background: {PREMIUM_COLORS['surface']}; }}
+            QLabel {{ color: {PREMIUM_COLORS['text_body']}; font-size: 13px; }}
+            QLineEdit {{ 
+                padding: 10px 12px; 
+                border: 2px solid {PREMIUM_COLORS['gradient_blue_start']}; 
+                border-radius: 8px; 
+                font-size: 14px;
+                background: white;
+            }}
+            QLineEdit:focus {{ border-color: {PREMIUM_COLORS['gradient_blue_end']}; }}
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        
+        label = QLabel("请输入新的字段名（将用顿号拼接到现有字段名后）：")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        
+        alias_input = QLineEdit()
+        alias_input.setPlaceholderText("输入字段别名，如：电话、联系方式")
+        layout.addWidget(alias_input)
+        
+        # 当前值预览
+        current_text = input_field.text().strip()
+        if current_text:
+            preview_label = QLabel(f"当前值: {current_text}")
+            preview_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+            layout.addWidget(preview_label)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch()
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedSize(80, 36)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['text_body']};
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {PREMIUM_COLORS['border_light']}; }}
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedSize(80, 36)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 {PREMIUM_COLORS['gradient_blue_start']}, 
+                    stop:1 {PREMIUM_COLORS['gradient_blue_end']});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ opacity: 0.9; }}
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+        
+        alias_input.setFocus()
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            text = alias_input.text().strip()
+            if text:
+                current_text = input_field.text().strip()
+                if current_text:
+                    new_text = f"{current_text}、{text}"
+                else:
+                    new_text = text
+                input_field.setText(new_text)
 
     def save_data(self):
         name = self.name_input.input.text().strip()

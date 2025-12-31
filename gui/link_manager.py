@@ -816,6 +816,88 @@ class LinkManagerDialog(QDialog):
                 show_error(self, "错误", "删除失败")
 
 
+class ChineseContextTextEdit(QTextEdit):
+    """支持中文右键菜单的 QTextEdit"""
+    
+    def contextMenuEvent(self, event):
+        """重写右键菜单事件，显示中文菜单"""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #F0F0F0;
+            }
+            QMenu::item:disabled {
+                color: #999999;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #E0E0E0;
+                margin: 4px 8px;
+            }
+        """)
+        
+        # 撤销
+        undo_action = QAction("撤销", self)
+        undo_action.triggered.connect(self.undo)
+        undo_action.setEnabled(self.document().isUndoAvailable())
+        menu.addAction(undo_action)
+        
+        # 重做
+        redo_action = QAction("重做", self)
+        redo_action.triggered.connect(self.redo)
+        redo_action.setEnabled(self.document().isRedoAvailable())
+        menu.addAction(redo_action)
+        
+        menu.addSeparator()
+        
+        # 剪切
+        cut_action = QAction("剪切", self)
+        cut_action.triggered.connect(self.cut)
+        cut_action.setEnabled(self.textCursor().hasSelection())
+        menu.addAction(cut_action)
+        
+        # 复制
+        copy_action = QAction("复制", self)
+        copy_action.triggered.connect(self.copy)
+        copy_action.setEnabled(self.textCursor().hasSelection())
+        menu.addAction(copy_action)
+        
+        # 粘贴
+        paste_action = QAction("粘贴", self)
+        paste_action.triggered.connect(self.paste)
+        paste_action.setEnabled(self.canPaste())
+        menu.addAction(paste_action)
+        
+        # 删除
+        delete_action = QAction("删除", self)
+        delete_action.triggered.connect(lambda: self.textCursor().removeSelectedText())
+        delete_action.setEnabled(self.textCursor().hasSelection())
+        menu.addAction(delete_action)
+        
+        menu.addSeparator()
+        
+        # 全选
+        select_all_action = QAction("全选", self)
+        select_all_action.triggered.connect(self.selectAll)
+        select_all_action.setEnabled(bool(self.toPlainText()))
+        menu.addAction(select_all_action)
+        
+        menu.exec(event.globalPos())
+
+
 class AIParseThread(QThread):
     """AI 解析线程"""
     finished = pyqtSignal(list)
@@ -844,7 +926,7 @@ class SmartAddLinkDialog(QDialog):
         self.init_ui()
         
     def init_ui(self):
-        self.setWindowTitle("新增链接 - 智能解析 (DeepSeek 支持)")
+        self.setWindowTitle("新增链接 - 智能解析")
         self.resize(1000, 700)
         self.setStyleSheet(f"background: {PREMIUM_COLORS['background']};")
         
@@ -866,7 +948,7 @@ class SmartAddLinkDialog(QDialog):
         info_layout = QHBoxLayout(info_card)
         info_layout.setContentsMargins(16, 12, 16, 12)
         
-        info_label = QLabel("💡 直接粘贴包含链接的文本（如聊天记录），可使用「本地正则解析」快速提取，或使用「AI 智能解析」获得更准确的标题和分类")
+        info_label = QLabel("💡 直接粘贴包含链接的文本（如聊天记录），系统会自动识别并提取链接信息")
         info_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
         info_label.setWordWrap(True)
         info_layout.addWidget(info_label)
@@ -900,7 +982,7 @@ class SmartAddLinkDialog(QDialog):
         input_header.addWidget(input_label)
         input_header.addStretch()
         
-        # AI 解析按钮
+        # AI 解析按钮 (暂时隐藏)
         self.btn_ai_parse = QPushButton("✨ DeepSeek 智能解析")
         self.btn_ai_parse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_ai_parse.setFixedHeight(34)
@@ -921,11 +1003,12 @@ class SmartAddLinkDialog(QDialog):
             }
         """)
         self.btn_ai_parse.clicked.connect(self.start_ai_parse)
-        input_header.addWidget(self.btn_ai_parse)
+        self.btn_ai_parse.hide()  # 暂时隐藏 DeepSeek 功能
+        # input_header.addWidget(self.btn_ai_parse)
         
         input_layout.addLayout(input_header)
         
-        self.text_edit = QTextEdit()
+        self.text_edit = ChineseContextTextEdit()
         self.text_edit.setPlaceholderText("在此粘贴包含链接的文本...\n例如：\nhttps://docs.qq.com/form/page/xx 邀请你填写《XX报名表》")
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
@@ -1140,51 +1223,174 @@ class SmartAddLinkDialog(QDialog):
             seen_urls.add(url)
             
             start, end = match.span()
-            context = text[max(0, start - 50):min(len(text), end + 50)]
+            # context = text[max(0, start - 50):min(len(text), end + 50)]
             
-            name = self._extract_link_name(text, start, context)
+            name = self._extract_link_name(text, start, end)
             
             category = self.guess_category(url)
             links.append({"name": name, "url": url, "category": category})
             
         self.populate_list(links)
     
-    def _extract_link_name(self, text, url_start, context):
-        """从文本中提取链接名称"""
-        # 1. 尝试匹配《标题》格式
-        title_match = re.search(r'《(.*?)》', context)
-        if title_match:
-            return title_match.group(1)
+    def _extract_link_name(self, text, url_start, url_end):
+        """从文本中提取链接名称
         
-        # 2. 尝试匹配【标题】格式
-        title_match = re.search(r'【(.*?)】', context)
-        if title_match:
-            title = title_match.group(1)
-            if "腾讯文档" not in title and "金山文档" not in title:
-                return title
+        优先级：
+        0. 文本块的第一行（通常是标题）
+        1. 同一行的前缀（如 "名称：URL" 格式）
+        2. 上一行内容
+        3. 附近的《》或【】标记
+        """
         
-        # 3. 尝试匹配 "名称：URL" 或 "名称: URL" 格式
-        # 找到URL前面最近的换行符位置
+        # 0. 首先尝试找到文本块的第一行作为标题
+        # 向前查找空行（连续换行）或文本开头，确定文本块的起始位置
+        block_start = 0
+        search_pos = url_start
+        
+        while search_pos > 0:
+            prev_newline = text.rfind('\n', 0, search_pos)
+            if prev_newline == -1:
+                block_start = 0
+                break
+            
+            # 检查这个换行符之前是否还有一个换行符（即空行）
+            if prev_newline > 0:
+                char_before = text[prev_newline - 1] if prev_newline > 0 else ''
+                # 检查前一行是否为空或只有空白
+                line_before_start = text.rfind('\n', 0, prev_newline - 1)
+                line_before_start = line_before_start + 1 if line_before_start != -1 else 0
+                line_before_content = text[line_before_start:prev_newline].strip()
+                
+                # 如果前一行为空，说明找到了文本块的开始
+                if not line_before_content:
+                    block_start = prev_newline + 1
+                    break
+            
+            search_pos = prev_newline
+        
+        # 获取文本块的第一行
+        first_line_end = text.find('\n', block_start)
+        if first_line_end == -1:
+            first_line_end = len(text)
+        
+        first_line = text[block_start:first_line_end].strip()
+        
+        # 检查第一行是否适合作为标题
+        # 条件：不为空、长度适中、不是URL、不是链接所在行
+        if (first_line and 
+            len(first_line) <= 60 and 
+            not first_line.startswith('http') and 
+            not re.search(r'https?://', first_line) and
+            block_start + len(first_line) < url_start):  # 确保第一行不是链接所在行
+            
+            # 清除可能的序号前缀
+            clean_title = re.sub(r'^[\d]+[.、)\]】]\s*', '', first_line).strip()
+            
+            # 排除一些不太像标题的内容（如纯标点、太短的内容）
+            if clean_title and len(clean_title) >= 2:
+                # 排除类似 "备注：xxx" 这样的字段行
+                if not re.match(r'^[\u4e00-\u9fa5]{2,4}[：:]\s*\S', clean_title):
+                    return clean_title
+                # 如果是 "XXX：" 格式但内容本身像标题（较长且没有冒号后内容）
+                elif re.match(r'^.+[：:]\s*$', first_line):
+                    pass  # 继续往下找
+                else:
+                    return clean_title
+        
+        # 1. 尝试获取同一行的前缀
         line_start = text.rfind('\n', 0, url_start)
         line_start = line_start + 1 if line_start != -1 else 0
-        
-        # 获取URL前面的文本
         prefix = text[line_start:url_start].strip()
-        
-        # 匹配 "名称：" 或 "名称:" 或 "名称 " 格式
-        # 支持中英文冒号、空格分隔
+
+        # 1.1 匹配 "名称：" 或 "名称: " 格式 (高优先级)
         name_match = re.match(r'^(.+?)[：:]\s*$', prefix)
         if name_match:
             name = name_match.group(1).strip()
-            if name and len(name) <= 30:  # 名称长度限制
+            if name and len(name) <= 50: 
                 return name
-        
-        # 4. 如果前缀不含冒号，但有内容，也可以作为名称
-        if prefix and len(prefix) <= 20 and not prefix.startswith('http'):
-            # 去掉可能的序号前缀（如 "1. " "1、"）
+
+        # 1.2 匹配 "名称 URL" 格式 (清除序号)
+        if prefix and len(prefix) <= 40 and not prefix.startswith('http'):
             clean_name = re.sub(r'^[\d]+[.、)\]】]\s*', '', prefix)
+            clean_name = clean_name.strip()
             if clean_name:
                 return clean_name
+
+        # 2. 尝试获取上一行作为名称
+        # 如果前缀为空，或者只是序号
+        is_empty_prefix = not prefix or re.match(r'^[\d]+[.、)\]】]\s*$', prefix)
+        
+        if is_empty_prefix:
+            prev_line_end = line_start - 1
+            if prev_line_end > 0:
+                prev_line_start = text.rfind('\n', 0, prev_line_end)
+                prev_line_start = prev_line_start + 1 if prev_line_start != -1 else 0
+                prev_line = text[prev_line_start:prev_line_end].strip()
+                
+                # 忽略太长的行或看起来像URL的行
+                if prev_line and len(prev_line) <= 50 and not prev_line.startswith('http') and not re.search(r'https?://', prev_line):
+                     # 清除序号
+                    clean_name = re.sub(r'^[\d]+[.、)\]】]\s*', '', prev_line)
+                    clean_name = clean_name.strip()
+                    if clean_name:
+                        return clean_name
+
+        # 3. 尝试在附近寻找《》或【】
+        # 限定搜索范围，避免跨越太远
+        search_start = max(0, url_start - 100)
+        search_end = min(len(text), url_end + 100)
+        context = text[search_start:search_end]
+        
+        # 调整 context 相对于 url_start 的位置
+        rel_url_start = url_start - search_start
+        rel_url_end = url_end - search_start
+        
+        # 3.1 《标题》
+        title_matches = list(re.finditer(r'《(.*?)》', context))
+        if title_matches:
+            best_match = None
+            min_dist = float('inf')
+            
+            for m in title_matches:
+                m_start, m_end = m.span()
+                # 计算距离：匹配项到URL的最近距离
+                if m_end <= rel_url_start:
+                    dist = rel_url_start - m_end
+                elif m_start >= rel_url_end:
+                    dist = m_start - rel_url_end
+                else:
+                    dist = 0 # 重叠
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match = m
+            
+            if best_match and min_dist < 50:
+                return best_match.group(1)
+
+        # 3.2 【标题】
+        title_matches = list(re.finditer(r'【(.*?)】', context))
+        if title_matches:
+            best_match = None
+            min_dist = float('inf')
+            
+            for m in title_matches:
+                m_start, m_end = m.span()
+                if m_end <= rel_url_start:
+                    dist = rel_url_start - m_end
+                elif m_start >= rel_url_end:
+                    dist = m_start - rel_url_end
+                else:
+                    dist = 0
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match = m
+            
+            if best_match and min_dist < 50:
+                title = best_match.group(1)
+                if "腾讯文档" not in title and "金山文档" not in title:
+                    return title
         
         return "新链接"
 
@@ -1212,7 +1418,7 @@ class SmartAddLinkDialog(QDialog):
             return "金数据"
         elif "feishu.cn" in url:
             return "飞书"
-        elif "kdocs.cn" in url:
+        elif "kdocs.cn" in url or "wps.cn" in url or "wps.com" in url:
             return "金山文档"
         elif "wenjuan.com" in url:
             return "问卷网"
@@ -1237,6 +1443,8 @@ class SmartAddLinkDialog(QDialog):
             "jinshuju.net",      # 5. 金数据（备用域名）
             "feishu.cn",         # 6. 飞书
             "kdocs.cn",          # 7. 金山文档/WPS
+            "wps.cn",            # 7.1 金山文档/WPS
+            "wps.com",           # 7.2 金山文档/WPS
             "wenjuan.com",       # 8. 问卷网
             "baominggongju.com", # 9. 报名工具
             "fanqier.cn",        # 10. 番茄表单

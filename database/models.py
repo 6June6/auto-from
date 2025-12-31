@@ -232,7 +232,8 @@ class Category(Document):
 class CardConfigItem(EmbeddedDocument):
     """名片配置项（嵌入式文档）"""
     key = StringField(required=True, verbose_name="字段名")  # 无长度限制，支持多别名组合
-    value = StringField(required=True, verbose_name="字段值")
+    value = StringField(required=True, verbose_name="字段值")  # 多值时存储为 JSON 数组字符串
+    value_count = IntField(default=1, verbose_name="字段值数量")  # 字段值数量，默认为1（兼容老数据）
     order = IntField(default=0, verbose_name="排序")
     fixed_template_id = StringField(verbose_name="固定模板ID")  # 来源模板ID，用户自己添加的为空
     
@@ -242,12 +243,16 @@ class CardConfigItem(EmbeddedDocument):
     
     def to_dict(self):
         """转换为字典"""
-        return {
+        result = {
             'key': self.key,
             'value': self.value,
             'order': self.order,
             'fixed_template_id': self.fixed_template_id
         }
+        # 只有当 value_count > 1 时才包含（节省空间，兼容老数据）
+        if self.value_count and self.value_count > 1:
+            result['value_count'] = self.value_count
+        return result
 
 
 class Card(Document):
@@ -695,6 +700,7 @@ class FixedTemplate(Document):
     """
     field_name = StringField(required=True, max_length=200, verbose_name="字段名（支持别名，用顿号分隔）")
     field_value = StringField(default='', verbose_name="字段值")
+    value_count = IntField(default=1, verbose_name="字段值数量")  # 字段值数量，默认为1
     placeholder = StringField(verbose_name="占位提示")  # 用于前端显示输入提示
     category = StringField(default='通用', max_length=50, verbose_name="分类")
     description = StringField(verbose_name="说明")

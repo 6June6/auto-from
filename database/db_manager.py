@@ -1167,7 +1167,7 @@ class DatabaseManager:
     @staticmethod
     def create_fixed_template(field_name: str, field_value: str, category: str = '通用',
                              description: str = None, placeholder: str = None,
-                             order: int = 0, created_by=None) -> FixedTemplate:
+                             order: int = 0, value_count: int = 1, created_by=None) -> FixedTemplate:
         """
         创建固定模板
         
@@ -1178,6 +1178,7 @@ class DatabaseManager:
             description: 说明
             placeholder: 占位提示（用于前端显示输入提示）
             order: 排序
+            value_count: 字段值数量，默认为1
             created_by: 创建人
         
         Returns:
@@ -1187,6 +1188,7 @@ class DatabaseManager:
             template = FixedTemplate(
                 field_name=field_name,
                 field_value=field_value,
+                value_count=value_count,
                 placeholder=placeholder,
                 category=category,
                 description=description,

@@ -700,16 +700,20 @@ class MessageCenterDialog(QDialog):
         layout.addWidget(footer)
     
     def load_messages(self):
-        """加载消息列表"""
+        """加载消息列表 - 只显示未读消息"""
         # 清空列表
         while self.list_layout.count():
             child = self.list_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         
-        # 获取总数
+        # 获取所有通知，然后过滤出未读的
         all_notifications = DatabaseManager.get_user_notifications(user=self.user, limit=1000)
-        self.total_count = len(all_notifications) if all_notifications else 0
+        
+        # 只保留未读消息
+        unread_notifications = [n for n in all_notifications if not n.is_read] if all_notifications else []
+        
+        self.total_count = len(unread_notifications)
         self.total_pages = max(1, (self.total_count + self.page_size - 1) // self.page_size)
         
         # 确保当前页有效
@@ -721,8 +725,8 @@ class MessageCenterDialog(QDialog):
         # 更新分页控件
         self.update_pagination()
         
-        if not all_notifications:
-            empty_lbl = QLabel("暂无消息")
+        if not unread_notifications:
+            empty_lbl = QLabel("暂无未读消息")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_lbl.setStyleSheet("color: #9CA3AF; font-size: 14px; padding: 60px;")
             self.list_layout.addWidget(empty_lbl)
@@ -732,7 +736,7 @@ class MessageCenterDialog(QDialog):
         # 计算分页
         start_idx = (self.current_page - 1) * self.page_size
         end_idx = start_idx + self.page_size
-        page_notifications = all_notifications[start_idx:end_idx]
+        page_notifications = unread_notifications[start_idx:end_idx]
         
         for notif in page_notifications:
             card = self._create_message_card(notif)
@@ -886,7 +890,14 @@ class MessageCenterDialog(QDialog):
         content_layout.setSpacing(4)
         
         title_row = QHBoxLayout()
-        title_lbl = QLabel(notification.title)
+        
+        # 标题限制长度（最多30个字符）
+        title_text = notification.title
+        if len(title_text) > 30:
+            title_text = title_text[:30] + "..."
+        
+        title_lbl = QLabel(title_text)
+        title_lbl.setToolTip(notification.title)  # 悬停显示完整标题
         title_lbl.setStyleSheet(f"""
             font-size: 15px; 
             font-weight: 700; 
@@ -911,8 +922,15 @@ class MessageCenterDialog(QDialog):
             title_row.addWidget(badge)
         title_row.addStretch()
         
-        content_lbl = QLabel(notification.content)
+        # 内容限制长度（最多100个字符，最多2行）
+        content_text = notification.content
+        if len(content_text) > 100:
+            content_text = content_text[:100] + "..."
+        
+        content_lbl = QLabel(content_text)
         content_lbl.setWordWrap(True)
+        content_lbl.setMaximumHeight(50)  # 限制最大高度，约2行
+        content_lbl.setToolTip(notification.content)  # 悬停显示完整内容
         content_lbl.setStyleSheet("color: #6B7280; font-size: 13px; line-height: 1.4;")
         
         time_lbl = QLabel(notification.created_at.strftime('%m-%d %H:%M'))

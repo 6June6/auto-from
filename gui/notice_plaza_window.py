@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QScrollArea, QFrame, 
                              QGridLayout, QComboBox, QLineEdit, QCheckBox,
                              QButtonGroup, QDateEdit, QApplication, QMessageBox,
-                             QGraphicsDropShadowEffect)
+                             QGraphicsDropShadowEffect, QTextEdit)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDate, QEvent
 from PyQt6.QtGui import QColor, QFont, QIcon, QCursor
 
@@ -66,8 +66,8 @@ class NoticeCardWidget(QFrame):
         self.init_ui()
         
     def init_ui(self):
-        self.setFixedWidth(320)  # 稍宽一点以容纳更多内容
-        self.setMinimumHeight(200)
+        self.setFixedWidth(340)  # 稍宽一点以容纳更多内容
+        self.setFixedHeight(350)  # 固定高度，长内容可滚动
         
         # 阴影效果
         self.shadow = QGraphicsDropShadowEffect()
@@ -107,6 +107,7 @@ class NoticeCardWidget(QFrame):
             font-size: 12px;
             font-weight: 600;
         """)
+        platform_tag.adjustSize()  # 自适应大小
         header_layout.addWidget(platform_tag)
         
         # 类目标签
@@ -120,6 +121,7 @@ class NoticeCardWidget(QFrame):
                 font-size: 12px;
                 font-weight: 600;
             """)
+            category_tag.adjustSize()  # 自适应大小
             header_layout.addWidget(category_tag)
         
         header_layout.addStretch()
@@ -129,23 +131,32 @@ class NoticeCardWidget(QFrame):
             date_str = self.notice.publish_date.strftime('%m-%d')
             date_label = QLabel(date_str)
             date_label.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 12px;")
+            date_label.setMinimumWidth(40)  # 确保日期能显示完整
             header_layout.addWidget(date_label)
         
         layout.addLayout(header_layout)
         
         # 2. 通告内容
-        # 优先使用 content 字段，否则回退到旧字段
-        content = self._get_display_content()
+        # 使用 QTextEdit 替代 QLabel 以支持滚动
+        content = self._get_full_content()
         
-        content_label = QLabel(content)
-        content_label.setWordWrap(True)
-        content_label.setStyleSheet(f"""
-            font-size: 14px;
-            color: {COLORS['text_primary']};
-            line-height: 1.5;
+        self.content_edit = QTextEdit()
+        self.content_edit.setPlainText(content)
+        self.content_edit.setReadOnly(True)
+        self.content_edit.setFrameShape(QFrame.Shape.NoFrame)
+        self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.content_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        self.content_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: transparent;
+                font-size: 14px;
+                color: {COLORS['text_primary']};
+                line-height: 1.5;
+                border: none;
+            }}
         """)
-        content_label.setToolTip(self._get_full_content())  # 悬停显示完整内容
-        layout.addWidget(content_label)
+        layout.addWidget(self.content_edit)
         
         layout.addStretch()
         
@@ -171,14 +182,6 @@ class NoticeCardWidget(QFrame):
         """)
         join_btn.clicked.connect(lambda: self.join_clicked.emit(self.notice))
         layout.addWidget(join_btn)
-    
-    def _get_display_content(self):
-        """获取用于显示的内容（截取）"""
-        full_content = self._get_full_content()
-        # 截取前150个字符
-        if len(full_content) > 150:
-            return full_content[:147] + "..."
-        return full_content
     
     def _get_full_content(self):
         """获取完整内容"""
@@ -240,13 +243,44 @@ class NoticePlazaWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         central_widget.setLayout(main_layout)
         
-        # 顶部：筛选区
-        filter_container = QWidget()
-        filter_container.setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLORS['border']};")
+        # 顶部：筛选区头部（控制折叠）
+        filter_header = QWidget()
+        filter_header.setStyleSheet("background-color: white;")
+        filter_header_layout = QHBoxLayout()
+        filter_header_layout.setContentsMargins(24, 16, 24, 0)
+        
+        filter_title = QLabel("筛选条件")
+        filter_title.setStyleSheet(f"font-weight: 600; font-size: 15px; color: {COLORS['text_primary']};")
+        filter_header_layout.addWidget(filter_title)
+        
+        filter_header_layout.addStretch()
+        
+        self.toggle_filter_btn = QPushButton("收起筛选 🔼")
+        self.toggle_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_filter_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                color: {COLORS['text_secondary']};
+                font-weight: 500;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                color: {COLORS['primary']};
+            }}
+        """)
+        self.toggle_filter_btn.clicked.connect(self.toggle_filters)
+        filter_header_layout.addWidget(self.toggle_filter_btn)
+        
+        filter_header.setLayout(filter_header_layout)
+        main_layout.addWidget(filter_header)
+
+        # 顶部：筛选区内容
+        self.filter_container = QWidget()
+        self.filter_container.setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLORS['border']};")
         filter_layout = QVBoxLayout()
-        filter_layout.setContentsMargins(24, 24, 24, 24)
+        filter_layout.setContentsMargins(24, 16, 24, 24)
         filter_layout.setSpacing(16)
-        filter_container.setLayout(filter_layout)
+        self.filter_container.setLayout(filter_layout)
         
         # 1. 类目筛选
         category_layout = QHBoxLayout()
@@ -321,7 +355,7 @@ class NoticePlazaWindow(QMainWindow):
         # 刷新按钮
         refresh_btn = QPushButton("🔄 刷新")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.setFixedSize(80, 36)
+        refresh_btn.setFixedSize(100, 36)
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background: white;
@@ -338,7 +372,7 @@ class NoticePlazaWindow(QMainWindow):
             }}
         """)
         refresh_btn.clicked.connect(self.refresh_notices)
-        action_layout.addWidget(refresh_btn)
+        # action_layout.addWidget(refresh_btn)
         
         # 搜索按钮
         search_btn = QPushButton("筛选")
@@ -364,7 +398,7 @@ class NoticePlazaWindow(QMainWindow):
         
         filter_layout.addLayout(action_layout)
         
-        main_layout.addWidget(filter_container)
+        main_layout.addWidget(self.filter_container)
         
         # 中间：内容区
         content_area = QScrollArea()
@@ -434,6 +468,19 @@ class NoticePlazaWindow(QMainWindow):
         footer_container.setLayout(footer_layout)
         main_layout.addWidget(footer_container)
     
+    def toggle_filters(self):
+        """切换筛选区显示状态"""
+        if self.filter_container.isVisible():
+            self.filter_container.setVisible(False)
+            self.toggle_filter_btn.setText("展开筛选 🔽")
+            # 添加底边框给header，因为filter_container隐藏了，它的底边框也不见了
+            self.toggle_filter_btn.parentWidget().setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLORS['border']};")
+        else:
+            self.filter_container.setVisible(True)
+            self.toggle_filter_btn.setText("收起筛选 🔼")
+            # 移除header的底边框，使用filter_container的底边框
+            self.toggle_filter_btn.parentWidget().setStyleSheet("background-color: white;")
+
     def load_data(self):
         """加载初始化数据"""
         # 加载类目

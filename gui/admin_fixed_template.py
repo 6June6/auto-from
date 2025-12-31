@@ -20,9 +20,10 @@ from gui.admin_base_components import (
 # 固定模板列表列宽配置
 TEMPLATE_LIST_COLUMNS = {
     'field_name': 180,
-    'field_value': 200,
+    'field_value': 180,
+    'value_count': 80,
     'category': 100,
-    'description': 150,
+    'description': 130,
     'order': 60,
     'status': 80,
     'actions': 140
@@ -36,6 +37,7 @@ class TemplateListHeader(BaseListHeader):
         columns = [
             ('字段名', TEMPLATE_LIST_COLUMNS['field_name']),
             ('字段值', TEMPLATE_LIST_COLUMNS['field_value']),
+            ('值数量', TEMPLATE_LIST_COLUMNS['value_count']),
             ('分类', TEMPLATE_LIST_COLUMNS['category']),
             ('说明', TEMPLATE_LIST_COLUMNS['description']),
             ('排序', TEMPLATE_LIST_COLUMNS['order']),
@@ -71,15 +73,27 @@ class TemplateRowWidget(BaseRowWidget):
         
         # 2. 字段值
         value_text = self.template.field_value or '-'
-        if len(value_text) > 25:
-            value_text = value_text[:25] + '...'
+        if len(value_text) > 20:
+            value_text = value_text[:20] + '...'
         value_label = QLabel(value_text)
         value_label.setFixedWidth(TEMPLATE_LIST_COLUMNS['field_value'])
         value_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
         value_label.setToolTip(self.template.field_value or '')
         layout.addWidget(value_label)
         
-        # 3. 分类
+        # 3. 字段值数量
+        value_count = getattr(self.template, 'value_count', 1) or 1
+        count_label = QLabel(str(value_count))
+        count_label.setFixedWidth(TEMPLATE_LIST_COLUMNS['value_count'])
+        count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        count_label.setStyleSheet(f"""
+            color: {PREMIUM_COLORS['gradient_blue_start']}; 
+            font-size: 13px;
+            font-weight: 600;
+        """)
+        layout.addWidget(count_label)
+        
+        # 4. 分类
         cat_container = QWidget()
         cat_container.setFixedWidth(TEMPLATE_LIST_COLUMNS['category'])
         cat_layout = QHBoxLayout(cat_container)
@@ -99,24 +113,24 @@ class TemplateRowWidget(BaseRowWidget):
         cat_layout.addStretch()
         layout.addWidget(cat_container)
         
-        # 4. 说明
+        # 5. 说明
         desc_text = self.template.description or '-'
-        if len(desc_text) > 15:
-            desc_text = desc_text[:15] + '...'
+        if len(desc_text) > 12:
+            desc_text = desc_text[:12] + '...'
         desc_label = QLabel(desc_text)
         desc_label.setFixedWidth(TEMPLATE_LIST_COLUMNS['description'])
         desc_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
         desc_label.setToolTip(self.template.description or '')
         layout.addWidget(desc_label)
         
-        # 5. 排序
+        # 6. 排序
         order_label = QLabel(str(self.template.order))
         order_label.setFixedWidth(TEMPLATE_LIST_COLUMNS['order'])
         order_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         order_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
         layout.addWidget(order_label)
         
-        # 6. 状态
+        # 7. 状态
         status_container = QWidget()
         status_container.setFixedWidth(TEMPLATE_LIST_COLUMNS['status'])
         status_layout = QHBoxLayout(status_container)
@@ -148,7 +162,7 @@ class TemplateRowWidget(BaseRowWidget):
         status_layout.addStretch()
         layout.addWidget(status_container)
         
-        # 7. 操作
+        # 8. 操作
         actions_container = QWidget()
         actions_container.setFixedWidth(TEMPLATE_LIST_COLUMNS['actions'])
         actions_layout = QHBoxLayout(actions_container)
@@ -224,7 +238,7 @@ class AddTemplateDialog(QDialog):
     def init_ui(self):
         title = "编辑模板" if self.template else "添加模板"
         self.setWindowTitle(title)
-        self.setFixedSize(550, 620)
+        self.setFixedSize(550, 720)
         self.setStyleSheet(f"background-color: {PREMIUM_COLORS['surface']};")
         
         layout = QVBoxLayout(self)
@@ -240,8 +254,8 @@ class AddTemplateDialog(QDialog):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(15)
         
-        # 字段名称
-        self.name_input = self._create_input_field("字段名称", "支持别名，用顿号分隔 (e.g. 手机号、电话、联系方式)")
+        # 字段名称（带加号按钮）
+        self.name_input = self._create_input_field_with_add_btn("字段名称", "支持别名，用顿号分隔 (e.g. 手机号、电话、联系方式)")
         form_layout.addWidget(self.name_input)
         
         # 字段值
@@ -273,6 +287,10 @@ class AddTemplateDialog(QDialog):
         """)
         value_layout.addWidget(self.value_input)
         form_layout.addWidget(value_container)
+        
+        # 字段值数量
+        self.value_count_input = self._create_input_field("字段值数量", "默认为1", "1")
+        form_layout.addWidget(self.value_count_input)
         
         # 分类
         self.category_combo = QComboBox()
@@ -351,6 +369,8 @@ class AddTemplateDialog(QDialog):
         if self.template:
             self.name_input.input.setText(self.template.field_name)
             self.value_input.setText(self.template.field_value)
+            value_count = getattr(self.template, 'value_count', 1) or 1
+            self.value_count_input.input.setText(str(value_count))
             self.category_combo.setCurrentText(self.template.category)
             self.placeholder_input.input.setText(self.template.placeholder or '')
             self.desc_input.input.setText(self.template.description or '')
@@ -385,6 +405,171 @@ class AddTemplateDialog(QDialog):
         container.input = input_field
         layout.addWidget(input_field)
         return container
+    
+    def _create_input_field_with_add_btn(self, label_text, placeholder="", default_val=""):
+        """创建带加号按钮的输入框（用于添加别名）"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        
+        label = QLabel(label_text)
+        label.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_body']};")
+        layout.addWidget(label)
+        
+        # 输入框容器（包含输入框和内嵌加号按钮）
+        input_container = QWidget()
+        input_container.setMinimumHeight(40)
+        input_layout = QHBoxLayout(input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(0)
+        
+        input_field = QLineEdit()
+        input_field.setPlaceholderText(placeholder)
+        input_field.setText(default_val)
+        input_field.setMinimumHeight(40)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 0 40px 0 10px;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 8px;
+                background: #f8fafc;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {PREMIUM_COLORS['primary']};
+                background: white;
+            }}
+        """)
+        input_layout.addWidget(input_field)
+        
+        # 加号按钮（内嵌在输入框右侧）
+        add_btn = QPushButton("+")
+        add_btn.setFixedSize(28, 28)
+        add_btn.setToolTip("添加字段别名（用顿号分隔）")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['gradient_blue_start']};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['gradient_blue_end']};
+            }}
+            QPushButton:pressed {{
+                background: #4338ca;
+            }}
+        """)
+        add_btn.clicked.connect(lambda: self._add_field_alias(input_field))
+        
+        # 将加号按钮定位在输入框内部右侧
+        add_btn.setParent(input_container)
+        add_btn.raise_()
+        
+        # 更新按钮位置
+        def update_add_btn_pos():
+            add_btn.move(input_container.width() - 34, (input_container.height() - 28) // 2)
+        
+        # 监听容器大小变化
+        input_container.resizeEvent = lambda e: update_add_btn_pos()
+        
+        layout.addWidget(input_container)
+        container.input = input_field
+        return container
+    
+    def _add_field_alias(self, input_field):
+        """添加字段别名"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加字段别名")
+        dialog.setFixedWidth(400)
+        dialog.setStyleSheet(f"""
+            QDialog {{ background: {PREMIUM_COLORS['surface']}; }}
+            QLabel {{ color: {PREMIUM_COLORS['text_body']}; font-size: 13px; }}
+            QLineEdit {{ 
+                padding: 10px 12px; 
+                border: 2px solid {PREMIUM_COLORS['gradient_blue_start']}; 
+                border-radius: 8px; 
+                font-size: 14px;
+                background: white;
+            }}
+            QLineEdit:focus {{ border-color: {PREMIUM_COLORS['gradient_blue_end']}; }}
+        """)
+        
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.setContentsMargins(24, 24, 24, 24)
+        dlg_layout.setSpacing(16)
+        
+        label = QLabel("请输入新的字段名（将用顿号拼接到现有字段名后）：")
+        label.setWordWrap(True)
+        dlg_layout.addWidget(label)
+        
+        alias_input = QLineEdit()
+        alias_input.setPlaceholderText("输入字段别名，如：电话、联系方式")
+        dlg_layout.addWidget(alias_input)
+        
+        # 当前值预览
+        current_text = input_field.text().strip()
+        if current_text:
+            preview_label = QLabel(f"当前值: {current_text}")
+            preview_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+            dlg_layout.addWidget(preview_label)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch()
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedSize(80, 36)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['background']};
+                color: {PREMIUM_COLORS['text_body']};
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {PREMIUM_COLORS['border_light']}; }}
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedSize(80, 36)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 {PREMIUM_COLORS['gradient_blue_start']}, 
+                    stop:1 {PREMIUM_COLORS['gradient_blue_end']});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ opacity: 0.9; }}
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        dlg_layout.addLayout(btn_layout)
+        
+        alias_input.setFocus()
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            text = alias_input.text().strip()
+            if text:
+                current_text = input_field.text().strip()
+                if current_text:
+                    new_text = f"{current_text}、{text}"
+                else:
+                    new_text = text
+                input_field.setText(new_text)
 
     def save_data(self):
         field_name = self.name_input.input.text().strip()
@@ -399,9 +584,17 @@ class AddTemplateDialog(QDialog):
         except ValueError:
             order = 0
             
+        try:
+            value_count = int(self.value_count_input.input.text().strip() or "1")
+            if value_count < 1:
+                value_count = 1
+        except ValueError:
+            value_count = 1
+            
         data = {
             'field_name': field_name,
             'field_value': field_value,
+            'value_count': value_count,
             'placeholder': self.placeholder_input.input.text().strip(),
             'category': self.category_combo.currentText().strip() or '通用',
             'description': self.desc_input.input.text().strip(),

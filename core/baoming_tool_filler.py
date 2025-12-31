@@ -157,6 +157,33 @@ class BaomingToolAPI:
         except Exception as e:
             return -99, f"请求失败: {str(e)}", None
     
+    def get_short_detail(self) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        获取表单简要信息（包含标题sign_name）
+        
+        Returns:
+            Tuple[bool, str, Optional[Dict]]: (成功标志, 消息, 详情数据)
+        """
+        if not self.eid:
+            return False, '缺少eid', None
+            
+        try:
+            url = f"{self.BASE_URL}/enroll/v1/short_detail"
+            params = {
+                'eid': self.eid
+            }
+            response = self.session.get(url, params=params, timeout=10)
+            data = response.json()
+            
+            if data.get('msg') == 'ok' or data.get('sta') == 0:
+                detail = data.get('data', {})
+                return True, '获取成功', detail
+            else:
+                return False, data.get('msg', '获取简要信息失败'), None
+                
+        except Exception as e:
+            return False, f"请求失败: {str(e)}", None
+    
     def get_enroll_detail(self) -> Tuple[bool, str, Optional[str]]:
         """
         获取报名详情，提取 info_id
@@ -357,20 +384,29 @@ class BaomingToolFiller:
         self.api = BaomingToolAPI()
         self.form_fields: List[Dict] = []
         self.login_code: Optional[str] = None
+        self.card_id: Optional[str] = None
+        self.eid: Optional[str] = None
+        self.form_title: Optional[str] = None  # 表单标题（sign_name）
+        self.form_short_info: Optional[Dict] = None  # 表单简要信息
         
-    def initialize(self, url: str) -> Tuple[bool, str]:
+    def initialize(self, url: str, card_id: Optional[str] = None) -> Tuple[bool, str]:
         """
         初始化填充器
         
         Args:
             url: 报名工具链接
+            card_id: 名片ID（可选，用于区分不同用户的登录状态）
             
         Returns:
             Tuple[bool, str]: (成功标志, 消息)
         """
+        self.card_id = str(card_id) if card_id else "default"
+        
         eid = self.api.extract_eid(url)
         if not eid:
             return False, '无法从链接中提取eid'
+            
+        self.eid = eid
         return True, f'已提取eid: {eid}'
     
     def get_qr_code(self) -> Tuple[bool, str, Optional[str]]:
@@ -384,26 +420,164 @@ class BaomingToolFiller:
         """检查登录状态"""
         if not self.login_code:
             return -99, '未获取登录二维码', None
-        return self.api.poll_login_status(self.login_code)
+        status, msg, user_data = self.api.poll_login_status(self.login_code)
+        
+        # 登录成功后，保存 Token
+        if status == 0 and user_data:
+            self._save_token(user_data)
+            
+        return status, msg, user_data
     
+    def try_restore_login(self) -> bool:
+        """尝试恢复登录状态"""
+        if not self.eid:
+            return False
+            
+        token_data = self._load_token()
+        if not token_data:
+            return False
+            
+        access_token = token_data.get('access_token')
+        if not access_token:
+            return False
+            
+        # 验证 Token 是否有效
+        self.api.access_token = access_token
+        self.api.user_info = token_data # 恢复用户信息
+        
+        print(f"  ✅ [报名工具] 恢复登录状态: {token_data.get('uname', '用户')} (名片ID: {self.card_id}, EID: {self.eid})")
+        return True
+
+    def _get_token_file_path(self):
+        """获取 Token 存储路径"""
+        import os
+        from pathlib import Path
+        # 存放在用户目录的 .auto-form-filler 文件夹下
+        home = Path.home()
+        config_dir = home / '.auto-form-filler'
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / 'baoming_tokens.json'
+
+    def _get_storage_key(self) -> str:
+        """生成存储 Key: card_{card_id}_eid_{eid}"""
+        return f"card_{self.card_id}_eid_{self.eid}"
+
+    def _save_token(self, user_data: Dict):
+        """保存 Token 到本地文件（支持多账号）"""
+        try:
+            file_path = self._get_token_file_path()
+            key = self._get_storage_key()
+            
+            # 读取现有数据
+            all_tokens = {}
+            if file_path.exists():
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        all_tokens = json.load(f)
+                except:
+                    all_tokens = {}
+            
+            # 更新特定 Key 的数据
+            # 添加保存时间
+            user_data['_save_time'] = time.time()
+            all_tokens[key] = user_data
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(all_tokens, f, ensure_ascii=False, indent=2)
+            print(f"  💾 [报名工具] Token 已保存: {key}")
+        except Exception as e:
+            print(f"  ⚠️ [报名工具] 保存 Token 失败: {e}")
+
+    def _load_token(self) -> Optional[Dict]:
+        """从本地文件加载特定 Key 的 Token"""
+        try:
+            file_path = self._get_token_file_path()
+            if not file_path.exists():
+                return None
+            
+            key = self._get_storage_key()
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                all_tokens = json.load(f)
+                return all_tokens.get(key)
+        except Exception as e:
+            print(f"  ⚠️ [报名工具] 加载 Token 失败: {e}")
+            return None
+    
+    def _clear_token(self):
+        """清空当前 Key 的 Token（token 失效时调用）"""
+        try:
+            file_path = self._get_token_file_path()
+            if not file_path.exists():
+                return
+            
+            key = self._get_storage_key()
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                all_tokens = json.load(f)
+            
+            if key in all_tokens:
+                del all_tokens[key]
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(all_tokens, f, ensure_ascii=False, indent=2)
+                print(f"  🗑️ [报名工具] Token 已清空: {key}")
+        except Exception as e:
+            print(f"  ⚠️ [报名工具] 清空 Token 失败: {e}")
+    
+    def _is_token_invalid_error(self, msg: str) -> bool:
+        """检查错误消息是否表示 token 失效"""
+        invalid_keywords = ['invalid access_token', 'access_token', 'token', '登录', '过期', '失效', '无效']
+        msg_lower = msg.lower()
+        return any(keyword.lower() in msg_lower for keyword in invalid_keywords)
+            
     def load_form(self) -> Tuple[bool, str]:
         """加载表单数据"""
-        # 先获取详情
+        # 先获取简要信息（包含表单内容）
+        success, msg, short_info = self.api.get_short_detail()
+        if success and short_info:
+            self.form_short_info = short_info
+            # 优先从 content[0].value 获取内容，其次是 sign_name
+            content_list = short_info.get('content', [])
+            if content_list and len(content_list) > 0:
+                first_content = content_list[0]
+                if isinstance(first_content, dict):
+                    self.form_title = first_content.get('value', '')
+            if not self.form_title:
+                self.form_title = short_info.get('sign_name', '')
+            print(f"  📋 [报名工具] 表单内容: {self.form_title[:50]}..." if len(self.form_title) > 50 else f"  📋 [报名工具] 表单内容: {self.form_title}")
+        
+        # 获取详情
         success, msg, info_id = self.api.get_enroll_detail()
         if not success:
+            # 检测 token 是否失效
+            if self._is_token_invalid_error(msg):
+                print(f"  ⚠️ [报名工具] Token 已失效，清空本地缓存: {msg}")
+                self._clear_token()
+                self.api.access_token = None
+                self.api.user_info = None
             return False, msg
             
         # 再获取表单字段
         success, msg, fields = self.api.get_form_fields()
         if not success:
+            # 检测 token 是否失效
+            if self._is_token_invalid_error(msg):
+                print(f"  ⚠️ [报名工具] Token 已失效，清空本地缓存: {msg}")
+                self._clear_token()
+                self.api.access_token = None
+                self.api.user_info = None
             return False, msg
             
         self.form_fields = fields or []
         return True, f'已加载 {len(self.form_fields)} 个字段'
     
+    def get_form_title(self) -> str:
+        """获取表单标题"""
+        return self.form_title or ""
+    
     def match_and_fill(self, card_config: List[Dict]) -> List[Dict]:
         """
-        匹配名片配置并填充表单
+        匹配名片配置并填充表单（优化版 - 复用石墨文档/见数算法）
         
         Args:
             card_config: 名片配置项列表，每项包含 name(字段名) 和 value(值)
@@ -413,22 +587,47 @@ class BaomingToolFiller:
         """
         result = []
         
-        for field in self.form_fields:
+        print(f"  🎯 [报名工具] 开始智能匹配，共有 {len(self.form_fields)} 个字段，{len(card_config)} 个名片项")
+        
+        for index, field in enumerate(self.form_fields):
             field_name = field.get('field_name', '')
             field_key = field.get('field_key', '')
             ignore = field.get('ignore', 0)
             
-            # 查找匹配的名片配置
-            matched_value = ''
+            best_match = {
+                'value': '',
+                'score': 0,
+                'matched_key': None
+            }
+            
+            print(f"  📋 字段 #{index+1}: \"{field_name}\"")
+            
+            # 遍历所有名片配置找最佳匹配
             for config in card_config:
-                config_name = config.get('name', '')
+                config_name = config.get('name', '') # 名片上的key
                 config_value = config.get('value', '')
                 
-                # 使用评分匹配
-                if self._match_field_name(field_name, config_name):
-                    matched_value = config_value
-                    break
+                # 计算匹配分数
+                score_result = self._calculate_match_score(field_name, config_name)
+                
+                # 记录详细日志（调试用）
+                # if score_result['score'] > 0:
+                #    print(f"     - 候选: \"{config_name}\" -> {score_result['score']}分")
+
+                if score_result['matched'] and score_result['score'] > best_match['score']:
+                    best_match = {
+                        'value': config_value,
+                        'score': score_result['score'],
+                        'matched_key': config_name
+                    }
             
+            matched_value = ''
+            if best_match['score'] >= 50: # 阈值50
+                matched_value = best_match['value']
+                print(f"     ✅ 选中: \"{best_match['matched_key']}\" (分数: {best_match['score']})")
+            else:
+                print(f"     ❌ 未匹配 (最高分: {best_match['score']})")
+
             result.append({
                 'field_name': field_name,
                 'field_key': field_key,
@@ -438,39 +637,192 @@ class BaomingToolFiller:
         
         return result
     
-    def _match_field_name(self, form_field: str, config_name: str) -> bool:
-        """
-        匹配字段名称
+    def _clean_text(self, text: str) -> str:
+        """清理文本"""
+        if not text:
+            return ''
+        text = str(text).lower()
+        # 去除特殊字符
+        text = re.sub(r'[：:*？?！!。.、，,\s\-_()（）【】\[\]\n\r\t/／\\|｜;；\'\"\u2795+《》<>""'']+', '', text)
+        return text.strip()
+
+    def _clean_text_no_prefix(self, text: str) -> str:
+        """去除数字前缀"""
+        if not text:
+            return ''
+        cleaned = self._clean_text(text)
+        # 去除开头的数字和点号
+        cleaned = re.sub(r'^\d+\.?\*?', '', cleaned)
+        return cleaned.strip()
+
+    def _split_keywords(self, keyword: str) -> List[str]:
+        """分割关键词"""
+        if not keyword:
+            return []
+        # 支持多种分隔符
+        parts = re.split(r'[|,;，；、\n\r\t/／\\｜\u2795+]+', keyword)
+        return [self._clean_text(p) for p in parts if p.strip()]
         
-        支持多种匹配方式：
-        1. 完全匹配
-        2. 包含匹配
-        3. 别名匹配（使用、分隔）
+    def _split_keywords_no_prefix(self, keyword: str) -> List[str]:
+        """分割关键词并去前缀"""
+        if not keyword:
+            return []
+        parts = re.split(r'[|,;，；、\n\r\t/／\\｜\u2795+]+', keyword)
+        return [self._clean_text_no_prefix(p) for p in parts if p.strip()]
+
+    def _extract_core_words(self, text: str) -> List[str]:
+        """提取核心词"""
+        cleaned = self._clean_text(text)
+        # 核心词库（与前端 JS 保持一致）
+        core_patterns = [
+            '小红书', '蒲公英', '微信', '微博', '抖音', '快手',
+            'id', '账号', '昵称', '主页', '名字', '名称',
+            '粉丝', '点赞', '赞藏', '互动', '阅读', '播放', '曝光', '收藏',
+            '中位数', '均赞', 'cpm', 'cpe',
+            '价格', '报价', '报备', '返点', '裸价', '预算',
+            '视频', '图文', '链接',
+            '手机', '电话', '地址',
+            '姓名', '年龄', '性别', '城市', '地区', 'ip',
+            '档期', '类别', '类型', '领域', '备注', '授权', '分发', '排竞',
+            '平台', '健康', '等级', '保价', '配合', '时间', '探店'
+        ]
+        found = []
+        for pattern in core_patterns:
+            if pattern in cleaned:
+                found.append(pattern)
+        return found
+        
+    def _longest_common_substring(self, s1: str, s2: str) -> int:
+        """最长公共子串长度"""
+        m, n = len(s1), len(s2)
+        if m == 0 or n == 0:
+            return 0
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        max_len = 0
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if s1[i-1] == s2[j-1]:
+                    dp[i][j] = dp[i-1][j-1] + 1
+                    max_len = max(max_len, dp[i][j])
+                else:
+                    dp[i][j] = 0
+        return max_len
+
+    def _calculate_match_score(self, field_name: str, config_name: str) -> Dict:
         """
-        if not form_field or not config_name:
-            return False
+        计算匹配分数（核心算法）
+        
+        Args:
+            field_name: 表单字段名 (Identifier)
+            config_name: 名片配置项名 (Keyword)
+        """
+        if not config_name:
+            return {'matched': False, 'score': 0}
             
-        form_field = form_field.lower().strip()
-        config_name = config_name.lower().strip()
+        clean_identifier = self._clean_text(field_name)
+        if not clean_identifier:
+            return {'matched': False, 'score': 0}
+            
+        clean_identifier_no_prefix = self._clean_text_no_prefix(field_name)
+        identifier_core_words = self._extract_core_words(field_name)
         
-        # 完全匹配
-        if form_field == config_name:
-            return True
+        # 分割名片关键词
+        sub_keywords = self._split_keywords(config_name)
+        if not sub_keywords:
+            sub_keywords = [self._clean_text(config_name)]
+            
+        sub_keywords_no_prefix = self._split_keywords_no_prefix(config_name)
+        if not sub_keywords_no_prefix:
+            sub_keywords_no_prefix = [self._clean_text_no_prefix(config_name)]
+            
+        best_score = 0
         
-        # 支持别名（用、分隔）
-        aliases = config_name.split('、')
-        for alias in aliases:
-            alias = alias.strip()
-            if not alias:
-                continue
-            # 完全匹配
-            if form_field == alias:
-                return True
-            # 包含匹配
-            if alias in form_field or form_field in alias:
-                return True
-        
-        return False
+        for i, sub_key in enumerate(sub_keywords):
+            if not sub_key: continue
+            
+            sub_key_no_prefix = sub_keywords_no_prefix[i] if i < len(sub_keywords_no_prefix) else sub_key
+            sub_key_core_words = self._extract_core_words(sub_key) # 注意这里是子关键词的核心词
+            
+            current_score = 0
+            
+            # 1. 完全匹配 (100分)
+            if clean_identifier == sub_key:
+                current_score = 100
+                
+            # 2. 去前缀后完全匹配 (98分)
+            elif sub_key_no_prefix and clean_identifier == sub_key_no_prefix:
+                current_score = 98
+                
+            # 3. 表单标签包含名片key (包含匹配)
+            elif sub_key in clean_identifier and len(sub_key) >= 2:
+                coverage = len(sub_key) / len(clean_identifier)
+                if coverage >= 0.8:
+                    current_score = 95
+                elif coverage >= 0.5:
+                    current_score = 50 + (coverage * 45)
+                else:
+                    current_score = 50 + (coverage * 40)
+                    
+            # 4. 去前缀后的包含匹配
+            elif sub_key_no_prefix and sub_key_no_prefix in clean_identifier and len(sub_key_no_prefix) >= 2:
+                coverage = len(sub_key_no_prefix) / len(clean_identifier)
+                if coverage >= 0.8:
+                    current_score = 93
+                else:
+                    current_score = 48 + (coverage * 40)
+                    
+            # 5. 名片key包含表单标签 (反向包含)
+            elif clean_identifier in sub_key and len(clean_identifier) >= 2:
+                if sub_key_no_prefix == clean_identifier:
+                    current_score = 96
+                else:
+                    base_len = len(sub_key_no_prefix) if sub_key_no_prefix else len(sub_key)
+                    coverage = len(clean_identifier) / base_len
+                    current_score = 55 + (coverage * 35)
+                    
+            # 6. 去前缀版本的反向包含
+            elif sub_key_no_prefix and clean_identifier_no_prefix in sub_key_no_prefix and len(clean_identifier_no_prefix) >= 2:
+                 coverage = len(clean_identifier_no_prefix) / len(sub_key_no_prefix)
+                 current_score = 53 + (coverage * 35)
+
+            # 7. 核心词匹配
+            elif len(sub_key_core_words) > 0 and len(identifier_core_words) > 0:
+                common_core_words = [w for w in sub_key_core_words if w in identifier_core_words]
+                if common_core_words:
+                    max_core_len = max(len(sub_key_core_words), len(identifier_core_words))
+                    core_match_ratio = len(common_core_words) / max_core_len
+                    
+                    if len(common_core_words) == len(sub_key_core_words) and len(common_core_words) == len(identifier_core_words):
+                        current_score = 88
+                    elif len(sub_key_core_words) == 1 and len(identifier_core_words) == 1:
+                        current_score = 80
+                    else:
+                        current_score = 55 + int(core_match_ratio * 25)
+            
+            # 8. 最长公共子串匹配 (兜底)
+            elif len(sub_key) >= 2 and len(clean_identifier) >= 2:
+                lcs = self._longest_common_substring(sub_key, clean_identifier)
+                max_len = max(len(sub_key), len(clean_identifier))
+                min_len = min(len(sub_key), len(clean_identifier))
+                
+                if lcs >= 2:
+                    coverage = lcs / max_len
+                    match_rate = lcs / min_len
+                    
+                    if match_rate >= 0.6 and lcs >= 3:
+                        current_score = 30 + (coverage * 20) + (match_rate * 15)
+                    elif match_rate >= 0.5 and lcs >= 2:
+                        current_score = 25 + (coverage * 15) + (match_rate * 10)
+            
+            if current_score > best_score:
+                best_score = current_score
+                
+        return {'matched': best_score >= 50, 'score': best_score}
+
+    def _match_field_name(self, form_field: str, config_name: str) -> bool:
+        """保留旧方法接口，但在内部调用新逻辑（为了兼容性）"""
+        result = self._calculate_match_score(form_field, config_name)
+        return result['matched']
     
     def submit(self, form_data: List[Dict]) -> Tuple[bool, str]:
         """提交表单"""
