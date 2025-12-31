@@ -201,8 +201,13 @@ class LoginWindow(QDialog):
         self.current_user = None
         self.auto_login_enabled = auto_login
         self.main_window_ready = False  # 主窗口是否准备好
+        self._is_closing = False  # 防止重复关闭
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)  # 无边框模式，自己画标题栏
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) # 透明背景用于圆角
+        
+        # 动画对象引用，便于清理
+        self._animations = []
+        
         self.init_ui()
         
         # 窗口拖动逻辑变量
@@ -445,6 +450,7 @@ class LoginWindow(QDialog):
             self.opacity_anim.setStartValue(0)
             self.opacity_anim.setEndValue(1)
             self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._animations.append(self.opacity_anim)
             
             # 动画结束后强制重绘并聚焦
             self.opacity_anim.finished.connect(self._on_animation_finished)
@@ -460,6 +466,7 @@ class LoginWindow(QDialog):
             self.opacity_anim.setStartValue(0)
             self.opacity_anim.setEndValue(1)
             self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._animations.append(self.opacity_anim)
             
             # 2. 位置上浮动画 (Slide Up)
             start_rect = original_rect.translated(0, 50)
@@ -469,6 +476,7 @@ class LoginWindow(QDialog):
             self.pos_anim.setStartValue(start_rect)
             self.pos_anim.setEndValue(original_rect)
             self.pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._animations.append(self.pos_anim)
             
             # 3. 组合并启动
             self.anim_group = QParallelAnimationGroup()
@@ -529,10 +537,12 @@ class LoginWindow(QDialog):
                 self.current_user = user
                 
                 # 更新加载文字
-                self.loading_text.setText("登录成功，正在进入...")
+                self.loading_text.setText("登录成功！")
+                if hasattr(self, 'sub_loading_text'):
+                    self.sub_loading_text.setText("即将进入...")
                 
-                # 延迟关闭窗口
-                QTimer.singleShot(800, self._finish_login)
+                # 短暂延迟后关闭
+                QTimer.singleShot(300, self._finish_login)
             else:
                 # 自动登录失败，删除无效 token
                 try:
@@ -624,10 +634,12 @@ class LoginWindow(QDialog):
             self.current_user = user
             
             # 更新加载文字
-            self.loading_text.setText("登录成功，正在进入...")
+            self.loading_text.setText("登录成功！")
+            if hasattr(self, 'sub_loading_text'):
+                self.sub_loading_text.setText("即将进入...")
             
-            # 延迟关闭窗口，让用户看到成功状态
-            QTimer.singleShot(800, self._finish_login)
+            # 短暂延迟后关闭，让用户看到成功状态
+            QTimer.singleShot(300, self._finish_login)
             
         except Exception as e:
             self.hide_loading_state()
@@ -635,29 +647,75 @@ class LoginWindow(QDialog):
     
     def _finish_login(self):
         """完成登录，关闭窗口"""
-        # 更新文字提示
-        if hasattr(self, 'loading_text'):
-            self.loading_text.setText("正在加载主界面...")
-        if hasattr(self, 'sub_loading_text'):
-            self.sub_loading_text.setText("请稍候...")
-        
-        # 发出信号，让 main.py 开始创建主窗口
+        # 发出信号通知登录成功
         self.login_success.emit(self.current_user)
-        
-        # 不立即关闭，等待外部调用 close_after_ready()
-        # 如果 1.5 秒后还没被关闭，则自动关闭（兜底）
-        QTimer.singleShot(1500, self._safe_close)
     
     def close_after_ready(self):
         """主窗口准备好后调用此方法关闭登录窗口"""
+        if self._is_closing:
+            return
+        self._is_closing = True
         self.main_window_ready = True
+        # 先清理动画，再关闭
+        self._cleanup_animations()
         # 短暂延迟后关闭，让过渡更平滑
-        QTimer.singleShot(200, self.accept)
+        QTimer.singleShot(100, self.accept)
     
     def _safe_close(self):
         """兜底关闭（如果主窗口创建失败等情况）"""
-        if not self.main_window_ready:
+        if not self.main_window_ready and not self._is_closing:
+            self._is_closing = True
+            self._cleanup_animations()
             self.accept()
+    
+    def _cleanup_animations(self):
+        """清理所有动画对象，防止 Windows 闪退"""
+        # 停止 spinner 定时器
+        if hasattr(self, 'spinner') and self.spinner:
+            try:
+                self.spinner.stop()
+            except:
+                pass
+        
+        # 停止所有记录的动画
+        for anim in self._animations:
+            try:
+                if anim and anim.state() == QPropertyAnimation.State.Running:
+                    anim.stop()
+            except:
+                pass
+        self._animations.clear()
+        
+        # 停止入场动画
+        if hasattr(self, 'opacity_anim') and self.opacity_anim:
+            try:
+                self.opacity_anim.stop()
+            except:
+                pass
+        
+        if hasattr(self, 'pos_anim') and self.pos_anim:
+            try:
+                self.pos_anim.stop()
+            except:
+                pass
+        
+        if hasattr(self, 'anim_group') and self.anim_group:
+            try:
+                self.anim_group.stop()
+            except:
+                pass
+        
+        # 停止 fade 动画
+        if hasattr(self, 'fade_anim') and self.fade_anim:
+            try:
+                self.fade_anim.stop()
+            except:
+                pass
+    
+    def closeEvent(self, event):
+        """窗口关闭时清理资源"""
+        self._cleanup_animations()
+        super().closeEvent(event)
     
     def show_loading_state(self, message="正在验证..."):
         """显示加载遮罩 - 增强设计感"""
@@ -736,24 +794,40 @@ class LoginWindow(QDialog):
         self.fade_anim.setStartValue(0)
         self.fade_anim.setEndValue(1)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animations.append(self.fade_anim)
         self.fade_anim.start()
     
     def hide_loading_state(self):
         """隐藏加载遮罩"""
-        if hasattr(self, 'spinner'):
-            self.spinner.stop()
+        # 停止 spinner
+        if hasattr(self, 'spinner') and self.spinner:
+            try:
+                self.spinner.stop()
+            except:
+                pass
+        
+        # 停止 fade 动画
+        if hasattr(self, 'fade_anim') and self.fade_anim:
+            try:
+                self.fade_anim.stop()
+            except:
+                pass
         
         # 渐出动画
-        if hasattr(self, 'loading_overlay'):
-            # 这里简单直接隐藏，如果需要渐出可以再加动画逻辑
-            # 为了响应速度，直接隐藏通常更好
-            self.loading_overlay.hide()
-            self.loading_overlay.deleteLater()
+        if hasattr(self, 'loading_overlay') and self.loading_overlay:
+            try:
+                self.loading_overlay.hide()
+                self.loading_overlay.deleteLater()
+            except:
+                pass
         
         # 恢复输入
-        self.login_btn.setEnabled(True)
-        self.username_input.input.setEnabled(True)
-        self.password_input.input.setEnabled(True)
+        try:
+            self.login_btn.setEnabled(True)
+            self.username_input.input.setEnabled(True)
+            self.password_input.input.setEnabled(True)
+        except:
+            pass
 
     def shake_window(self):
         original_pos = self.pos()

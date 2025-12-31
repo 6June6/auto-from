@@ -59,29 +59,46 @@ def main():
     
     # 用于存储主窗口的变量
     main_window = None
+    pending_user = None  # 待处理的用户
     
     def on_login_success(user):
-        """登录成功回调 - 在登录窗口关闭前创建主窗口"""
-        nonlocal main_window
-        
+        """登录成功回调 - 先关闭登录窗口，再创建主窗口"""
+        nonlocal pending_user
+        pending_user = user
         print(f"✅ 用户 {user.username} 登录成功")
         
-        # 根据用户角色创建不同的窗口
-        if user.is_admin():
-            print("📊 启动管理后台界面...")
-            main_window = AdminMainWindow(current_user=user)
-        else:
-            print("📝 启动表单填写界面...")
-            main_window = MainWindow(current_user=user)
-        
-        # 将窗口保存到应用程序对象，防止被垃圾回收
-        app._main_window = main_window
-        
-        # 通知登录窗口可以关闭了
+        # 立即关闭登录窗口，不等待主窗口创建
+        # 这样用户不会看到卡在"正在加载主界面"
         login_window.close_after_ready()
+    
+    def create_main_window():
+        """登录窗口关闭后创建主窗口"""
+        nonlocal main_window, pending_user
         
-        # 显示主窗口
-        main_window.show()
+        if not pending_user:
+            return
+        
+        user = pending_user
+        
+        try:
+            # 根据用户角色创建不同的窗口
+            if user.is_admin():
+                print("📊 启动管理后台界面...")
+                main_window = AdminMainWindow(current_user=user)
+            else:
+                print("📝 启动表单填写界面...")
+                main_window = MainWindow(current_user=user)
+            
+            # 将窗口保存到应用程序对象，防止被垃圾回收
+            app._main_window = main_window
+            
+            # 显示主窗口
+            main_window.show()
+            
+        except Exception as e:
+            print(f"❌ 创建主窗口失败: {e}")
+            import traceback
+            traceback.print_exc()
     
     # 显示登录窗口（会自动检测并尝试自动登录）
     login_window = LoginWindow(auto_login=True)
@@ -93,6 +110,10 @@ def main():
         # 用户取消登录
         print("❌ 用户取消登录，程序退出")
         sys.exit(0)
+    
+    # 登录窗口关闭后，创建主窗口
+    # 这样用户不会看到卡在"正在加载主界面"
+    create_main_window()
     
     # 检查主窗口是否已创建
     if not main_window:
