@@ -10214,17 +10214,32 @@ class NewFillWindow(QDialog):
             let containerText = '';
             // 遍历所有子节点提取文本
             function traverse(node) {{
-                if (node === input || node.contains(input)) return; // 跳过包含 input 的分支
-                if (['BUTTON', 'SCRIPT', 'STYLE', 'SVG', 'PATH'].includes(node.tagName)) return;
+                // 遇到 input 自身跳过
+                if (node === input) return;
                 
-                if (node.nodeType === Node.TEXT_NODE) {{
-                    containerText += node.textContent + ' ';
-                }} else if (node.nodeType === Node.ELEMENT_NODE) {{
-                    // 检查是否是干扰元素
-                    const text = node.innerText || '';
-                    if (text.includes('提交') || text.includes('取消') || text.includes('登录')) return;
+                // 遇到干扰标签跳过
+                if (node.nodeType === Node.ELEMENT_NODE) {{
+                    const tagName = node.tagName;
+                    if (['BUTTON', 'SCRIPT', 'STYLE', 'SVG', 'PATH', 'NOSCRIPT', 'IFRAME', 'SELECT', 'OPTION'].includes(tagName)) return;
                     
-                    node.childNodes.forEach(child => traverse(child));
+                    // 检查 hidden
+                    const style = window.getComputedStyle(node);
+                    if (style.display === 'none' || style.visibility === 'hidden') return;
+
+                    // 遇到特定干扰文本跳过
+                     const text = node.innerText || node.textContent || '';
+                    if (text.includes('提交') || text.includes('取消') || (text.includes('登录') && text.length < 10)) return;
+                }}
+
+                if (node.nodeType === Node.TEXT_NODE) {{
+                    const val = node.textContent.trim();
+                    if (val) {{
+                        containerText += val + ' ';
+                    }}
+                }} else if (node.nodeType === Node.ELEMENT_NODE) {{
+                    // 不再跳过包含 input 的节点，而是深入遍历
+                    // node.childNodes 是实时的，且是有序的
+                    Array.from(node.childNodes).forEach(child => traverse(child));
                 }}
             }}
             // 遍历容器的直接子节点
