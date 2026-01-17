@@ -7,11 +7,12 @@ from PyQt6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QPushBu
                              QGraphicsDropShadowEffect, QApplication, QTabWidget,
                              QGridLayout, QSizePolicy, QStackedWidget, QLineEdit, QInputDialog)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize, QEvent
-from PyQt6.QtGui import QColor, QClipboard
+from PyQt6.QtGui import QColor
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 import qtawesome as qta
 import json
+import time
 from collections import defaultdict
 from database import DatabaseManager
 from core import AutoFillEngineV2, TencentDocsFiller
@@ -45,6 +46,25 @@ class ElidedLabel(QLabel):
         # 只有文本变化时才更新，避免循环
         if super().text() != elided:
             super().setText(elided)
+
+
+class ClipboardWebPage(QWebEnginePage):
+    """自定义 WebEnginePage - 监听 JavaScript 控制台消息来处理剪贴板操作"""
+    
+    COPY_PREFIX = "__CLIPBOARD_COPY__:"
+    
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        """拦截 JavaScript 控制台消息，处理剪贴板操作"""
+        if message.startswith(self.COPY_PREFIX):
+            # 提取要复制的文本
+            text = message[len(self.COPY_PREFIX):]
+            if text:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(text)
+                print(f"[剪贴板] 已复制: {text[:50]}..." if len(text) > 50 else f"[剪贴板] 已复制: {text}")
+            return
+        # 其他消息正常输出（可选）
+        # super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
 
 
 class ChineseContextWebView(QWebEngineView):
@@ -126,6 +146,28 @@ class ChineseContextWebView(QWebEngineView):
             return item;
         }
         
+        // 复制文本到剪贴板（通过 console.log 传递给 Python）
+        function copyToClipboard() {
+            const selectedText = window.getSelection().toString();
+            if (!selectedText) {
+                return;
+            }
+            // 通过特殊前缀的 console.log 传递给 Python 处理
+            console.log('__CLIPBOARD_COPY__:' + selectedText);
+        }
+        
+        // 剪切文本到剪贴板
+        function cutToClipboard() {
+            const selectedText = window.getSelection().toString();
+            if (!selectedText) return;
+            
+            copyToClipboard();
+            // 在可编辑元素中删除选中内容
+            if (targetElement && isEditable(targetElement)) {
+                document.execCommand('delete');
+            }
+        }
+        
         // 创建分隔线
         function createSeparator() {
             const sep = document.createElement('div');
@@ -158,14 +200,14 @@ class ChineseContextWebView(QWebEngineView):
                 menu.appendChild(createMenuItem('撤销', () => document.execCommand('undo')));
                 menu.appendChild(createMenuItem('重做', () => document.execCommand('redo')));
                 menu.appendChild(createSeparator());
-                menu.appendChild(createMenuItem('剪切', () => document.execCommand('cut'), !hasSelection));
-                menu.appendChild(createMenuItem('复制', () => document.execCommand('copy'), !hasSelection));
+                menu.appendChild(createMenuItem('剪切', cutToClipboard, !hasSelection));
+                menu.appendChild(createMenuItem('复制', copyToClipboard, !hasSelection));
                 menu.appendChild(createMenuItem('粘贴', () => document.execCommand('paste')));
                 menu.appendChild(createSeparator());
                 menu.appendChild(createMenuItem('全选', () => document.execCommand('selectAll')));
             } else {
                 // 非编辑区域的菜单
-                menu.appendChild(createMenuItem('复制', () => document.execCommand('copy'), !hasSelection));
+                menu.appendChild(createMenuItem('复制', copyToClipboard, !hasSelection));
                 menu.appendChild(createSeparator());
                 menu.appendChild(createMenuItem('全选', () => document.execCommand('selectAll')));
             }
@@ -215,6 +257,10 @@ class ChineseContextWebView(QWebEngineView):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 使用自定义 Page 来处理剪贴板操作
+        self._clipboard_page = ClipboardWebPage(self)
+        self.setPage(self._clipboard_page)
+        
         # 页面加载完成后注入中文右键菜单脚本
         self.loadFinished.connect(self._inject_chinese_context_menu)
     
@@ -291,6 +337,90 @@ class ChineseContextWebView(QWebEngineView):
         menu.exec(event.globalPos())
 
 
+class FillCardItemWidget(QWidget):
+    """填充页面的名片项组件 - 横条样式（参考首页设计）"""
+    
+    clicked = pyqtSignal(object)  # 点击信号，传递card对象
+    
+    def __init__(self, card, parent=None):
+        super().__init__(parent)
+        self.card = card
+        self.is_selected = False
+        self.init_ui()
+    
+    def init_ui(self):
+        # 横条样式设计 - 紧凑版
+        self.setFixedHeight(36)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        layout = QHBoxLayout()
+        layout.setContentsMargins(10, 4, 6, 4)
+        layout.setSpacing(4)
+        self.setLayout(layout)
+        
+        # 名片名称 - 支持省略
+        self.name_label = QLabel(self.card.name)
+        self.name_label.setStyleSheet("""
+            font-size: 12px;
+            font-weight: 500;
+            color: #1D1D1F;
+        """)
+        # 设置文本省略模式
+        self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(self.name_label, 1)  # stretch=1 让名称占据剩余空间
+        
+        self.update_style()
+    
+    def resizeEvent(self, event):
+        """大小改变时更新名称省略"""
+        super().resizeEvent(event)
+        self._update_elided_text()
+    
+    def _update_elided_text(self):
+        """更新省略文本"""
+        if hasattr(self, 'name_label'):
+            # 计算可用宽度（减去边距）
+            available_width = self.width() - 10 - 6 - 10  # 边距
+            if available_width > 20:
+                font_metrics = self.name_label.fontMetrics()
+                elided_text = font_metrics.elidedText(self.card.name, Qt.TextElideMode.ElideRight, available_width)
+                self.name_label.setText(elided_text)
+                self.name_label.setToolTip(self.card.name if elided_text != self.card.name else "")
+    
+    def set_selected(self, selected: bool):
+        self.is_selected = selected
+        self.update_style()
+    
+    def update_style(self):
+        if self.is_selected:
+            self.setStyleSheet("""
+                FillCardItemWidget {
+                    background: #F2F8FD;
+                    border: 2px solid #007AFF;
+                    border-radius: 8px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                FillCardItemWidget {
+                    background: white;
+                    border: 1px solid #D1D1D6;
+                    border-radius: 8px;
+                }
+                FillCardItemWidget:hover {
+                    border-color: #007AFF;
+                    background: #FAFAFA;
+                }
+            """)
+    
+    def mousePressEvent(self, event):
+        """鼠标点击事件"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.card)
+        super().mousePressEvent(event)
+
+
 class NewFillWindow(QDialog):
     """新的填充窗口 - 多名片多链接，带标签页"""
     
@@ -312,6 +442,10 @@ class NewFillWindow(QDialog):
         self.selected_values = {}  # {card_id: {field_key: selected_value}} 存储用户选择的字段值
         self.current_card_values_map = {}  # 当前名片的字段多值列表 {key: values_list}
         self.current_card_combos = {}  # 当前名片的下拉框引用 {key: QComboBox}
+        
+        # ⚡️ Profile 缓存：同一名片 + 同一平台共享同一个 Profile 实例
+        # key: "{card_id}_{form_type}", value: QWebEngineProfile 实例
+        self.profile_cache = {}
         
         # ⚡️ 分类相关：按分类分组名片，默认显示第一个分类
         self.cards_by_category = {}  # {category: [cards]}
@@ -449,7 +583,20 @@ class NewFillWindow(QDialog):
         if hasattr(self, 'loading_queues'):
             self.loading_queues.clear()
         
+        # ⚡️ 清理加载超时定时器
+        if hasattr(self, 'load_timeout_timers'):
+            for timer in self.load_timeout_timers.values():
+                if timer.isActive():
+                    timer.stop()
+            self.load_timeout_timers.clear()
+        
         self.web_views_by_link.clear()
+        
+        # ⚡️ 清理 Profile 缓存
+        if hasattr(self, 'profile_cache'):
+            print(f"🧹 清理 {len(self.profile_cache)} 个 Profile 缓存...")
+            self.profile_cache.clear()
+        
         print("✅ 资源清理完成")
         
         super().closeEvent(event)
@@ -518,11 +665,73 @@ class NewFillWindow(QDialog):
         
         # ⚡️ 窗口打开后自动开始加载WebView
         QTimer.singleShot(500, self.auto_start_loading_webviews)
+        
+        # ⚡️ 延迟更新固定首页按钮位置（确保布局完成后）
+        QTimer.singleShot(100, self._update_fixed_home_btn_position)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'expand_btn'):
             self.expand_btn.move(self.width() - 32, 60)
+        # 更新固定首页按钮位置
+        if hasattr(self, 'fixed_home_btn'):
+            self._update_fixed_home_btn_position()
+    
+    def _update_fixed_home_btn_position(self):
+        """更新固定首页按钮的位置"""
+        if not hasattr(self, 'fixed_home_btn'):
+            return
+        # 定位在标签栏左侧，与标签对齐（margin-top: 4px）
+        self.fixed_home_btn.move(0, 4)
+    
+    def _update_fixed_home_btn_style(self):
+        """更新固定首页按钮的样式"""
+        if not hasattr(self, 'fixed_home_btn'):
+            return
+        
+        is_home_selected = self.tab_widget.currentIndex() == 0
+        
+        # 背景色与标签栏背景一致（不透明）
+        tab_bar_bg = "#F5F5F7"
+        
+        if is_home_selected:
+            # 选中状态样式 - 与标签选中样式一致
+            self.fixed_home_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {tab_bar_bg};
+                    color: {COLORS['primary']};
+                    font-size: 14px;
+                    font-weight: 600;
+                    border: none;
+                    border-radius: 0px;
+                    padding: 8px 16px;
+                    margin: 0px;
+                }}
+                QPushButton:hover {{
+                    background: {tab_bar_bg};
+                }}
+            """)
+        else:
+            # 未选中状态样式 - 与标签未选中样式一致
+            self.fixed_home_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {tab_bar_bg};
+                    color: #6E6E73;
+                    font-size: 14px;
+                    font-weight: 500;
+                    border: none;
+                    border-radius: 0px;
+                    padding: 8px 16px;
+                    margin: 0px;
+                }}
+                QPushButton:hover {{
+                    background: #EAEAEC;
+                    color: #1D1D1F;
+                }}
+            """)
+        
+        # 确保位置正确
+        self._update_fixed_home_btn_position()
 
     def hide_right_panel(self):
         """隐藏右侧面板 - 快速平滑"""
@@ -749,6 +958,20 @@ class NewFillWindow(QDialog):
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
         layout.addWidget(self.tab_widget)
+        
+        # ⚡️ 添加固定的"首页"按钮，覆盖在第一个标签位置上，防止滚动时被顶走
+        self.fixed_home_btn = QPushButton("首页")
+        self.fixed_home_btn.setParent(self.tab_widget)
+        self.fixed_home_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 高度 = 内容高度32px + padding 8px*2 = 48px，宽度留足够覆盖
+        self.fixed_home_btn.setFixedSize(80, 48)
+        self.fixed_home_btn.setAutoFillBackground(True)  # 启用自动填充背景
+        self.fixed_home_btn.clicked.connect(self.close)
+        self._update_fixed_home_btn_style()
+        self.fixed_home_btn.raise_()  # 确保在最上层
+        
+        # 监听标签页变化，更新固定首页按钮样式
+        self.tab_widget.currentChanged.connect(self._update_fixed_home_btn_style)
         
         return panel
     
@@ -1202,25 +1425,9 @@ class NewFillWindow(QDialog):
         # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
-        # 创建独立 Profile（参考 auto_fill_window.py）
-        # ⚡️ 修改：使用 card.id 和 平台类型 作为唯一标识，实现同平台共享登录状态
+        # ⚡️ 获取或创建 Profile（同一名片+同一平台共享登录状态）
         form_type = self.detect_form_type(link.url)
-        storage_name = f"profile_store_{card.id}_{form_type}"
-        profile = QWebEngineProfile(storage_name, web_view)
-        
-        # ⚡️ 修改：设置为磁盘缓存模式（默认），允许持久化 Cookie
-        # profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
-        profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
-        # profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
-        profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-        
-        # 设置中文语言
-        profile.setHttpAcceptLanguage("zh-CN,zh;q=0.9,en;q=0.8")
-        
-        # 设置 User-Agent
-        user_agent = profile.httpUserAgent()
-        if 'zh-CN' not in user_agent:
-            profile.setHttpUserAgent(user_agent + " Language/zh-CN")
+        profile = self.get_or_create_profile(str(card.id), form_type)
             
         # ⚡️ 事件过滤：点击卡片或Webview获得焦点时选中名片
         container.installEventFilter(self)
@@ -1458,7 +1665,7 @@ class NewFillWindow(QDialog):
         
         layout.addWidget(category_box)
         
-        # 名片列表（可滚动）
+        # 名片列表（可滚动）- 改为网格布局
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("""
@@ -1477,9 +1684,12 @@ class NewFillWindow(QDialog):
         """)
         
         self.cards_list_widget = QWidget()
-        self.cards_list_layout = QVBoxLayout()
-        self.cards_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.cards_list_layout.setSpacing(4)
+        self.cards_list_widget.setStyleSheet("background: transparent;")
+        # 改用网格布局 - 一行2个名片（因为右侧面板宽度有限）
+        self.cards_list_layout = QGridLayout()
+        self.cards_list_layout.setContentsMargins(4, 4, 4, 4)
+        self.cards_list_layout.setSpacing(8)
+        self.cards_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.cards_list_widget.setLayout(self.cards_list_layout)
         
         scroll.setWidget(self.cards_list_widget)
@@ -1688,7 +1898,7 @@ class NewFillWindow(QDialog):
         """
         
         # 重新导入按钮
-        reimport_btn = QPushButton("一键填充")
+        reimport_btn = QPushButton("一键全填")
         reimport_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reimport_btn.setStyleSheet(btn_style)
         reimport_btn.clicked.connect(self.reimport_card)
@@ -1710,7 +1920,7 @@ class NewFillWindow(QDialog):
         batch_select_layout.setSpacing(8)
         batch_select_row.setLayout(batch_select_layout)
         
-        batch_label = QLabel("批量选择第")
+        batch_label = QLabel("粉丝赞藏填写")
         batch_label.setStyleSheet(f"""
             font-size: 12px;
             color: {COLORS['text_secondary']};
@@ -1750,7 +1960,7 @@ class NewFillWindow(QDialog):
         self.batch_index_combo.currentIndexChanged.connect(self.batch_select_by_index)
         batch_select_layout.addWidget(self.batch_index_combo)
         
-        batch_label_suffix = QLabel("个值")
+        batch_label_suffix = QLabel("格式")
         batch_label_suffix.setStyleSheet(f"""
             font-size: 12px;
             color: {COLORS['text_secondary']};
@@ -1904,7 +2114,7 @@ class NewFillWindow(QDialog):
                 self.category_combo.setItemIcon(i, qta.icon('fa5s.check', color='transparent'))
     
     def load_cards_list(self, target_card_id=None):
-        """加载名片列表（仅显示已选名片）"""
+        """加载名片列表（仅显示已选名片）- 网格布局"""
         # 清空现有列表
         while self.cards_list_layout.count():
             child = self.cards_list_layout.takeAt(0)
@@ -1915,32 +2125,42 @@ class NewFillWindow(QDialog):
         if not category:
             return
         
-        # 显示该类别下的已选名片
+        # 收集该类别下的已选名片
+        category_cards = []
         for card in self.selected_cards:
             card_category = card.category if hasattr(card, 'category') and card.category else "默认分类"
             if card_category == category:
-                card_btn = self.create_card_list_item(card)
-                self.cards_list_layout.addWidget(card_btn)
+                category_cards.append(card)
         
-        self.cards_list_layout.addStretch()
+        # 使用网格布局添加名片 - 一行4个
+        MAX_COLUMNS = 4
+        target_widget = None
+        
+        for index, card in enumerate(category_cards):
+            row = index // MAX_COLUMNS
+            col = index % MAX_COLUMNS
+            
+            # 创建名片卡片（横条样式）
+            card_widget = FillCardItemWidget(card)
+            card_widget.clicked.connect(lambda c, w=card_widget: self.on_card_item_clicked(c, w))
+            
+            # 添加到网格
+            self.cards_list_layout.addWidget(card_widget, row, col)
+            
+            # 记录目标卡片
+            if target_card_id and str(card.id) == str(target_card_id):
+                target_widget = card_widget
         
         # 选中逻辑
-        target_btn = None
-        if target_card_id:
-            for i in range(self.cards_list_layout.count()):
-                item = self.cards_list_layout.itemAt(i)
-                if item and item.widget():
-                    btn = item.widget()
-                    if isinstance(btn, QPushButton) and btn.property("card_id") == str(target_card_id):
-                        target_btn = btn
-                        break
-        
-        if target_btn:
-            target_btn.click()
-        elif self.cards_list_layout.count() > 1: # 至少有一个名片 (stretch占了一个)
-            first_item = self.cards_list_layout.itemAt(0)
+        if target_widget:
+            target_widget.clicked.emit(target_widget.card)
+        elif category_cards:
+            # 默认选中第一个
+            first_item = self.cards_list_layout.itemAtPosition(0, 0)
             if first_item and first_item.widget():
-                first_item.widget().click()
+                widget = first_item.widget()
+                if isinstance(widget, FillCardItemWidget):
+                    widget.clicked.emit(widget.card)
                 
     def refresh_all_webviews(self):
         """[修改为] 对当前页面的所有表单执行全局填充（不刷新页面）"""
@@ -2084,66 +2304,24 @@ class NewFillWindow(QDialog):
         except:
             pass
     
-    def create_card_list_item(self, card) -> QPushButton:
-        """创建名片列表项"""
-        btn = QPushButton(card.name)
-        btn.setMinimumHeight(44) # 稍微加高
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setProperty("card_id", str(card.id))
+    def on_card_item_clicked(self, card, widget):
+        """处理名片卡片点击事件"""
+        # 取消其他卡片的选中状态
+        for i in range(self.cards_list_layout.count()):
+            item = self.cards_list_layout.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                if isinstance(w, FillCardItemWidget) and w != widget:
+                    w.set_selected(False)
         
-        # 移除默认图标，使用自定义布局
-        # btn.setIcon(Icons.user('gray'))
-        # btn.setIconSize(QSize(16, 16))
+        # 选中当前卡片
+        widget.set_selected(True)
         
-        # 重新设计样式：类似于联系人列表
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {COLORS['text_primary']};
-                border: none;
-                border-radius: 8px;
-                padding: 0 16px;
-                text-align: left; /* 左对齐 */
-                font-size: 14px;
-                margin: 2px 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['surface_hover']};
-            }}
-            QPushButton:checked {{
-                background: {COLORS['surface_hover']}; /* 选中时保持浅灰背景 */
-                color: {COLORS['primary']};
-                font-weight: 600;
-                border-left: 3px solid {COLORS['primary']}; /* 左侧指示条 */
-                border-radius: 0 8px 8px 0; /* 左侧直角 */
-                padding-left: 13px; /* 补偿边框宽度 */
-            }}
-        """)
-        btn.setCheckable(True) # 支持选中状态
+        # 单开模式下，点击切换WebView内容
+        if self.fill_mode == "single" and self.current_card != card:
+            self.switch_card_single_mode(card)
         
-        # 点击逻辑：处理选中状态互斥
-        def on_click():
-            # 取消其他按钮的选中状态
-            for i in range(self.cards_list_layout.count()):
-                item = self.cards_list_layout.itemAt(i)
-                if item and item.widget():
-                    widget = item.widget()
-                    if isinstance(widget, QPushButton) and widget != btn:
-                        widget.setChecked(False)
-                        # 恢复样式
-                        # widget.setIcon(Icons.user('gray'))
-
-            btn.setChecked(True)
-            # btn.setIcon(Icons.check_circle('primary')) # 不再需要切换图标
-            
-            # 单开模式下，点击切换WebView内容
-            if self.fill_mode == "single" and self.current_card != card:
-                self.switch_card_single_mode(card)
-            
-            self.show_card_info(card)
-            
-        btn.clicked.connect(on_click)
-        return btn
+        self.show_card_info(card)
     
     def show_card_info(self, card):
         """显示名片信息"""
@@ -2304,11 +2482,13 @@ class NewFillWindow(QDialog):
             layout.addWidget(value_label, 1)
             copy_value = value_text
         else:
-            # 多值：显示下拉选择框
+            # 多值：显示下拉选择框（禁用直接点击，只能通过批量选择切换）
             from PyQt6.QtWidgets import QComboBox
             combo = QComboBox()
             combo.setFixedHeight(28)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            # 禁用下拉框，只能通过上方批量选择切换
+            combo.setEnabled(False)
             combo.setStyleSheet(f"""
                 QComboBox {{
                     border: 1px solid #FFB800;
@@ -2318,8 +2498,10 @@ class NewFillWindow(QDialog):
                     color: {COLORS['text_primary']};
                     background: #FFFBF0;
                 }}
-                QComboBox:hover {{
-                    border-color: #FFA500;
+                QComboBox:disabled {{
+                    border: 1px solid #FFB800;
+                    color: {COLORS['text_primary']};
+                    background: #FFFBF0;
                 }}
                 QComboBox::drop-down {{
                     border: none;
@@ -2331,12 +2513,6 @@ class NewFillWindow(QDialog):
                     border-right: 4px solid transparent;
                     border-top: 5px solid #FFB800;
                     margin-right: 6px;
-                }}
-                QComboBox QAbstractItemView {{
-                    border: 1px solid #E5E5EA;
-                    selection-background-color: #FFF3D0;
-                    selection-color: {COLORS['text_primary']};
-                    background: white;
                 }}
             """)
             
@@ -2411,52 +2587,86 @@ class NewFillWindow(QDialog):
         print(f"已复制: {text}")
     
     def batch_select_by_index(self, combo_index: int):
-        """批量选择第N个值
+        """批量选择第N个值 - 对所有名片生效
         
         Args:
-            combo_index: 下拉框的选中索引（0是"--"，1-6对应第1-6个值）
+            combo_index: 下拉框的选中索引（0对应第1个值）
         """
         if combo_index < 0:
             return
         
-        target_index = combo_index  # 下拉框索引0对应第1个值（索引0）
-        
-        if not self.current_card:
-            return
-        
-        card_id = str(self.current_card.id)
-        
+        target_index = combo_index
         value_num = combo_index + 1  # 显示给用户的是第几个（1-based）
-        print(f"📋 批量选择第 {value_num} 个值")
+        print(f"📋 批量选择第 {value_num} 个值（对所有名片生效）")
         
-        # 遍历所有有下拉框的字段
-        if hasattr(self, 'current_card_combos') and hasattr(self, 'current_card_values_map'):
+        import json
+        
+        # 遍历所有选中的名片
+        for card in self.selected_cards:
+            card_id = str(card.id)
+            
+            # 确保该名片在 selected_values 中有记录
+            if card_id not in self.selected_values:
+                self.selected_values[card_id] = {}
+            
+            # 检查名片是否有配置
+            if not hasattr(card, 'configs') or not card.configs:
+                continue
+            
+            # 遍历名片的所有字段配置
+            for config in card.configs:
+                key = ""
+                value = ""
+                
+                # 兼容字典和对象两种格式
+                if isinstance(config, dict):
+                    key = config.get('key', '')
+                    value = config.get('value', '')
+                elif hasattr(config, 'key'):
+                    key = config.key
+                    value = getattr(config, 'value', '')
+                
+                if not key:
+                    continue
+                
+                # 解析多值字段
+                values_list = []
+                if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                    try:
+                        parsed = json.loads(value)
+                        if isinstance(parsed, list):
+                            values_list = parsed
+                    except json.JSONDecodeError:
+                        values_list = [value] if value else []
+                else:
+                    values_list = [str(value)] if value is not None else []
+                
+                # 只处理多值字段（多于1个值）
+                if len(values_list) <= 1:
+                    continue
+                
+                # 更新选中值
+                if target_index < len(values_list):
+                    selected_val = values_list[target_index]
+                    self.selected_values[card_id][key] = selected_val
+                    print(f"  ✓ [{card.name}] 字段「{key}」-> 第{value_num}个值: {selected_val}")
+                else:
+                    self.selected_values[card_id][key] = ""
+                    print(f"  ⚠ [{card.name}] 字段「{key}」没有第{value_num}个值（共{len(values_list)}个），设为空")
+        
+        # 更新当前名片的 UI 下拉框显示
+        if self.current_card and hasattr(self, 'current_card_combos') and hasattr(self, 'current_card_values_map'):
             for key, combo in self.current_card_combos.items():
                 values_list = self.current_card_values_map.get(key, [])
                 
                 if target_index < len(values_list):
-                    # 有对应索引的值，选中它
                     combo.blockSignals(True)
                     combo.setCurrentIndex(target_index)
                     combo.blockSignals(False)
-                    
-                    # 更新存储的选中值
-                    selected_val = values_list[target_index]
-                    if card_id not in self.selected_values:
-                        self.selected_values[card_id] = {}
-                    self.selected_values[card_id][key] = selected_val
-                    print(f"  ✓ 字段「{key}」-> 第{value_num}个值: {selected_val}")
                 else:
-                    # 数组越界，设置为空
                     combo.blockSignals(True)
-                    combo.setCurrentIndex(-1)  # 清除选中状态
+                    combo.setCurrentIndex(-1)
                     combo.blockSignals(False)
-                    
-                    # 将存储的值设为空
-                    if card_id not in self.selected_values:
-                        self.selected_values[card_id] = {}
-                    self.selected_values[card_id][key] = ""
-                    print(f"  ⚠ 字段「{key}」没有第{value_num}个值（共{len(values_list)}个），设为空")
     
     def toggle_right_panel(self, panel: QFrame, btn: QPushButton):
         """折叠/展开右侧面板"""
@@ -2672,11 +2882,8 @@ class NewFillWindow(QDialog):
             row.deleteLater()
 
     def reimport_card(self):
-        """重新导入/刷新名片数据（不切换名片，仅更新当前名片的数据）"""
-        print("🔄 重新导入名片...")
-        if not self.current_card:
-            QMessageBox.warning(self, "提示", "请先选择名片")
-            return
+        """一键填充：单开模式填充当前名片，多开模式填充当前tab链接下所有webview"""
+        print("🔄 一键填充...")
         
         # 获取当前标签页对应的链接
         current_index = self.tab_widget.currentIndex()
@@ -2692,22 +2899,22 @@ class NewFillWindow(QDialog):
         current_link = self.selected_links[real_index]
         link_id = str(current_link.id)
         
+        # 多开模式：填充当前tab链接下所有webview（复用auto_fill_for_link逻辑）
+        if self.fill_mode == "multi":
+            print(f"📋 多开模式：填充链接 {link_id} 下所有webview")
+            self.auto_fill_for_link(link_id)
+            return
+        
+        # 单开模式：填充当前名片对应的webview
+        if not self.current_card:
+            QMessageBox.warning(self, "提示", "请先选择名片")
+            return
+        
         # 获取该链接下的所有 WebView 信息
         webview_infos = self.web_views_by_link.get(link_id, [])
         
-        # 找到当前名片对应的 WebView 信息 (兼容单开和多开模式)
-        target_info = None
-        
-        if self.fill_mode == "single":
-            # 单开模式下，只有一个 WebView，且它当前就显示的是 self.current_card
-            if webview_infos:
-                target_info = webview_infos[0]
-        else:
-            # 多开模式下，根据名片ID查找
-            for info in webview_infos:
-                if info.get('card') and str(info['card'].id) == str(self.current_card.id):
-                    target_info = info
-                    break
+        # 单开模式下，只有一个 WebView
+        target_info = webview_infos[0] if webview_infos else None
         
         if target_info:
             if target_info.get('web_view'):
@@ -2734,8 +2941,14 @@ class NewFillWindow(QDialog):
                 # 标记此 WebView 需要在稍后自动填充（如果此时正好在加载中）
                 target_info['web_view'].setProperty("auto_fill_after_load", True)
                 
-                # 立即尝试填充
-                self.execute_auto_fill_for_webview(target_info['web_view'], latest_card)
+                # 设置 is_auto_fill_active 标记
+                target_info['web_view'].setProperty("is_auto_fill_active", True)
+                
+                # ⚡️ 关键修复：刷新页面以重置网页状态，让 on_webview_loaded 自动触发填充
+                # 这样可以覆盖已填充的数据，而不只是填充空白字段
+                print(f"🔄 触发刷新并等待自动填充: {latest_card.name}")
+                target_info['web_view'].setProperty("status", "loading")  # 重置状态
+                target_info['web_view'].reload()
                 return
             else:
                 QMessageBox.warning(self, "提示", "页面尚未加载完成，请稍候")
@@ -2747,26 +2960,18 @@ class NewFillWindow(QDialog):
         """通过ID选中名片列表项"""
         target_card = None
         
-        # 1. 更新列表项视觉状态
+        # 1. 更新列表项视觉状态（支持新的网格布局）
         if hasattr(self, 'cards_list_layout'):
             for i in range(self.cards_list_layout.count()):
                 item = self.cards_list_layout.itemAt(i)
                 if item and item.widget():
                     widget = item.widget()
-                    if isinstance(widget, QPushButton):
-                        card_id = widget.property("card_id")
-                        if card_id == target_card_id:
-                            widget.setChecked(True)
-                            widget.setIcon(Icons.check_circle('primary'))
-                            
-                            # Find the card object
-                            for c in self.selected_cards:
-                                if str(c.id) == target_card_id:
-                                    target_card = c
-                                    break
+                    if isinstance(widget, FillCardItemWidget):
+                        if str(widget.card.id) == target_card_id:
+                            widget.set_selected(True)
+                            target_card = widget.card
                         else:
-                            widget.setChecked(False)
-                            widget.setIcon(Icons.get('fa5s.user-circle', COLORS['text_secondary']))
+                            widget.set_selected(False)
         
         # 2. 触发业务逻辑
         if target_card:
@@ -2793,47 +2998,6 @@ class NewFillWindow(QDialog):
         
         return super().eventFilter(obj, event)
 
-    def create_card_list_item(self, card) -> QPushButton:
-        """创建名片列表项 - 一比一还原设计图"""
-        btn = QPushButton(card.name)
-        btn.setMinimumHeight(56) # 加高，更像列表项
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setProperty("card_id", str(card.id))
-        
-        # 恢复图标显示
-        btn.setIcon(Icons.get('fa5s.user-circle', COLORS['text_secondary']))
-        btn.setIconSize(QSize(20, 20))
-        
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                color: {COLORS['text_primary']};
-                border: 1px solid transparent;
-                border-radius: 8px;
-                text-align: left;
-                padding-left: 16px;
-                font-size: 15px;
-                margin-bottom: 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['surface_hover']};
-            }}
-            QPushButton:checked {{
-                background: #E6F7FF;
-                color: {COLORS['primary']};
-                border: 1px solid {COLORS['primary']};
-                font-weight: 600;
-            }}
-        """)
-        btn.setCheckable(True) # 支持选中状态
-        
-        # 点击逻辑：处理选中状态互斥
-        def on_click():
-            self.select_card_by_id(str(card.id))
-            
-        btn.clicked.connect(on_click)
-        return btn
-
     def switch_card_single_mode(self, new_card):
         """单开模式：切换名片"""
         print(f"🔄 单开模式切换名片: {self.current_card.name if self.current_card else 'None'} -> {new_card.name}")
@@ -2857,23 +3021,30 @@ class NewFillWindow(QDialog):
             
         info = webview_infos[0] # 只有一个
         
-        # 1. 清理旧的缓存和Token (关键步骤)
+        # ⚡️ 优化：切换名片时，使用新名片的 Profile，而不是清除旧名片的 cookie
+        # 这样可以保持每个名片的登录状态独立，同时同一名片内共享登录状态
         if info['web_view']:
-            # 尝试清理 LocalStorage/SessionStorage
-            info['web_view'].page().runJavaScript("localStorage.clear(); sessionStorage.clear();")
+            web_view = info['web_view']
             
-            # 清除Cookies
-            profile = info['web_view'].page().profile()
-            cookie_store = profile.cookieStore()
-            cookie_store.deleteAllCookies()
+            # 获取新名片对应的 Profile
+            form_type = self.detect_form_type(link.url)
+            new_profile = self.get_or_create_profile(str(new_card.id), form_type)
             
-            # 清除Http缓存
-            profile.clearHttpCache()
+            # 创建新的 Page（使用新名片的 Profile）
+            class WebEnginePage(QWebEnginePage):
+                def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+                    print(f"  [JS] {message}", flush=True)
+                
+                def javaScriptConfirm(self, securityOrigin, msg):
+                    return True
+            
+            new_page = WebEnginePage(new_profile, web_view)
+            web_view.setPage(new_page)
             
             # 加载空白页，视觉上重置
-            info['web_view'].load(QUrl("about:blank"))
+            web_view.load(QUrl("about:blank"))
             
-            print("🧹 已清理WebView缓存、Storage和Cookies，并重置为空白页")
+            print(f"🔄 已切换到新名片 Profile: {new_card.id}_{form_type}")
 
         # 2. 更新绑定的名片
         info['card'] = new_card
@@ -3109,10 +3280,13 @@ class NewFillWindow(QDialog):
             print(f"❌ 未找到链接 {link_id} 的WebView信息")
             return
         
-        # 收集所有已加载的WebView
+        # 收集所有已加载的WebView（包括已填充的，支持覆盖填充）
         loaded_webviews = []
         for info in webview_infos:
-            if info['web_view'] and info['web_view'].property("status") == "loaded":
+            status = info['web_view'].property("status") if info['web_view'] else None
+            # ⚡️ 关键修复：不仅收集 "loaded"，也收集 "filled" 状态的 WebView
+            # 这样"一键全填"可以覆盖已填充的数据
+            if info['web_view'] and status in ["loaded", "filled", "filling"]:
                 loaded_webviews.append(info['web_view'])
         
         print(f"\n{'='*60}")
@@ -3127,7 +3301,12 @@ class NewFillWindow(QDialog):
             # ⚡️ 关键修复：设置 is_auto_fill_active 标记
             # 这样登录后页面刷新时，on_webview_loaded 能够检测到并自动重填
             web_view.setProperty("is_auto_fill_active", True)
-            self.execute_auto_fill_for_webview(web_view, card_data)
+            
+            # ⚡️ 关键修复：刷新页面以重置网页状态，让 on_webview_loaded 自动触发填充
+            # 这样可以覆盖已填充的数据，而不只是填充空白字段
+            print(f"🔄 触发刷新并等待自动填充: {card_data.name}")
+            web_view.setProperty("status", "loading")  # 重置状态
+            web_view.reload()
     
     def load_webviews_only(self, webview_infos):
         """批量加载WebView（不立即填充）"""
@@ -3192,23 +3371,9 @@ class NewFillWindow(QDialog):
         # web_view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         web_view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, False)
         
-        # 创建独立 Profile
-        # ⚡️ 修改：使用 card.id 和 平台类型 作为唯一标识，实现同平台共享登录状态
+        # ⚡️ 获取或创建 Profile（同一名片+同一平台共享登录状态）
         form_type = self.detect_form_type(link.url)
-        storage_name = f"profile_store_{card.id}_{form_type}"
-        profile = QWebEngineProfile(storage_name, web_view)
-        
-        # ⚡️ 修改：设置为磁盘缓存模式（默认），允许持久化 Cookie
-        # profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
-        profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
-        # profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
-        profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-
-        profile.setHttpAcceptLanguage("zh-CN,zh;q=0.9,en;q=0.8")
-        
-        user_agent = profile.httpUserAgent()
-        if 'zh-CN' not in user_agent:
-            profile.setHttpUserAgent(user_agent + " Language/zh-CN")
+        profile = self.get_or_create_profile(str(card.id), form_type)
         
         class WebEnginePage(QWebEnginePage):
             def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
@@ -3264,6 +3429,10 @@ class NewFillWindow(QDialog):
         self.current_batches[link_id] += 1
         print(f"\n📦 链接 {link_id} - 加载批次 #{self.current_batches[link_id]}（{len(batch)} 个）")
         
+        # ⚡️ 初始化加载超时定时器存储（如果不存在）
+        if not hasattr(self, 'load_timeout_timers'):
+            self.load_timeout_timers = {}
+        
         # 开始加载
         for info in batch:
             # ⚡️ 优化：在需要加载时才创建WebView对象
@@ -3287,10 +3456,55 @@ class NewFillWindow(QDialog):
                 web_view.setUrl(QUrl(link.url))
             
             web_view.setProperty("status", "loading")
+            # ⚡️ 记录加载开始时间，用于超时检测
+            web_view.setProperty("load_start_time", time.time())
+            
+            # ⚡️ 设置加载超时定时器（30秒）
+            webview_id = id(web_view)
+            timeout_timer = QTimer()
+            timeout_timer.setSingleShot(True)
+            timeout_timer.timeout.connect(lambda wv=web_view, lid=link_id: self.on_webview_load_timeout(wv, lid))
+            timeout_timer.start(30000)  # 30秒超时
+            self.load_timeout_timers[webview_id] = timeout_timer
             
             # ⚡️ 强制刷新，确保加载立即可见
             web_view.show()
             # web_view.update()
+    
+    def on_webview_load_timeout(self, web_view: QWebEngineView, link_id: str):
+        """WebView 加载超时处理"""
+        # ⚡️ 安全检查
+        if not self._is_valid():
+            return
+        
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        if sip.isdeleted(web_view):
+            return
+        
+        # 检查是否已经加载完成（避免重复处理）
+        status = web_view.property("status")
+        if status != "loading":
+            return
+        
+        card_data = web_view.property("card_data")
+        card_name = card_data.name if card_data else "未知"
+        
+        print(f"⏰ WebView ({card_name}) 加载超时（30秒），强制标记为已加载")
+        
+        # 将状态设为 timeout，并触发后续流程
+        web_view.setProperty("status", "timeout")
+        
+        # 清理超时定时器
+        webview_id = id(web_view)
+        if hasattr(self, 'load_timeout_timers') and webview_id in self.load_timeout_timers:
+            del self.load_timeout_timers[webview_id]
+        
+        # 手动触发加载完成检查，继续加载下一批
+        self.check_batch_load_complete(link_id, web_view)
     
     def load_next_batch(self, batch_size):
         """加载下一批WebView（兼容旧方法）"""
@@ -3304,6 +3518,10 @@ class NewFillWindow(QDialog):
         
         print(f"\n📦 加载批次 #{self.current_batch + 1}（{len(batch)} 个）")
         self.current_batch += 1
+        
+        # ⚡️ 初始化加载超时定时器存储（如果不存在）
+        if not hasattr(self, 'load_timeout_timers'):
+            self.load_timeout_timers = {}
         
         # 开始加载
         for info in batch:
@@ -3321,6 +3539,17 @@ class NewFillWindow(QDialog):
                 web_view.setUrl(QUrl(link.url))
             
             web_view.setProperty("status", "loading")
+            # ⚡️ 记录加载开始时间
+            web_view.setProperty("load_start_time", time.time())
+            
+            # ⚡️ 设置加载超时定时器（30秒）
+            webview_id = id(web_view)
+            link_id = str(link.id) if hasattr(link, 'id') else "unknown"
+            timeout_timer = QTimer()
+            timeout_timer.setSingleShot(True)
+            timeout_timer.timeout.connect(lambda wv=web_view, lid=link_id: self.on_webview_load_timeout(wv, lid))
+            timeout_timer.start(30000)  # 30秒超时
+            self.load_timeout_timers[webview_id] = timeout_timer
             
             # ⚡️ 强制刷新，确保加载立即可见
             web_view.show()
@@ -3342,6 +3571,14 @@ class NewFillWindow(QDialog):
             print("🛑 [on_batch_webview_loaded] WebView 已销毁，跳过回调")
             return
         
+        # ⚡️ 取消加载超时定时器
+        webview_id = id(web_view)
+        if hasattr(self, 'load_timeout_timers') and webview_id in self.load_timeout_timers:
+            timer = self.load_timeout_timers[webview_id]
+            if timer.isActive():
+                timer.stop()
+            del self.load_timeout_timers[webview_id]
+        
         card_data = web_view.property("card_data")
         link_data = web_view.property("link_data")
         index = web_view.property("index")
@@ -3350,6 +3587,9 @@ class NewFillWindow(QDialog):
         if not success:
             web_view.setProperty("status", "failed")
             print(f"❌ WebView #{index+1} ({card_data.name}) 加载失败")
+            # ⚡️ 即使失败也要检查是否继续加载下一批
+            link_id = str(link_data.id)
+            self.check_batch_load_complete(link_id, web_view)
             return
         
         web_view.setProperty("status", "loaded")
@@ -3395,9 +3635,20 @@ class NewFillWindow(QDialog):
         
         # 获取当前WebView所属的链接
         link_id = str(link_data.id)
-        webview_infos = self.web_views_by_link.get(link_id, [])
         
-        # 统计该链接的加载状态
+        # ⚡️ 检查批次加载是否完成，继续加载下一批
+        self.check_batch_load_complete(link_id, web_view)
+    
+    def check_batch_load_complete(self, link_id: str, web_view: QWebEngineView):
+        """检查当前批次是否加载完成，继续加载下一批"""
+        # ⚡️ 安全检查
+        if not self._is_valid():
+            return
+        
+        webview_infos = self.web_views_by_link.get(link_id, [])
+        link_data = web_view.property("link_data")
+        
+        # 统计该链接的加载状态（只统计 "loading" 状态的）
         loading_count = sum(1 for info in webview_infos 
                           if info['web_view'] and info['web_view'].property("status") == "loading")
         
@@ -3412,13 +3663,14 @@ class NewFillWindow(QDialog):
             else:
                 # 该链接的所有WebView加载完成
                 loaded_count = sum(1 for info in webview_infos if info.get('loaded', False))
-                print(f"\n🎉 链接 '{link_data.name}' 的所有WebView加载完成 ({loaded_count}/{len(webview_infos)})")
+                link_name = link_data.name if link_data else link_id
+                print(f"\n🎉 链接 '{link_name}' 的所有WebView加载完成 ({loaded_count}/{len(webview_infos)})")
                 
                 # ⚡️ 自动填充模式：该链接加载完成后立即开始填充
                 if hasattr(self, 'auto_fill_enabled') and self.auto_fill_enabled:
                     if link_id not in self.links_ready_for_fill:
                         self.links_ready_for_fill.add(link_id)
-                        print(f"\n🚀 自动开始填充链接 '{link_data.name}' 的表单...")
+                        print(f"\n🚀 自动开始填充链接 '{link_name}' 的表单...")
                         # 使用默认参数捕获link_id的当前值，避免闭包问题
                         QTimer.singleShot(1000, lambda lid=link_id: self.auto_fill_for_link(lid))
     
@@ -3437,6 +3689,14 @@ class NewFillWindow(QDialog):
         if sip.isdeleted(web_view):
             print("🛑 [on_webview_loaded] WebView 已销毁，跳过回调")
             return
+        
+        # ⚡️ 取消加载超时定时器
+        webview_id = id(web_view)
+        if hasattr(self, 'load_timeout_timers') and webview_id in self.load_timeout_timers:
+            timer = self.load_timeout_timers[webview_id]
+            if timer.isActive():
+                timer.stop()
+            del self.load_timeout_timers[webview_id]
         
         card_data = web_view.property("card_data")
         link_data = web_view.property("link_data")
@@ -3999,6 +4259,8 @@ class NewFillWindow(QDialog):
                 if latest_card:
                     latest_card.reload() # 强制刷新数据
                     card = latest_card
+                    # 更新 WebView 的属性，以便 on_webview_loaded 能获取最新数据
+                    web_view.setProperty("card_data", latest_card)
                     print(f"  🔄 [填充] 已获取最新名片数据: {card.name}")
                     # 打印第一个配置项的值用于调试
                     if card.configs:
@@ -4006,9 +4268,11 @@ class NewFillWindow(QDialog):
         except Exception as e:
             print(f"  ⚠️ 获取最新名片失败: {e}")
 
-        # 统一使用 execute_auto_fill_for_webview，它现在已经足够健壮
-        # 能够处理报名工具的 data URL、登录状态保持等情况
-        self.execute_auto_fill_for_webview(web_view, card)
+        # ⚡️ 关键修复：刷新页面以重置网页状态，让 on_webview_loaded 自动触发填充
+        # 这样可以覆盖已填充的数据，而不只是填充空白字段
+        print(f"🔄 手动填充触发刷新并等待自动填充: {card.name}")
+        web_view.setProperty("status", "loading")  # 重置状态
+        web_view.reload()
     
     def init_baoming_tool_for_webview(self, web_view: QWebEngineView, url: str, card):
         """初始化报名工具（从WebView创建时调用）"""
@@ -4022,22 +4286,13 @@ class NewFillWindow(QDialog):
         except Exception as e:
             print(f"  ⚠️ [初始化] 获取最新名片失败: {e}")
 
-        # 准备名片配置数据
-        card_config = []
-        for config in card.configs:
-            if isinstance(config, dict):
-                card_config.append({
-                    'name': config.get('key', ''),
-                    'value': config.get('value', '')
-                })
-            else:
-                card_config.append({
-                    'name': config.key,
-                    'value': config.value
-                })
-        
+        # ⚡️ 使用 _get_fill_data_for_card 处理多值字段（解析 JSON 数组，使用用户选择或默认第一个值）
+        fill_data = self._get_fill_data_for_card(card)
+        # 转换为报名工具需要的格式（name 而不是 key）
+        card_config = [{'name': item['key'], 'value': item['value']} for item in fill_data]
+
         # 调试打印
-        print(f"  📋 [初始化] 名片配置 ({len(card_config)}): {[c['name'] + '=' + c['value'] for c in card_config]}")
+        print(f"  📋 [初始化] 名片配置 ({len(card_config)}): {[c['name'] + '=' + str(c['value']) for c in card_config]}")
         
         # 调用设置方法
         self.setup_baoming_tool_in_webview(url, card_config, web_view, card)
@@ -4481,17 +4736,122 @@ class NewFillWindow(QDialog):
         # 自动匹配填充
         filled_data = filler.match_and_fill(card_config)
         
+        # ⚡️ 合并字段类型信息（用于渲染不同组件）
+        form_fields = filler.form_fields
+        print(f"  🔍 [调试] 合并字段类型信息：filled_data={len(filled_data)}个, form_fields={len(form_fields)}个")
+        for item in filled_data:
+            field_key = item.get('field_key')
+            field_name = item.get('field_name', '')
+            matched = False
+            for field in form_fields:
+                # ⚡️ 修复：支持字符串和整数类型的 field_key 比较
+                form_field_key = field.get('field_key')
+                if str(form_field_key) == str(field_key):
+                    item['field_type'] = field.get('field_type', 0)
+                    item['options'] = field.get('new_options', [])
+                    item['require'] = field.get('require', 0)
+                    item['field_desc'] = field.get('field_desc', '')
+                    matched = True
+                    print(f"     ✅ 字段 \"{field_name}\" -> field_type={item['field_type']}, require={item['require']}")
+                    break
+            if not matched:
+                print(f"     ⚠️ 字段 \"{field_name}\" (key={field_key}) 未找到匹配的类型定义")
+        
         # 生成表单HTML
-        self.show_baoming_form_page(web_view, filler, filled_data, card)
+        # ⚡️ 传递表单简要信息
+        form_short_info = getattr(filler, 'form_short_info', None)
+        self.show_baoming_form_page(web_view, filler, filled_data, card, form_short_info)
     
-    def show_baoming_form_page(self, web_view: QWebEngineView, filler, filled_data: list, card):
+    def show_baoming_form_page(self, web_view: QWebEngineView, filler, filled_data: list, card, form_info: dict = None):
         """显示报名工具表单页面（新设计）"""
         import json
         import html as html_escape
+        from datetime import datetime
         
-        # 获取表单标题
-        form_title = filler.get_form_title() if hasattr(filler, 'get_form_title') else ''
-        form_title_escaped = html_escape.escape(form_title) if form_title else ''
+        # 字段类型常量（与前端 JS 和后端 API 保持一致）
+        FIELD_TYPE_TEXT = 0       # 单行文本
+        FIELD_TYPE_NUMBER = 1     # 数字
+        FIELD_TYPE_TEXTAREA = 2   # 多行文本
+        FIELD_TYPE_DATE = 3       # 日期
+        FIELD_TYPE_RADIO = 4      # 单选
+        FIELD_TYPE_CHECKBOX = 5   # 多选
+        FIELD_TYPE_IMAGE = 6      # 图片上传
+        FIELD_TYPE_FILE = 7       # 文件上传
+        FIELD_TYPE_ADDRESS = 8    # 地址
+        FIELD_TYPE_ID_CARD = 9    # 身份证
+        FIELD_TYPE_SELECT = 10    # 下拉选择
+        FIELD_TYPE_REGION = 12    # 地区选择
+        FIELD_TYPE_PHONE = 13     # 手机号
+        FIELD_TYPE_RICH_TEXT = 14 # 富文本/图片上传
+        
+        # 构造头部 HTML
+        header_html = ''
+        if form_info:
+            title = html_escape.escape(form_info.get('title', ''))
+            status_code = form_info.get('status', 1)
+            status_text = "进行中" if status_code == 1 else ("未开始" if status_code == 0 else "已结束")
+            
+            # 格式化时间
+            start_ts = form_info.get('start_time', 0)
+            end_ts = form_info.get('end_time', 0)
+            try:
+                start_str = datetime.fromtimestamp(start_ts).strftime('%m/%d %H:%M')
+                end_str = datetime.fromtimestamp(end_ts).strftime('%m/%d %H:%M')
+                time_range = f"{start_str} - {end_str}"
+            except:
+                time_range = ""
+            
+            count = form_info.get('count', 0)
+            limit = form_info.get('limit', 0)
+            
+            owner_pic = form_info.get('owner_pic', '')
+            sign_name = html_escape.escape(form_info.get('sign_name', ''))
+            
+            content_list = form_info.get('content', [])
+            content_text = ""
+            if content_list and isinstance(content_list, list):
+                for item in content_list:
+                    if item.get('type') == 'text':
+                        val = item.get('value', '')
+                        if val:
+                            content_text += html_escape.escape(val).replace('\n', '<br>') + "<br>"
+            
+            header_html = f'''
+            <div class="header-card">
+                <div class="card-top">
+                    <div class="card-title">{title}</div>
+                    <div class="card-status">{status_text}</div>
+                </div>
+                <div class="card-info-row">
+                    <div class="info-item" style="margin-right: 16px;">
+                        <span class="icon">📝</span> 报名: {time_range}
+                    </div>
+                    <div class="info-item">
+                        <span class="icon">👥</span> 提交: {count}/{limit}
+                    </div>
+                </div>
+                <div class="owner-row">
+                    <div class="owner-left">
+                        <img src="{owner_pic}" class="owner-avatar">
+                        <div class="owner-info">
+                            <div class="owner-name">{sign_name}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-content">
+                    {content_text}
+                </div>
+            </div>
+            '''
+        else:
+            # 获取表单标题（旧逻辑）
+            form_title = filler.get_form_title() if hasattr(filler, 'get_form_title') else ''
+            form_title_escaped = html_escape.escape(form_title) if form_title else ''
+            header_html = f'''
+            <div class="header">
+                <div class="title">{form_title_escaped or '📋 报名工具表单'}</div>
+            </div>
+            '''
         
         # 生成表单字段HTML
         fields_html = ''
@@ -4499,30 +4859,144 @@ class NewFillWindow(QDialog):
             field_name = field.get('field_name', '')
             field_key = field.get('field_key', '')
             field_value = field.get('field_value', '')
+            field_type = field.get('field_type', 0)
+            options = field.get('options', [])
+            require = field.get('require', 0)
+            field_desc = field.get('field_desc', '')
             
-            fields_html += f'''
-            <div class="field-group">
-                <div class="field-header">
-                    <label>{field_name}</label>
+            # ⚡️ 修复：确保 field_value 是字符串（用于渲染）
+            # 对于多选框，将数组转换为逗号分隔的字符串
+            if isinstance(field_value, list):
+                if field_type == FIELD_TYPE_CHECKBOX:
+                    # 多选框：数组转逗号分隔字符串
+                    field_value = ','.join(str(v) for v in field_value if v)
+                else:
+                    # 其他类型：取第一个值
+                    field_value = field_value[0] if field_value else ''
+            elif not isinstance(field_value, str):
+                field_value = str(field_value) if field_value else ''
+            
+            # HTML 转义
+            field_name_escaped = html_escape.escape(str(field_name))
+            field_key_escaped = html_escape.escape(str(field_key))
+            field_value_escaped = html_escape.escape(str(field_value))
+            field_desc_escaped = html_escape.escape(str(field_desc)) if field_desc else ''
+            
+            # 必填标记
+            require_mark = '<span class="require-mark">*</span>' if require else ''
+            # 字段描述
+            desc_html = f'<div class="field-desc">{field_desc_escaped}</div>' if field_desc_escaped else ''
+            
+            # ⚡️ 智能识别图片上传类型：
+            # 1. field_type == 6 (图片上传)
+            # 2. field_type == 14 (富文本/图片上传)
+            # 3. 字段名包含"图片"、"上传"、"截图"、"照片"等关键词
+            is_image_field = (field_type in [FIELD_TYPE_IMAGE, FIELD_TYPE_RICH_TEXT] or 
+                              any(kw in field_name for kw in ['图片', '上传图片', '截图', '照片', '头像', '封面']))
+            
+            # 根据字段类型生成不同的输入组件
+            if field_type == FIELD_TYPE_CHECKBOX and options:
+                # 多选框
+                checkbox_html = ''
+                selected_values = [v.strip() for v in field_value.split(',') if v.strip()]
+                for opt in options:
+                    opt_key = html_escape.escape(str(opt.get('key', '')))
+                    opt_value = html_escape.escape(str(opt.get('value', '')))
+                    # 检查是否已选中（匹配 key 或 value）
+                    is_checked = opt.get('key', '') in selected_values or opt.get('value', '') in selected_values
+                    checked_attr = 'checked' if is_checked else ''
+                    checkbox_html += f'''
+                        <label class="checkbox-item">
+                            <input type="checkbox" name="field_{i}" value="{opt_key}" {checked_attr}>
+                            <span class="checkbox-label">{opt_value}</span>
+                        </label>
+                    '''
+                fields_html += f'''
+                <div class="field-group">
+                    <div class="field-header">
+                        <label>{require_mark}{field_name_escaped}</label>
+                    </div>
+                    {desc_html}
+                    <div class="checkbox-group" id="field_{i}" data-key="{field_key_escaped}" data-name="{field_name_escaped}" data-type="checkbox">
+                        {checkbox_html}
+                    </div>
                 </div>
-                <input type="text" 
-                       id="field_{i}" 
-                       data-key="{field_key}" 
-                       data-name="{field_name}"
-                       value="{field_value}" 
-                       placeholder="请输入{field_name}">
-            </div>
-            '''
+                '''
+            elif field_type == FIELD_TYPE_RADIO and options:
+                # 单选框
+                radio_html = ''
+                for opt in options:
+                    opt_key = html_escape.escape(str(opt.get('key', '')))
+                    opt_value = html_escape.escape(str(opt.get('value', '')))
+                    is_checked = opt.get('key', '') == field_value or opt.get('value', '') == field_value
+                    checked_attr = 'checked' if is_checked else ''
+                    radio_html += f'''
+                        <label class="radio-item">
+                            <input type="radio" name="field_{i}" value="{opt_key}" {checked_attr}>
+                            <span class="radio-label">{opt_value}</span>
+                        </label>
+                    '''
+                fields_html += f'''
+                <div class="field-group">
+                    <div class="field-header">
+                        <label>{require_mark}{field_name_escaped}</label>
+                    </div>
+                    {desc_html}
+                    <div class="radio-group" id="field_{i}" data-key="{field_key_escaped}" data-name="{field_name_escaped}" data-type="radio">
+                        {radio_html}
+                    </div>
+                </div>
+                '''
+            elif is_image_field:
+                # 图片上传（根据 field_type 或字段名识别）
+                preview_html = f'<img src="{field_value_escaped}" class="image-preview" id="preview_{i}">' if field_value else f'<div class="image-placeholder" id="preview_{i}">📷 点击上传图片</div>'
+                fields_html += f'''
+                <div class="field-group">
+                    <div class="field-header">
+                        <label>{require_mark}{field_name_escaped}</label>
+                    </div>
+                    {desc_html}
+                    <div class="image-upload-container" id="field_{i}" data-key="{field_key_escaped}" data-name="{field_name_escaped}" data-type="image">
+                        <input type="file" accept="image/*" id="file_{i}" class="file-input" onchange="handleImageUpload({i}, this)">
+                        <div class="image-preview-box" onclick="document.getElementById('file_{i}').click()">
+                            {preview_html}
+                        </div>
+                        <input type="hidden" id="url_{i}" value="{field_value_escaped}">
+                        <div class="upload-status" id="status_{i}"></div>
+                    </div>
+                </div>
+                '''
+            else:
+                # 默认：文本输入框
+                input_type = 'tel' if field_type == FIELD_TYPE_PHONE else 'text'
+                fields_html += f'''
+                <div class="field-group">
+                    <div class="field-header">
+                        <label>{require_mark}{field_name_escaped}</label>
+                    </div>
+                    {desc_html}
+                    <input type="{input_type}"
+                           id="field_{i}"
+                           data-key="{field_key_escaped}"
+                           data-name="{field_name_escaped}"
+                           data-type="text"
+                           value="{field_value_escaped}"
+                           placeholder="请输入{field_name_escaped}">
+                </div>
+                '''
         
-        # 标题区域HTML（如果有标题则显示）
+        # 标题区域HTML（只在没有新header时显示）
         title_section = ''
-        if form_title_escaped:
-            title_section = f'''
-                <div class="form-title-section">
-                    <div class="form-title-label">📝 表单标题</div>
-                    <div class="form-title-text">{form_title_escaped}</div>
-                </div>
-            '''
+        if not form_info:
+            form_title = filler.get_form_title() if hasattr(filler, 'get_form_title') else ''
+            form_title_escaped = html_escape.escape(form_title) if form_title else ''
+            if form_title_escaped:
+                title_section = f'''
+                    <div class="form-title-section">
+                        <div class="form-title-label">📝 表单标题</div>
+                        <div class="form-title-text">{form_title_escaped}</div>
+                    </div>
+                '''
         
         html = f'''
         <!DOCTYPE html>
@@ -4538,6 +5012,88 @@ class NewFillWindow(QDialog):
                     min-height: 100vh;
                     padding: 20px;
                 }}
+                /* Header Card Styles */
+                .header-card {{
+                    background: #fff;
+                    border-radius: 16px;
+                    padding: 24px;
+                    margin-bottom: 24px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                }}
+                .card-top {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    margin-bottom: 16px;
+                }}
+                .card-title {{
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #1D1D1F;
+                    line-height: 1.4;
+                    flex: 1;
+                    margin-right: 12px;
+                }}
+                .card-status {{
+                    background: #E6F4FF;
+                    color: #007AFF;
+                    font-size: 13px;
+                    padding: 4px 12px;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    white-space: nowrap;
+                }}
+                .card-info-row {{
+                    display: flex;
+                    align-items: center;
+                    margin-bottom: 8px;
+                    color: #666;
+                    font-size: 14px;
+                }}
+                .info-item {{
+                    display: flex;
+                    align-items: center;
+                }}
+                .icon {{
+                    margin-right: 8px;
+                    font-size: 16px;
+                }}
+                .owner-row {{
+                    display: flex;
+                    align-items: center;
+                    margin: 12px 0 16px 0;
+                }}
+                .owner-left {{
+                    display: flex;
+                    align-items: center;
+                }}
+                .owner-avatar {{
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    margin-right: 10px;
+                    object-fit: cover;
+                }}
+                .owner-info {{
+                    display: flex;
+                    flex-direction: column;
+                }}
+                .owner-name {{
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #333;
+                }}
+                .card-content {{
+                    font-size: 14px;
+                    color: #444;
+                    line-height: 1.6;
+                    margin-top: 16px;
+                    padding-top: 16px;
+                    border-top: 1px solid #F0F0F0;
+                    white-space: pre-wrap;
+                }}
+                
+                /* Old Header */
                 .header {{
                     text-align: center;
                     margin-bottom: 24px;
@@ -4612,6 +5168,110 @@ class NewFillWindow(QDialog):
                 input::placeholder {{
                     color: #bfbfbf;
                 }}
+                .require-mark {{
+                    color: #f5222d;
+                    margin-right: 4px;
+                }}
+                .field-desc {{
+                    font-size: 12px;
+                    color: #8c8c8c;
+                    margin-bottom: 8px;
+                    line-height: 1.4;
+                }}
+                /* 多选框样式 */
+                .checkbox-group, .radio-group {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                }}
+                .checkbox-item, .radio-item {{
+                    display: flex;
+                    align-items: center;
+                    cursor: pointer;
+                    padding: 10px 16px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    background: #fff;
+                    transition: all 0.2s;
+                    flex: 0 0 auto;
+                    min-width: 100px;
+                }}
+                .checkbox-item:hover, .radio-item:hover {{
+                    border-color: #1890ff;
+                    background: #f0f7ff;
+                }}
+                .checkbox-item input, .radio-item input {{
+                    width: 18px;
+                    height: 18px;
+                    margin-right: 8px;
+                    cursor: pointer;
+                    accent-color: #1890ff;
+                }}
+                .checkbox-item input:checked + .checkbox-label,
+                .radio-item input:checked + .radio-label {{
+                    color: #1890ff;
+                    font-weight: 600;
+                }}
+                .checkbox-item:has(input:checked),
+                .radio-item:has(input:checked) {{
+                    border-color: #1890ff;
+                    background: #e6f4ff;
+                }}
+                .checkbox-label, .radio-label {{
+                    font-size: 14px;
+                    color: #333;
+                    user-select: none;
+                }}
+                /* 图片上传样式 */
+                .image-upload-container {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }}
+                .file-input {{
+                    display: none;
+                }}
+                .image-preview-box {{
+                    width: 100%;
+                    min-height: 120px;
+                    border: 2px dashed #d9d9d9;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    background: #fafafa;
+                    transition: all 0.2s;
+                    overflow: hidden;
+                }}
+                .image-preview-box:hover {{
+                    border-color: #1890ff;
+                    background: #f0f7ff;
+                }}
+                .image-placeholder {{
+                    color: #8c8c8c;
+                    font-size: 14px;
+                    text-align: center;
+                    padding: 20px;
+                }}
+                .image-preview {{
+                    max-width: 100%;
+                    max-height: 200px;
+                    object-fit: contain;
+                }}
+                .upload-status {{
+                    font-size: 12px;
+                    color: #8c8c8c;
+                }}
+                .upload-status.uploading {{
+                    color: #1890ff;
+                }}
+                .upload-status.success {{
+                    color: #52c41a;
+                }}
+                .upload-status.error {{
+                    color: #f5222d;
+                }}
                 .submit-btn {{
                     width: 100%;
                     padding: 14px;
@@ -4658,9 +5318,7 @@ class NewFillWindow(QDialog):
             </style>
         </head>
         <body>
-            <div class="header">
-                <div class="title">📋 报名工具表单</div>
-            </div>
+            {header_html}
             <div class="form-container">
                 {title_section}
                 {fields_html}
@@ -4669,23 +5327,122 @@ class NewFillWindow(QDialog):
             </div>
             
             <script>
+                // 图片上传处理
+                function handleImageUpload(index, input) {{
+                    var file = input.files[0];
+                    if (!file) return;
+                    
+                    var statusEl = document.getElementById('status_' + index);
+                    var previewEl = document.getElementById('preview_' + index);
+                    var urlInput = document.getElementById('url_' + index);
+                    
+                    // 显示预览
+                    var reader = new FileReader();
+                    reader.onload = function(e) {{
+                        previewEl.outerHTML = '<img src="' + e.target.result + '" class="image-preview" id="preview_' + index + '">';
+                    }};
+                    reader.readAsDataURL(file);
+                    
+                    // 上传到 OSS
+                    statusEl.textContent = '正在上传...';
+                    statusEl.className = 'upload-status uploading';
+                    
+                    var formData = new FormData();
+                    var timestamp = Date.now();
+                    var filename = 'test/upload/' + timestamp + '_' + file.name;
+                    
+                    formData.append('key', filename);
+                    formData.append('OSSAccessKeyId', 'LTAI5tHzG8jWeAZG2mP2MFvS');
+                    formData.append('policy', 'eyJleHBpcmF0aW9uIjoiMjEwMC0wMS0wMVQxMjowMDowMC4wMDBaIiwiY29uZGl0aW9ucyI6W1siY29udGVudC1sZW5ndGgtcmFuZ2UiLDAsMTA0ODU3NjAwMF1dfQ==');
+                    formData.append('signature', 'jdjUfw+5vYWYkzjyiQYXveiP1nA=');
+                    formData.append('success_action_status', '200');
+                    formData.append('file', file);
+                    
+                    fetch('https://taiguoossanmo.oss-accelerate.aliyuncs.com', {{
+                        method: 'POST',
+                        body: formData
+                    }})
+                    .then(function(response) {{
+                        if (response.ok || response.status === 204) {{
+                            var ossUrl = 'https://oss.fang-qingsong.com/' + filename;
+                            urlInput.value = ossUrl;
+                            statusEl.textContent = '上传成功';
+                            statusEl.className = 'upload-status success';
+                            console.log('图片上传成功:', ossUrl);
+                        }} else {{
+                            throw new Error('上传失败: ' + response.status);
+                        }}
+                    }})
+                    .catch(function(error) {{
+                        statusEl.textContent = '上传失败: ' + error.message;
+                        statusEl.className = 'upload-status error';
+                        console.error('图片上传失败:', error);
+                    }});
+                }}
+                
                 function submitForm() {{
                     var btn = document.querySelector('.submit-btn');
                     btn.disabled = true;
                     btn.textContent = '正在提交...';
                     
-                    var fields = document.querySelectorAll('input');
                     var data = [];
-                    fields.forEach(function(input) {{
+                    
+                    // 处理文本输入框
+                    var textInputs = document.querySelectorAll('input[data-type="text"]');
+                    textInputs.forEach(function(input) {{
                         var key = input.getAttribute('data-key');
-                        // 如果 field_key 是纯数字，转回整数类型（API 需要保持原始类型）
-                        if (/^\d+$/.test(key)) {{
-                            key = parseInt(key, 10);
-                        }}
+                        if (/^\d+$/.test(key)) key = parseInt(key, 10);
                         data.push({{
                             field_name: input.getAttribute('data-name'),
                             field_key: key,
                             field_value: input.value,
+                            ignore: 0
+                        }});
+                    }});
+                    
+                    // 处理多选框（报名工具需要数组格式）
+                    var checkboxGroups = document.querySelectorAll('.checkbox-group');
+                    checkboxGroups.forEach(function(group) {{
+                        var key = group.getAttribute('data-key');
+                        if (/^\d+$/.test(key)) key = parseInt(key, 10);
+                        var checkedValues = [];
+                        group.querySelectorAll('input:checked').forEach(function(cb) {{
+                            checkedValues.push(cb.value);
+                        }});
+                        data.push({{
+                            field_name: group.getAttribute('data-name'),
+                            field_key: key,
+                            field_value: checkedValues,  // 报名工具需要数组
+                            new_field_value: [],  // 其他选项的值（数组）
+                            ignore: 0
+                        }});
+                    }});
+                    
+                    // 处理单选框（报名工具需要 new_field_value 字段）
+                    var radioGroups = document.querySelectorAll('.radio-group');
+                    radioGroups.forEach(function(group) {{
+                        var key = group.getAttribute('data-key');
+                        if (/^\d+$/.test(key)) key = parseInt(key, 10);
+                        var checkedRadio = group.querySelector('input:checked');
+                        data.push({{
+                            field_name: group.getAttribute('data-name'),
+                            field_key: key,
+                            field_value: checkedRadio ? checkedRadio.value : '',
+                            new_field_value: '',  // 其他选项的值
+                            ignore: 0
+                        }});
+                    }});
+                    
+                    // 处理图片上传
+                    var imageContainers = document.querySelectorAll('.image-upload-container');
+                    imageContainers.forEach(function(container) {{
+                        var key = container.getAttribute('data-key');
+                        if (/^\d+$/.test(key)) key = parseInt(key, 10);
+                        var urlInput = container.querySelector('input[type="hidden"]');
+                        data.push({{
+                            field_name: container.getAttribute('data-name'),
+                            field_key: key,
+                            field_value: urlInput ? urlInput.value : '',
                             ignore: 0
                         }});
                     }});
@@ -4908,6 +5665,49 @@ class NewFillWindow(QDialog):
             return 'tencent_wj'
         else:
             return 'unknown'
+    
+    def get_or_create_profile(self, card_id: str, form_type: str) -> QWebEngineProfile:
+        """
+        获取或创建 Profile 实例
+        
+        同一个名片 + 同一个平台共享同一个 Profile 实例，
+        这样同一名片访问同一平台的不同链接可以共享登录状态（cookie、token等）
+        
+        Args:
+            card_id: 名片ID
+            form_type: 平台类型（由 detect_form_type 返回）
+            
+        Returns:
+            QWebEngineProfile: Profile 实例
+        """
+        cache_key = f"{card_id}_{form_type}"
+        
+        if cache_key in self.profile_cache:
+            print(f"  🔄 复用已有 Profile: {cache_key}")
+            return self.profile_cache[cache_key]
+        
+        # 创建新的 Profile
+        storage_name = f"profile_store_{cache_key}"
+        # 注意：这里不传入 parent，让 profile 的生命周期由 self.profile_cache 管理
+        profile = QWebEngineProfile(storage_name, self)
+        
+        # 设置为磁盘缓存模式，允许持久化 Cookie
+        profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
+        profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
+        
+        # 设置中文语言
+        profile.setHttpAcceptLanguage("zh-CN,zh;q=0.9,en;q=0.8")
+        
+        # 设置 User-Agent
+        user_agent = profile.httpUserAgent()
+        if 'zh-CN' not in user_agent:
+            profile.setHttpUserAgent(user_agent + " Language/zh-CN")
+        
+        # 缓存 Profile
+        self.profile_cache[cache_key] = profile
+        print(f"  ✅ 创建新 Profile: {cache_key} (共 {len(self.profile_cache)} 个)")
+        
+        return profile
     
     def _jinshuju_fill_with_field_log(self, web_view, card, fill_data: list):
         """金数据填充：先获取表单字段打印日志，再执行填充"""
@@ -6361,32 +7161,88 @@ class NewFillWindow(QDialog):
         return {{ matched: bestScore > 0, identifier: bestIdentifier, score: bestScore }};
     }}
     
-    // 填充输入框
+    // 填充输入框 - React/Ant Design 深度兼容（修复金数据表单验证问题）
     function fillInput(input, value) {{
+        // 1. 聚焦输入框
         input.focus();
-        input.value = value;
+        input.click();
         
-        ['input', 'change', 'blur', 'keyup', 'keydown'].forEach(eventName => {{
-            input.dispatchEvent(new Event(eventName, {{ bubbles: true, cancelable: true }}));
+        // 2. 清空现有内容（触发 React 状态清除）
+        input.value = '';
+        
+        // 3. 使用原生 setter 设置值（React 关键）
+        const isTextArea = input.tagName === 'TEXTAREA';
+        const proto = isTextArea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        
+        try {{
+            const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            nativeValueSetter.call(input, value);
+        }} catch (e) {{
+            input.value = value;
+        }}
+        
+        // 4. 触发 React 合成事件 - 使用 InputEvent（关键！）
+        const inputEvent = new InputEvent('input', {{
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: value
+        }});
+        input.dispatchEvent(inputEvent);
+        
+        // 5. 触发 change 事件
+        const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
+        input.dispatchEvent(changeEvent);
+        
+        // 6. 模拟键盘事件序列（某些框架依赖这些事件）
+        const keyboardEvents = ['keydown', 'keypress', 'keyup'];
+        keyboardEvents.forEach(eventName => {{
+            const keyEvent = new KeyboardEvent(eventName, {{
+                bubbles: true,
+                cancelable: true,
+                key: value.slice(-1) || 'a',
+                code: 'KeyA'
+            }});
+            input.dispatchEvent(keyEvent);
         }});
         
+        // 7. 再次确认值已设置
+        if (input.value !== value) {{
+            input.value = value;
+            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }}
+        
+        // 8. 触发 blur 完成编辑
+        input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+        
+        // 9. 尝试触发 React/Ant Design 内部状态更新
         try {{
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            if (nativeInputValueSetter) {{
-                nativeInputValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            // React Fiber 节点查找
+            const reactKey = Object.keys(input).find(key => 
+                key.startsWith('__reactFiber$') || 
+                key.startsWith('__reactInternalInstance$') ||
+                key.startsWith('__reactProps$')
+            );
+            if (reactKey && input[reactKey]) {{
+                const props = input[reactKey].memoizedProps || input[reactKey].pendingProps || {{}};
+                if (props.onChange) {{
+                    props.onChange({{ target: input, currentTarget: input }});
+                }}
             }}
         }} catch (e) {{}}
         
+        // 10. Ant Design 特殊处理：尝试触发 Form.Item 的 onFieldsChange
         try {{
-            const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            if (nativeTextAreaValueSetter && input.tagName === 'TEXTAREA') {{
-                nativeTextAreaValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            // 找到 ant-form-item 容器
+            const formItem = input.closest('.ant-form-item');
+            if (formItem) {{
+                // 触发 input 的 compositionend 事件（某些输入法模式需要）
+                input.dispatchEvent(new CompositionEvent('compositionend', {{
+                    bubbles: true,
+                    data: value
+                }}));
             }}
         }} catch (e) {{}}
-        
-        input.blur();
     }}
     
     // 主执行函数 - 以输入框为主体，为每个输入框找最佳匹配的名片字段
@@ -9315,26 +10171,22 @@ class NewFillWindow(QDialog):
     
     // 【核心】WPS表单专用：精确提取输入框对应的问题标识
     // WPS表单结构：
-    // <div class="ksapc-form-container-write">
-    //   <div class="ksapc-theme-back">
-    //     问题标题文本
-    //     <input />
-    //   </div>
-    // </div>
+    // <div class="ksapc-form-container-write">...</div>
+    // OR <div class="rc-component ...">...</div> (f.wps.cn)
     function getInputIdentifiers(input, inputIndex) {{
         const identifiers = [];
-        const MAX_LABEL_LENGTH = 50;
+        const MAX_LABEL_LENGTH = 100;
         
         // 辅助函数：添加标识符（带去重和优先级）
         function addIdentifier(text, priority = 0) {{
             if (!text) return;
             let cleaned = text.trim();
-            // 去除序号前缀（如 "01."、"1."等）
-            cleaned = cleaned.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
-            // 去除多余空白和特殊符号
-            cleaned = cleaned.replace(/^[\\s*]+|[\\s*]+$/g, '').trim();
+            // 去除序号前缀（如 "01."、"1."、"1、"、"1 "等）
+            cleaned = cleaned.replace(/^[\d\s\.\、\*\-]+/, '').trim();
             // 去除必填标记
-            cleaned = cleaned.replace(/[\\*必填]/g, '').trim();
+            cleaned = cleaned.replace(/[\*必填]/g, '').trim();
+            // 去除多余空白
+            cleaned = cleaned.replace(/\s+/g, ' ').trim();
             
             if (cleaned && cleaned.length > 0 && cleaned.length <= MAX_LABEL_LENGTH) {{
                 if (!identifiers.some(item => item.text === cleaned)) {{
@@ -9343,57 +10195,79 @@ class NewFillWindow(QDialog):
             }}
         }}
         
-        // 【方法1 - 最高优先级】WPS表单专用：查找 ksapc-theme-back 容器
-        let container = input.closest('.ksapc-theme-back, [class*="ksapc"], [class*="form-item"], [class*="question"]');
+        // 【方法1 - 最高优先级】WPS表单专用：查找容器 (ksapc 或 rc-component)
+        // f.wps.cn 常使用 rc-component 或 generic divs
+        let container = input.closest('.ksapc-theme-back, [class*="ksapc"], [class*="form-item"], [class*="question"], [class*="component"], .question-box, [role="group"]');
+        
         if (container) {{
-            // 提取容器中的文本节点（排除 input 自身）
-            let containerText = '';
-            container.childNodes.forEach(node => {{
-                if (node.nodeType === Node.TEXT_NODE) {{
-                    containerText += node.textContent + ' ';
-                }} else if (node.nodeType === Node.ELEMENT_NODE && node !== input && !node.contains(input)) {{
-                    // 获取非包含 input 的兄弟元素的文本
-                    const text = node.innerText || node.textContent || '';
-                    if (text && !text.includes('提交') && !text.includes('取消')) {{
-                        containerText += text + ' ';
-                    }}
-                }}
-            }});
-            if (containerText.trim()) {{
-                addIdentifier(containerText, 100);
-                console.log(`[WPS] 容器文本匹配: "${{containerText.trim()}}"`);
-            }}
-            
-            // 备选：查找标题元素
-            const titleEl = container.querySelector('[class*="title"], [class*="label"], label, h3, h4');
+            // 1.1 查找特定的标题元素
+            const titleEl = container.querySelector('[class*="title"], [class*="label"], [class*="header"], h2, h3, h4, strong, b');
             if (titleEl) {{
                 const titleText = (titleEl.innerText || titleEl.textContent || '').trim();
                 if (titleText) {{
-                    addIdentifier(titleText, 95);
+                    addIdentifier(titleText, 100);
                     console.log(`[WPS] 标题元素匹配: "${{titleText}}"`);
                 }}
             }}
-        }}
-        
-        // 【方法2】向上查找包含问题标题的容器
-        if (identifiers.length === 0) {{
-            let parent = input.parentElement;
-            for (let depth = 0; depth < 8 && parent; depth++) {{
-                const titleEl = parent.querySelector(':scope > h2, :scope > h3, :scope > h4, :scope [class*="title"], :scope [class*="label"]');
-                if (titleEl) {{
-                    const text = (titleEl.innerText || titleEl.textContent || '').trim();
-                    const cleanedText = text.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
-                    if (cleanedText && cleanedText.length <= MAX_LABEL_LENGTH) {{
-                        addIdentifier(cleanedText, 90);
-                        console.log(`[WPS] 向上查找匹配: "${{cleanedText}}"`);
-                        break;
-                    }}
+            
+            // 1.2 提取容器中的纯文本（排除 input 自身和按钮）
+            let containerText = '';
+            // 遍历所有子节点提取文本
+            function traverse(node) {{
+                if (node === input || node.contains(input)) return; // 跳过包含 input 的分支
+                if (['BUTTON', 'SCRIPT', 'STYLE', 'SVG', 'PATH'].includes(node.tagName)) return;
+                
+                if (node.nodeType === Node.TEXT_NODE) {{
+                    containerText += node.textContent + ' ';
+                }} else if (node.nodeType === Node.ELEMENT_NODE) {{
+                    // 检查是否是干扰元素
+                    const text = node.innerText || '';
+                    if (text.includes('提交') || text.includes('取消') || text.includes('登录')) return;
+                    
+                    node.childNodes.forEach(child => traverse(child));
                 }}
-                parent = parent.parentElement;
+            }}
+            // 遍历容器的直接子节点
+            container.childNodes.forEach(child => traverse(child));
+            
+            if (containerText.trim()) {{
+                // 分割多行文本，分别添加
+                const lines = containerText.split(/[\n\r]+/);
+                lines.forEach(line => {{
+                    if (line.trim().length > 1) {{
+                        addIdentifier(line.trim(), 95);
+                    }}
+                }});
+                if (lines.length === 0 && containerText.trim()) {{
+                     addIdentifier(containerText.trim(), 95);
+                }}
+                console.log(`[WPS] 容器文本匹配: "${{containerText.trim().substring(0, 30)}}..."`);
             }}
         }}
         
-        // 【方法3】aria-labelledby 属性
+        // 【方法2】通用向上查找 (Backup)
+        let parent = input.parentElement;
+        for (let depth = 0; depth < 6 && parent; depth++) {{
+            // 查找标题元素
+            const titleEl = parent.querySelector(':scope > [class*="title"], :scope > [class*="label"], :scope > h3, :scope > h4');
+            if (titleEl) {{
+                addIdentifier(titleEl.innerText || titleEl.textContent, 90 - depth * 5);
+            }}
+            
+            // 查找前置兄弟元素 (Title usually comes before Input)
+            let sibling = parent.previousElementSibling;
+            if (sibling) {{
+                // 检查兄弟是否包含文本
+                const text = sibling.innerText || sibling.textContent || '';
+                if (text && text.length < MAX_LABEL_LENGTH && text.length > 1) {{
+                    addIdentifier(text, 85 - depth * 5);
+                }}
+            }}
+            
+            parent = parent.parentElement;
+        }}
+        
+        // 【方法3】aria-labelledby
         const ariaLabelledBy = input.getAttribute('aria-labelledby');
         if (ariaLabelledBy) {{
             ariaLabelledBy.split(' ').forEach(id => {{
@@ -9411,25 +10285,10 @@ class NewFillWindow(QDialog):
             }});
         }}
         
-        // 【方法5】placeholder、title、aria-label 基础属性
+        // 【方法5】属性
         if (input.placeholder) addIdentifier(input.placeholder, 70);
         if (input.title) addIdentifier(input.title, 70);
         if (input.getAttribute('aria-label')) addIdentifier(input.getAttribute('aria-label'), 70);
-        
-        // 【方法6】前置兄弟元素（作为兜底）
-        let sibling = input.previousElementSibling;
-        for (let i = 0; i < 3 && sibling; i++) {{
-            if (sibling.tagName === 'H2' || sibling.tagName === 'H3' || 
-                sibling.tagName === 'LABEL' || sibling.className.includes('title') || 
-                sibling.className.includes('label')) {{
-                const text = (sibling.innerText || sibling.textContent || '').trim();
-                if (text && text.length <= MAX_LABEL_LENGTH) {{
-                    addIdentifier(text, 60);
-                    break;
-                }}
-            }}
-            sibling = sibling.previousElementSibling;
-        }}
         
         // 按优先级排序
         identifiers.sort((a, b) => {{
@@ -9475,12 +10334,13 @@ class NewFillWindow(QDialog):
     // 提取核心词
     function extractCoreWords(text) {{
         const cleaned = cleanText(text);
+        // 【优化】添加更多核心词，特别是"后台"、"非报备"等
         const corePatterns = [
             '小红书', '蒲公英', '微信', '微博', '抖音', '快手',
             'id', '账号', '昵称', '主页', '名字', '名称', '姓名',
             '粉丝', '点赞', '赞藏', '互动', '阅读', '播放', '曝光', '收藏',
             '中位数', '均赞', 'cpm', 'cpe',
-            '价格', '报价', '报备', '返点', '裸价', '预算',
+            '后台', '非报备', '报备', '价格', '报价', '返点', '裸价', '预算',
             '视频', '图文', '链接',
             '手机', '电话', '地址', '联系', '方式',
             '年龄', '性别', '城市', '地区', 'ip',
@@ -9494,6 +10354,37 @@ class NewFillWindow(QDialog):
             }}
         }}
         return found;
+    }}
+    
+    // 【新增】检测反义词冲突（如"非报备" vs "报备"）
+    function hasNegationConflict(text1, text2) {{
+        const clean1 = cleanText(text1);
+        const clean2 = cleanText(text2);
+        
+        // 定义反义词对
+        const negationPairs = [
+            ['非报备', '报备'],
+            ['非授权', '授权'],
+            ['非视频', '视频'],
+            ['非图文', '图文'],
+            ['不报备', '报备'],
+            ['无授权', '授权']
+        ];
+        
+        for (const [negative, positive] of negationPairs) {{
+            // 检测：一方包含"非X"，另一方包含"X"但不包含"非X"
+            const has1Negative = clean1.includes(negative);
+            const has2Negative = clean2.includes(negative);
+            const has1Positive = clean1.includes(positive) && !has1Negative;
+            const has2Positive = clean2.includes(positive) && !has2Negative;
+            
+            // 如果一方是否定形式，另一方是肯定形式，则存在冲突
+            if ((has1Negative && has2Positive) || (has2Negative && has1Positive)) {{
+                console.log(`[WPS] ⚠️ 检测到反义词冲突: "${{text1}}" vs "${{text2}}" (对: ${{negative}}/${{positive}})`);
+                return true;
+            }}
+        }}
+        return false;
     }}
     
     // 计算最长连续公共子串长度
@@ -9513,7 +10404,7 @@ class NewFillWindow(QDialog):
         return maxLen;
     }}
     
-    // 【核心】匹配关键词 - 参考石墨文档的动态覆盖率评分系统
+    // 【核心】匹配关键词 - 优化版：支持反义词冲突检测和多核心词精确匹配
     function matchKeyword(identifiers, keyword) {{
         if (!keyword) return {{ matched: false, identifier: null, score: 0 }};
         
@@ -9540,6 +10431,12 @@ class NewFillWindow(QDialog):
                 const cleanIdentifier = cleanText(identifier);
                 const cleanIdentifierNoPrefix = cleanTextNoPrefix(identifier);
                 if (!cleanIdentifier) continue;
+                
+                // 【新增】反义词冲突检测 - 如果存在冲突则跳过此匹配
+                if (hasNegationConflict(subKey, cleanIdentifier)) {{
+                    console.log(`[WPS] 跳过冲突匹配: 名片"${{subKey}}" vs 表单"${{cleanIdentifier}}"`);
+                    continue;
+                }}
                 
                 const identifierCoreWords = extractCoreWords(identifier);
                 let currentScore = 0;
@@ -9586,19 +10483,29 @@ class NewFillWindow(QDialog):
                     const coverage = cleanIdentifierNoPrefix.length / subKeyNoPrefix.length;
                     currentScore = 53 + (coverage * 35);
                 }}
-                // 7. 核心词匹配
+                // 7. 【优化】核心词匹配 - 增加多核心词匹配的权重
                 else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
                     const commonCoreWords = subKeyCoreWords.filter(w => identifierCoreWords.includes(w));
                     if (commonCoreWords.length > 0) {{
                         const coreMatchRatio = commonCoreWords.length / Math.max(subKeyCoreWords.length, identifierCoreWords.length);
                         
+                        // 【优化】核心词完全一致
                         if (commonCoreWords.length === subKeyCoreWords.length && 
                             commonCoreWords.length === identifierCoreWords.length) {{
                             currentScore = 88;
-                        }} else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1) {{
+                        }} 
+                        // 【优化】单核心词匹配
+                        else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1) {{
                             currentScore = 80;
-                        }} else {{
-                            currentScore = 55 + Math.floor(coreMatchRatio * 25);
+                        }} 
+                        // 【优化】多核心词部分匹配 - 根据匹配数量增加分数
+                        else {{
+                            // 基础分 + 匹配率加成 + 匹配数量加成
+                            const baseScore = 50;
+                            const ratioBonus = Math.floor(coreMatchRatio * 25);
+                            const countBonus = Math.min(commonCoreWords.length * 5, 15); // 每个匹配的核心词加5分，最多15分
+                            currentScore = baseScore + ratioBonus + countBonus;
+                            console.log(`[WPS] 多核心词匹配: 共同核心词[${{commonCoreWords.join(',')}}], 匹配率=${{(coreMatchRatio*100).toFixed(0)}}%, 分数=${{currentScore}}`);
                         }}
                     }}
                 }}
