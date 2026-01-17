@@ -233,12 +233,14 @@ class AddTemplateDialog(QDialog):
         self.template = template
         self.db_manager = db_manager or DatabaseManager()
         self.current_user = current_user
+        self._saved_placeholders = []  # 初始化多值提示列表
         self.init_ui()
         
     def init_ui(self):
         title = "编辑模板" if self.template else "添加模板"
         self.setWindowTitle(title)
-        self.setFixedSize(550, 720)
+        self.setMinimumSize(550, 720)
+        self.resize(550, 850)  # 默认更大的高度
         self.setStyleSheet(f"background-color: {PREMIUM_COLORS['surface']};")
         
         layout = QVBoxLayout(self)
@@ -250,8 +252,16 @@ class AddTemplateDialog(QDialog):
         title_lbl.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {PREMIUM_COLORS['text_heading']};")
         layout.addWidget(title_lbl)
         
-        # 表单区域
-        form_layout = QVBoxLayout()
+        # 滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        form_layout = QVBoxLayout(scroll_content)
+        form_layout.setContentsMargins(0, 0, 10, 0)
         form_layout.setSpacing(15)
         
         # 字段名称（带加号按钮）
@@ -290,9 +300,18 @@ class AddTemplateDialog(QDialog):
         
         # 字段值数量
         self.value_count_input = self._create_input_field("字段值数量", "默认为1", "1")
+        self.value_count_input.input.textChanged.connect(self._update_placeholder_inputs)
         form_layout.addWidget(self.value_count_input)
         
-        # 分类
+        # 多值提示容器（动态生成）
+        self.placeholders_container = QWidget()
+        self.placeholders_layout = QVBoxLayout(self.placeholders_container)
+        self.placeholders_layout.setContentsMargins(0, 0, 0, 0)
+        self.placeholders_layout.setSpacing(8)
+        self.placeholder_inputs = []  # 存储多个提示输入框
+        form_layout.addWidget(self.placeholders_container)
+        
+        # 分类  
         self.category_combo = QComboBox()
         self.category_combo.setEditable(True)
         # 获取现有分类
@@ -328,8 +347,9 @@ class AddTemplateDialog(QDialog):
         self.order_input = self._create_input_field("排序", "数字越小越靠前", "0")
         form_layout.addWidget(self.order_input)
         
-        layout.addLayout(form_layout)
-        layout.addStretch()
+        form_layout.addStretch()
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area, 1)
         
         # 按钮组
         btn_layout = QHBoxLayout()
@@ -369,12 +389,23 @@ class AddTemplateDialog(QDialog):
         if self.template:
             self.name_input.input.setText(self.template.field_name)
             self.value_input.setText(self.template.field_value)
-            value_count = getattr(self.template, 'value_count', 1) or 1
-            self.value_count_input.input.setText(str(value_count))
             self.category_combo.setCurrentText(self.template.category)
             self.placeholder_input.input.setText(self.template.placeholder or '')
             self.desc_input.input.setText(self.template.description or '')
             self.order_input.input.setText(str(self.template.order))
+            
+            # 解析多值提示并回显（必须在设置 value_count 之前）
+            template_str = getattr(self.template, 'value_placeholder_template', '') or ''
+            if template_str:
+                import json
+                try:
+                    self._saved_placeholders = json.loads(template_str)
+                except:
+                    self._saved_placeholders = []
+            
+            # 最后设置 value_count，触发生成提示输入框
+            value_count = getattr(self.template, 'value_count', 1) or 1
+            self.value_count_input.input.setText(str(value_count))
             
     def _create_input_field(self, label_text, placeholder="", default_val=""):
         container = QWidget()
@@ -405,6 +436,71 @@ class AddTemplateDialog(QDialog):
         container.input = input_field
         layout.addWidget(input_field)
         return container
+    
+    def _update_placeholder_inputs(self):
+        """根据字段值数量动态生成提示输入框"""
+        # 清空现有输入框
+        while self.placeholders_layout.count():
+            item = self.placeholders_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.placeholder_inputs.clear()
+        
+        # 获取数量
+        try:
+            count = int(self.value_count_input.input.text().strip() or "1")
+        except ValueError:
+            count = 1
+        
+        if count <= 1:
+            return
+        
+        # 获取已保存的提示（用于回显）
+        saved = getattr(self, '_saved_placeholders', [])
+        
+        # 添加标题
+        title_label = QLabel("各字段值提示（选填）")
+        title_label.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_body']}; margin-top: 8px;")
+        self.placeholders_layout.addWidget(title_label)
+        
+        # 生成输入框
+        for i in range(count):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            
+            # 标签
+            label = QLabel(f"值 {i + 1}:")
+            label.setFixedWidth(45)
+            label.setStyleSheet(f"color: {PREMIUM_COLORS['text_hint']}; font-size: 12px;")
+            row_layout.addWidget(label)
+            
+            # 输入框
+            input_field = QLineEdit()
+            input_field.setPlaceholderText(f"第 {i + 1} 个值的提示文本")
+            input_field.setMinimumHeight(36)
+            input_field.setStyleSheet(f"""
+                QLineEdit {{
+                    padding: 0 10px;
+                    border: 1px solid {PREMIUM_COLORS['border_light']};
+                    border-radius: 6px;
+                    background: #f8fafc;
+                    font-size: 13px;
+                }}
+                QLineEdit:focus {{
+                    border: 1px solid {PREMIUM_COLORS['primary']};
+                    background: white;
+                }}
+            """)
+            
+            # 回显已保存的值
+            if i < len(saved) and saved[i]:
+                input_field.setText(saved[i])
+            
+            row_layout.addWidget(input_field)
+            self.placeholder_inputs.append(input_field)
+            self.placeholders_layout.addWidget(row)
     
     def _create_input_field_with_add_btn(self, label_text, placeholder="", default_val=""):
         """创建带加号按钮的输入框（用于添加别名）"""
@@ -590,11 +686,17 @@ class AddTemplateDialog(QDialog):
                 value_count = 1
         except ValueError:
             value_count = 1
+        
+        # 收集多值提示为 JSON 数组
+        import json
+        placeholders_list = [inp.text().strip() for inp in self.placeholder_inputs]
+        value_placeholder_template = json.dumps(placeholders_list, ensure_ascii=False) if placeholders_list else ""
             
         data = {
             'field_name': field_name,
             'field_value': field_value,
             'value_count': value_count,
+            'value_placeholder_template': value_placeholder_template,
             'placeholder': self.placeholder_input.input.text().strip(),
             'category': self.category_combo.currentText().strip() or '通用',
             'description': self.desc_input.input.text().strip(),

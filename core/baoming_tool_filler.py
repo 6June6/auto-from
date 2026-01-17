@@ -207,8 +207,14 @@ class BaomingToolAPI:
             
             if data.get('sta') == 0:
                 detail = data.get('data', {})
-                self.info_id = detail.get('info_id')
-                return True, '获取成功', self.info_id
+                info_id = detail.get('info_id')
+                if info_id:
+                    self.info_id = info_id
+                    return True, '获取成功', self.info_id
+                else:
+                    # API 返回成功但没有 info_id，说明用户未报名过
+                    print(f"  ⚠️ [报名工具] detail 中没有 info_id，用户可能未报名过")
+                    return False, '未找到已有报名记录', None
             else:
                 return False, data.get('msg', '获取详情失败'), None
                 
@@ -270,7 +276,8 @@ class BaomingToolAPI:
                 print(f"  ⚠️ [报名工具] 签名生成失败，尝试直接获取已有记录...")
                 # 签名失败时，尝试获取已有的 info_id
                 success, msg, info_id = self.get_enroll_detail()
-                if success:
+                if success and info_id:
+                    self.info_id = info_id  # 确保赋值
                     print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
                 # 跳过新增接口，直接走更新
                 raise Exception("签名生成失败")
@@ -321,15 +328,21 @@ class BaomingToolAPI:
                     # 已报名过的情况下，需要先获取 info_id
                     if not self.info_id:
                         success, msg, info_id = self.get_enroll_detail()
-                        if success:
+                        if success and info_id:
+                            self.info_id = info_id  # 确保赋值
                             print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
+                        else:
+                            print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
                 else:
                     print(f"  ⚠️ [报名工具] 新增接口返回: {error_msg}")
                     # 尝试获取 info_id（可能是已经报过名但接口返回其他错误）
                     if not self.info_id:
                         success, msg, info_id = self.get_enroll_detail()
-                        if success:
+                        if success and info_id:
+                            self.info_id = info_id  # 确保赋值
                             print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
+                        else:
+                            print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
             else:
                 print(f"  ✅ [报名工具] 新增接口调用成功")
                 # 新增成功后，更新 info_id
@@ -344,14 +357,21 @@ class BaomingToolAPI:
             if not self.info_id:
                 try:
                     success, msg, info_id = self.get_enroll_detail()
-                    if success:
+                    if success and info_id:
+                        self.info_id = info_id  # 确保赋值
                         print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
-                except:
-                    pass
+                    else:
+                        print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
+                except Exception as detail_err:
+                    print(f"  ⚠️ [报名工具] 获取 info_id 异常: {detail_err}")
         
         # 第二步：调用更新接口 enroll/v1/user_update
         if not self.info_id:
-            return False, '缺少info_id，无法更新'
+            print(f"  ❌ [报名工具] 无法获取 info_id，可能原因：")
+            print(f"     1. 新增接口调用失败且用户未报名过（无历史记录）")
+            print(f"     2. 服务器返回异常")
+            print(f"     3. 签名验证失败")
+            return False, '缺少info_id，无法更新。请检查：1.签名是否正确 2.是否为首次报名但新增接口失败'
             
         try:
             update_url = f"{self.BASE_URL}/enroll/v1/user_update"
@@ -429,8 +449,13 @@ class BaomingToolFiller:
         return status, msg, user_data
     
     def try_restore_login(self) -> bool:
-        """尝试恢复登录状态"""
-        if not self.eid:
+        """
+        尝试恢复登录状态
+        
+        ⚡️ 优化：同一名片的所有报名工具链接共享 token
+        只要该名片之前登录过任意一个报名工具活动，其他活动也自动登录
+        """
+        if not self.card_id:
             return False
             
         token_data = self._load_token()
@@ -445,7 +470,7 @@ class BaomingToolFiller:
         self.api.access_token = access_token
         self.api.user_info = token_data # 恢复用户信息
         
-        print(f"  ✅ [报名工具] 恢复登录状态: {token_data.get('uname', '用户')} (名片ID: {self.card_id}, EID: {self.eid})")
+        print(f"  ✅ [报名工具] 恢复登录状态: {token_data.get('uname', '用户')} (名片ID: {self.card_id})")
         return True
 
     def _get_token_file_path(self):
@@ -459,8 +484,13 @@ class BaomingToolFiller:
         return config_dir / 'baoming_tokens.json'
 
     def _get_storage_key(self) -> str:
-        """生成存储 Key: card_{card_id}_eid_{eid}"""
-        return f"card_{self.card_id}_eid_{self.eid}"
+        """
+        生成存储 Key: card_{card_id}
+        
+        ⚡️ 优化：只使用 card_id 作为 key，这样同一名片的所有报名工具链接共享 token
+        （之前是 card_{card_id}_eid_{eid}，每个活动都需要单独登录）
+        """
+        return f"card_{self.card_id}"
 
     def _save_token(self, user_data: Dict):
         """保存 Token 到本地文件（支持多账号）"""
@@ -532,21 +562,18 @@ class BaomingToolFiller:
             
     def load_form(self) -> Tuple[bool, str]:
         """加载表单数据"""
-        # 先获取简要信息（包含表单内容）
+        # 先获取简要信息（包含表单标题）
         success, msg, short_info = self.api.get_short_detail()
         if success and short_info:
             self.form_short_info = short_info
-            # 优先从 content[0].value 获取内容，其次是 sign_name
-            content_list = short_info.get('content', [])
-            if content_list and len(content_list) > 0:
-                first_content = content_list[0]
-                if isinstance(first_content, dict):
-                    self.form_title = first_content.get('value', '')
+            # 从 short_detail 接口的 title 字段获取标题
+            self.form_title = short_info.get('title', '')
+            # 如果 title 为空，回退到 sign_name
             if not self.form_title:
                 self.form_title = short_info.get('sign_name', '')
-            print(f"  📋 [报名工具] 表单内容: {self.form_title[:50]}..." if len(self.form_title) > 50 else f"  📋 [报名工具] 表单内容: {self.form_title}")
+            print(f"  📋 [报名工具] 表单标题: {self.form_title[:50]}..." if len(self.form_title) > 50 else f"  📋 [报名工具] 表单标题: {self.form_title}")
         
-        # 获取详情
+        # 获取详情（尝试获取已有的 info_id，首次报名时可能没有）
         success, msg, info_id = self.api.get_enroll_detail()
         if not success:
             # 检测 token 是否失效
@@ -555,7 +582,13 @@ class BaomingToolFiller:
                 self._clear_token()
                 self.api.access_token = None
                 self.api.user_info = None
-            return False, msg
+                return False, msg
+            # 未找到已有报名记录是正常的（首次报名），继续获取表单字段
+            if '未找到已有报名记录' in msg:
+                print(f"  ℹ️ [报名工具] 首次报名，继续加载表单字段...")
+            else:
+                # 其他错误则返回
+                return False, msg
             
         # 再获取表单字段
         success, msg, fields = self.api.get_form_fields()
@@ -624,7 +657,8 @@ class BaomingToolFiller:
             matched_value = ''
             if best_match['score'] >= 50: # 阈值50
                 matched_value = best_match['value']
-                print(f"     ✅ 选中: \"{best_match['matched_key']}\" (分数: {best_match['score']})")
+                val_preview = str(matched_value)[:20] + "..." if len(str(matched_value)) > 20 else str(matched_value)
+                print(f"     ✅ 选中: \"{best_match['matched_key']}\" = \"{val_preview}\" (分数: {best_match['score']})")
             else:
                 print(f"     ❌ 未匹配 (最高分: {best_match['score']})")
 
@@ -642,7 +676,12 @@ class BaomingToolFiller:
         if not text:
             return ''
         text = str(text).lower()
-        # 去除特殊字符
+        
+        # 1. 先去除括号及其内容（通常是提示信息，如"(必填)", "(不要填错)"）
+        # 支持中文括号（）和英文括号()
+        text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)
+        
+        # 2. 去除特殊字符
         text = re.sub(r'[：:*？?！!。.、，,\s\-_()（）【】\[\]\n\r\t/／\\|｜;；\'\"\u2795+《》<>""'']+', '', text)
         return text.strip()
 
@@ -675,16 +714,18 @@ class BaomingToolFiller:
         cleaned = self._clean_text(text)
         # 核心词库（与前端 JS 保持一致）
         core_patterns = [
-            '小红书', '蒲公英', '微信', '微博', '抖音', '快手',
+            '小红书', '蒲公英', '微信', '微博', '抖音', '快手', 'b站', '哔哩哔哩',
             'id', '账号', '昵称', '主页', '名字', '名称',
             '粉丝', '点赞', '赞藏', '互动', '阅读', '播放', '曝光', '收藏',
             '中位数', '均赞', 'cpm', 'cpe',
-            '价格', '报价', '报备', '返点', '裸价', '预算',
-            '视频', '图文', '链接',
+            '价格', '报价', '报备', '返点', '裸价', '预算', '后台',
+            '视频', '图文', '链接', '作品', '笔记',
             '手机', '电话', '地址',
             '姓名', '年龄', '性别', '城市', '地区', 'ip',
             '档期', '类别', '类型', '领域', '备注', '授权', '分发', '排竞',
-            '平台', '健康', '等级', '保价', '配合', '时间', '探店'
+            '平台', '健康', '等级', '保价', '配合', '时间', '探店',
+            '收货', '寄送', '快递',
+            '出镜', '人物', '保底'
         ]
         found = []
         for pattern in core_patterns:
@@ -708,6 +749,117 @@ class BaomingToolFiller:
                     dp[i][j] = 0
         return max_len
 
+    def _has_negation_conflict(self, text1: str, text2: str) -> bool:
+        """检测反义词冲突（如"非报备" vs "报备"）"""
+        clean1 = self._clean_text(text1)
+        clean2 = self._clean_text(text2)
+        
+        # 定义反义词对
+        negation_pairs = [
+            ['非报备', '报备'],
+            ['非授权', '授权'],
+            ['非视频', '视频'],
+            ['非图文', '图文'],
+            ['不报备', '报备'],
+            ['无授权', '授权'],
+            ['非独家', '独家'],
+            ['税前', '税后'],
+            ['含税', '不含税']
+        ]
+        
+        for negative, positive in negation_pairs:
+            # 检测：一方包含"非X"，另一方包含"X"但不包含"非X"
+            has1_negative = negative in clean1
+            has2_negative = negative in clean2
+            has1_positive = positive in clean1 and not has1_negative
+            has2_positive = positive in clean2 and not has2_negative
+            
+            # 如果一方是否定形式，另一方是肯定形式，则存在冲突
+            if (has1_negative and has2_positive) or (has2_negative and has1_positive):
+                # print(f"     🚫 [冲突] \"{text1}\" vs \"{text2}\" ({negative}/{positive})")
+                return True
+        return False
+
+    def _are_fields_compatible(self, form_field: str, card_field: str) -> bool:
+        """互斥字段检测"""
+        clean_form = self._clean_text(form_field)
+        clean_card = self._clean_text(card_field)
+        
+        # --- 1. 微信相关特殊处理 (优先处理) ---
+        # 解决 微信名 vs 微信号、微信ID vs 微信昵称 等复杂情况
+        is_form_wechat = any(k in clean_form for k in ['微信', 'wx', 'vx'])
+        
+        if is_form_wechat:
+            # A. 表单是 微信名/昵称 类
+            if any(k in clean_form for k in ['名', '昵称']):
+                # 互斥：ID类 (号, id, 账号)
+                # 但要注意：如果名片也是 Name 类 (如 "微信名")，则不互斥
+                # 只有当名片是纯 ID 类时才互斥
+                # ⚡️ 修正：将 "微信", "wx", "vx" 也视为 ID 特征，除非它包含 "名/昵称"
+                is_card_id = any(k in clean_card for k in ['号', 'id', '账号', 'wx', 'vx']) or clean_card == '微信'
+                is_card_name = any(k in clean_card for k in ['名', '昵称'])
+                
+                if is_card_id and not is_card_name:
+                    return False
+                    
+                # 互斥：明显非微信的字段
+                if any(k in clean_card for k in ['地址', '电话', '手机', '邮箱', '链接', '主页']):
+                    return False
+                    
+                return True
+                
+            # B. 表单是 微信ID/账号 类 (默认为此)
+            else:
+                # 互斥：Name 类 (名, 昵称)
+                # 只有当名片明确是 Name 类时才互斥
+                is_card_name = any(k in clean_card for k in ['名', '昵称'])
+                if is_card_name:
+                    return False
+                    
+                # 互斥：明显非微信的字段
+                if any(k in clean_card for k in ['地址', '电话', '手机', '邮箱', '链接', '主页']):
+                    return False
+                    
+                return True
+
+        # --- 2. 通用互斥组 (非微信字段) ---
+        incompatible_pairs = [
+            # 电话 vs 地址/姓名/其他
+            (['电话', '手机', '联系方式', '固话'], 
+             ['地址', '收货', '街道', '姓名', '昵称', '名字', '省', '市', '区', '微信', '账号', 'id', '邮箱']),
+            # 地址 vs 电话
+            (['地址', '收货', '街道', '所在地', '地区'], 
+             ['电话', '手机', '固话', '微信', '账号', 'id', '粉丝', '价格', '邮箱']),
+            # 姓名 vs 地址/电话
+            (['姓名', '名字', '收货人'], 
+             ['地址', '街道', '电话', '手机', '微信', '账号', 'id', '邮箱']),
+            # 昵称 vs 微信/地址/电话
+            (['昵称', '名称', '用户名'], 
+             ['微信', '微信号', '地址', '电话', '手机', '邮箱']),
+            # ID/账号 vs 地址/电话/昵称
+            (['id', '账号'], 
+             ['地址', '电话', '手机', '昵称', '名字', '名称', '微信', '微信号']),
+            # 价格 vs 地址/电话
+            (['价格', '报价', '费用', '预算'], 
+             ['地址', '电话', '手机', '微信', '账号', 'id', '粉丝', '阅读', '点赞']),
+            # 粉丝 vs 地址/电话
+            (['粉丝'], 
+             ['地址', '电话', '手机', '微信', '账号', 'id', '价格', '报价'])
+        ]
+        
+        for form_keywords, card_keywords in incompatible_pairs:
+            # 检查表单字段是否包含组1关键词
+            form_match = any(kw in clean_form for kw in form_keywords)
+            
+            if form_match:
+                # 检查名片字段是否包含组2关键词
+                card_match = any(kw in clean_card for kw in card_keywords)
+                if card_match:
+                    # print(f"     🚫 [互斥] 表单:\"{form_field}\" vs 名片:\"{card_field}\"")
+                    return False
+                
+        return True
+
     def _calculate_match_score(self, field_name: str, config_name: str) -> Dict:
         """
         计算匹配分数（核心算法）
@@ -721,6 +873,10 @@ class BaomingToolFiller:
             
         clean_identifier = self._clean_text(field_name)
         if not clean_identifier:
+            return {'matched': False, 'score': 0}
+            
+        # 1. 兼容性预检
+        if not self._are_fields_compatible(field_name, config_name):
             return {'matched': False, 'score': 0}
             
         clean_identifier_no_prefix = self._clean_text_no_prefix(field_name)
@@ -739,6 +895,10 @@ class BaomingToolFiller:
         
         for i, sub_key in enumerate(sub_keywords):
             if not sub_key: continue
+            
+            # 2. 反义词冲突检测
+            if self._has_negation_conflict(field_name, sub_key):
+                continue
             
             sub_key_no_prefix = sub_keywords_no_prefix[i] if i < len(sub_keywords_no_prefix) else sub_key
             sub_key_core_words = self._extract_core_words(sub_key) # 注意这里是子关键词的核心词
@@ -761,7 +921,9 @@ class BaomingToolFiller:
                 elif coverage >= 0.5:
                     current_score = 50 + (coverage * 45)
                 else:
-                    current_score = 50 + (coverage * 40)
+                    # ⚡️ 优化：低覆盖率时大幅降低分数 (原: 50 + coverage * 40)
+                    # 例如 "视频" (2) in "视频出镜人物" (6), coverage=0.33 -> 30 + 13.2 = 43.2 (不匹配)
+                    current_score = 30 + (coverage * 40)
                     
             # 4. 去前缀后的包含匹配
             elif sub_key_no_prefix and sub_key_no_prefix in clean_identifier and len(sub_key_no_prefix) >= 2:
@@ -769,7 +931,8 @@ class BaomingToolFiller:
                 if coverage >= 0.8:
                     current_score = 93
                 else:
-                    current_score = 48 + (coverage * 40)
+                    # ⚡️ 优化：同上
+                    current_score = 28 + (coverage * 40)
                     
             # 5. 名片key包含表单标签 (反向包含)
             elif clean_identifier in sub_key and len(clean_identifier) >= 2:
@@ -778,12 +941,15 @@ class BaomingToolFiller:
                 else:
                     base_len = len(sub_key_no_prefix) if sub_key_no_prefix else len(sub_key)
                     coverage = len(clean_identifier) / base_len
-                    current_score = 55 + (coverage * 35)
+                    # ⚡️ 优化：反向包含时也降低低覆盖率的分数 (原: 55 + coverage * 35)
+                    # 例如 "视频" (2) in "非报备视频报价" (7), coverage=0.28 -> 30 + 16.8 = 46.8 (不匹配)
+                    current_score = 30 + (coverage * 60)
                     
             # 6. 去前缀版本的反向包含
             elif sub_key_no_prefix and clean_identifier_no_prefix in sub_key_no_prefix and len(clean_identifier_no_prefix) >= 2:
                  coverage = len(clean_identifier_no_prefix) / len(sub_key_no_prefix)
-                 current_score = 53 + (coverage * 35)
+                 # ⚡️ 优化：同上
+                 current_score = 28 + (coverage * 60)
 
             # 7. 核心词匹配
             elif len(sub_key_core_words) > 0 and len(identifier_core_words) > 0:
@@ -795,9 +961,14 @@ class BaomingToolFiller:
                     if len(common_core_words) == len(sub_key_core_words) and len(common_core_words) == len(identifier_core_words):
                         current_score = 88
                     elif len(sub_key_core_words) == 1 and len(identifier_core_words) == 1:
-                        current_score = 80
+                        # ⚡️ 优化：单核心词匹配时，如果不是完全相同（已被前面逻辑捕获），说明有其他干扰词
+                        # 例如 "视频" vs "视频出镜人物"，ratio=0.33
+                        current_score = 60 # 稍微降低
                     else:
-                        current_score = 55 + int(core_match_ratio * 25)
+                        # ⚡️ 优化：严格按照核心词比例打分 (原: 55 + ratio * 25)
+                        # ratio=0.33 -> 25 + 21 = 46 (不匹配)
+                        # ratio=0.5 -> 25 + 32 = 57 (匹配)
+                        current_score = 25 + int(core_match_ratio * 65)
             
             # 8. 最长公共子串匹配 (兜底)
             elif len(sub_key) >= 2 and len(clean_identifier) >= 2:

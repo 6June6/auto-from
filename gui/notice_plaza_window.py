@@ -12,13 +12,13 @@ from .styles import COLORS, GLOBAL_STYLE
 from .icons import Icons
 
 class TagButton(QPushButton):
-    """标签按钮 - 胶囊样式"""
+    """标签按钮 - 紧凑胶囊样式"""
     def __init__(self, text, parent=None, is_active=False):
         super().__init__(text, parent)
         self.setCheckable(True)
         self.setChecked(is_active)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(32)
+        self.setFixedHeight(30)
         self.update_style()
         self.toggled.connect(self.update_style)
     
@@ -26,13 +26,13 @@ class TagButton(QPushButton):
         if self.isChecked():
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                               stop:0 {COLORS['primary']}, 
-                                              stop:1 {COLORS['primary_light']});
+                                              stop:1 {COLORS['primary_dark']});
                     color: white;
                     border: none;
-                    border-radius: 16px;
-                    padding: 0 18px;
+                    border-radius: 15px;
+                    padding: 0 14px;
                     font-weight: 600;
                     font-size: 13px;
                 }}
@@ -40,17 +40,18 @@ class TagButton(QPushButton):
         else:
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: #F3F4F6;
+                    background-color: #F5F5F7;
                     color: {COLORS['text_secondary']};
-                    border: 1px solid transparent;
-                    border-radius: 16px;
-                    padding: 0 18px;
+                    border: 1px solid #E5E5EA;
+                    border-radius: 15px;
+                    padding: 0 14px;
                     font-size: 13px;
                     font-weight: 500;
                 }}
                 QPushButton:hover {{
-                    background-color: #E5E7EB;
-                    color: {COLORS['text_primary']};
+                    background-color: #E8E8ED;
+                    border-color: {COLORS['primary']};
+                    color: {COLORS['primary']};
                 }}
             """)
 
@@ -66,21 +67,21 @@ class NoticeCardWidget(QFrame):
         self.init_ui()
         
     def init_ui(self):
-        self.setFixedWidth(340)  # 稍宽一点以容纳更多内容
-        self.setFixedHeight(350)  # 固定高度，长内容可滚动
+        self.setFixedWidth(300)  # 更紧凑的宽度
+        self.setFixedHeight(280)  # 更紧凑的高度
         
         # 阴影效果
         self.shadow = QGraphicsDropShadowEffect()
-        self.shadow.setBlurRadius(15)
-        self.shadow.setColor(QColor(0, 0, 0, 20))
-        self.shadow.setOffset(0, 4)
+        self.shadow.setBlurRadius(12)
+        self.shadow.setColor(QColor(0, 0, 0, 15))
+        self.shadow.setOffset(0, 3)
         self.setGraphicsEffect(self.shadow)
         
         # 卡片基础样式
         self.setStyleSheet(f"""
             NoticeCardWidget {{
                 background-color: white;
-                border-radius: 16px;
+                border-radius: 12px;
                 border: 1px solid {COLORS['border_light']};
             }}
             NoticeCardWidget:hover {{
@@ -89,8 +90,8 @@ class NoticeCardWidget(QFrame):
         """)
         
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
         self.setLayout(layout)
         
         # 1. 头部：平台 + 类目
@@ -136,8 +137,7 @@ class NoticeCardWidget(QFrame):
         
         layout.addLayout(header_layout)
         
-        # 2. 通告内容
-        # 使用 QTextEdit 替代 QLabel 以支持滚动
+        # 2. 通告内容 - 更清晰的文字
         content = self._get_full_content()
         
         self.content_edit = QTextEdit()
@@ -150,20 +150,26 @@ class NoticeCardWidget(QFrame):
         self.content_edit.setStyleSheet(f"""
             QTextEdit {{
                 background-color: transparent;
-                font-size: 14px;
+                font-size: 13px;
                 color: {COLORS['text_primary']};
-                line-height: 1.5;
+                line-height: 1.4;
                 border: none;
             }}
+            QScrollBar:vertical {{
+                width: 4px;
+                background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #D1D5DB;
+                border-radius: 2px;
+            }}
         """)
-        layout.addWidget(self.content_edit)
+        layout.addWidget(self.content_edit, 1)
         
-        layout.addStretch()
-        
-        # 3. 底部按钮
+        # 3. 底部按钮 - 更紧凑
         join_btn = QPushButton("查看详情 / 加入链接")
         join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        join_btn.setFixedHeight(36)
+        join_btn.setFixedHeight(34)
         join_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']};
@@ -243,14 +249,15 @@ class NoticePlazaWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         central_widget.setLayout(main_layout)
         
-        # 顶部：筛选区头部（控制折叠）
+        # 顶部：筛选区头部（控制折叠）- 紧凑版
         filter_header = QWidget()
+        filter_header.setFixedHeight(44)
         filter_header.setStyleSheet("background-color: white;")
         filter_header_layout = QHBoxLayout()
-        filter_header_layout.setContentsMargins(24, 16, 24, 0)
+        filter_header_layout.setContentsMargins(24, 0, 24, 0)
         
         filter_title = QLabel("筛选条件")
-        filter_title.setStyleSheet(f"font-weight: 600; font-size: 15px; color: {COLORS['text_primary']};")
+        filter_title.setStyleSheet(f"font-weight: 700; font-size: 16px; color: {COLORS['text_primary']};")
         filter_header_layout.addWidget(filter_title)
         
         filter_header_layout.addStretch()
@@ -261,7 +268,7 @@ class NoticePlazaWindow(QMainWindow):
             QPushButton {{
                 border: none;
                 color: {COLORS['text_secondary']};
-                font-weight: 500;
+                font-weight: 600;
                 font-size: 13px;
             }}
             QPushButton:hover {{
@@ -274,73 +281,66 @@ class NoticePlazaWindow(QMainWindow):
         filter_header.setLayout(filter_header_layout)
         main_layout.addWidget(filter_header)
 
-        # 顶部：筛选区内容
+        # 顶部：筛选区内容 - 紧凑布局
         self.filter_container = QWidget()
         self.filter_container.setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLORS['border']};")
         filter_layout = QVBoxLayout()
-        filter_layout.setContentsMargins(24, 16, 24, 24)
-        filter_layout.setSpacing(16)
+        filter_layout.setContentsMargins(24, 12, 24, 16)
+        filter_layout.setSpacing(10)
         self.filter_container.setLayout(filter_layout)
         
-        # 1. 类目筛选
+        # 1. 类目筛选 - 单行紧凑
         category_layout = QHBoxLayout()
+        category_layout.setSpacing(12)
         cat_label = QLabel("类目：")
-        cat_label.setFixedWidth(60)
-        cat_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_primary']};")
+        cat_label.setFixedWidth(45)
+        cat_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {COLORS['text_primary']};")
         category_layout.addWidget(cat_label)
         
         self.category_group = QButtonGroup(self)
         self.category_group.setExclusive(True)
         self.category_layout_container = QHBoxLayout()
-        self.category_layout_container.setSpacing(10)
+        self.category_layout_container.setSpacing(8)
         
-        # 包装在一个 ScrollArea 里防止类目太多
-        cat_scroll = QScrollArea()
-        cat_scroll.setWidgetResizable(True)
-        cat_scroll.setFixedHeight(50)
-        cat_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        cat_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        cat_scroll.setStyleSheet("background: transparent;")
-        
-        cat_content = QWidget()
-        cat_content.setLayout(self.category_layout_container)
-        cat_scroll.setWidget(cat_content)
-        
-        category_layout.addWidget(cat_scroll)
+        category_layout.addLayout(self.category_layout_container)
+        category_layout.addStretch()
         filter_layout.addLayout(category_layout)
         
-        # 2. 平台筛选
+        # 2. 平台筛选 - 单行紧凑
         platform_layout = QHBoxLayout()
+        platform_layout.setSpacing(12)
         plat_label = QLabel("平台：")
-        plat_label.setFixedWidth(60)
-        plat_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_primary']};")
+        plat_label.setFixedWidth(45)
+        plat_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {COLORS['text_primary']};")
         platform_layout.addWidget(plat_label)
         
         self.platform_group = QButtonGroup(self)
         self.platform_group.setExclusive(True)
         self.platform_layout_container = QHBoxLayout()
-        self.platform_layout_container.setSpacing(10)
+        self.platform_layout_container.setSpacing(8)
         
         platform_layout.addLayout(self.platform_layout_container)
         platform_layout.addStretch()
         filter_layout.addLayout(platform_layout)
         
-        # 3. 搜索和刷新按钮
+        # 3. 搜索和筛选按钮 - 同一行
         action_layout = QHBoxLayout()
-        action_layout.setSpacing(16)
+        action_layout.setSpacing(12)
         
         # 搜索框
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索通告内容...")
-        self.search_input.setFixedWidth(300)
+        self.search_input.setFixedHeight(36)
+        self.search_input.setMinimumWidth(250)
+        self.search_input.setMaximumWidth(400)
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 background: #F3F4F6;
-                border: 1px solid transparent;
+                border: 1px solid #E5E7EB;
                 border-radius: 8px;
-                padding: 8px 12px;
+                padding: 0 12px;
                 color: {COLORS['text_primary']};
-                font-size: 13px;
+                font-size: 14px;
             }}
             QLineEdit:focus {{
                 background: white;
@@ -352,36 +352,15 @@ class NoticePlazaWindow(QMainWindow):
         
         action_layout.addStretch()
         
-        # 刷新按钮
-        refresh_btn = QPushButton("🔄 刷新")
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.setFixedSize(100, 36)
-        refresh_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                color: {COLORS['text_secondary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['background']};
-                color: {COLORS['primary']};
-                border-color: {COLORS['primary']};
-            }}
-        """)
-        refresh_btn.clicked.connect(self.refresh_notices)
-        # action_layout.addWidget(refresh_btn)
-        
-        # 搜索按钮
+        # 筛选按钮
         search_btn = QPushButton("筛选")
         search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        search_btn.setFixedSize(100, 36)
+        search_btn.setFixedSize(80, 36)
         search_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']};
                 color: white;
+                border: none;
                 border-radius: 8px;
                 font-weight: 600;
                 font-size: 14px;
@@ -400,7 +379,7 @@ class NoticePlazaWindow(QMainWindow):
         
         main_layout.addWidget(self.filter_container)
         
-        # 中间：内容区
+        # 中间：内容区 - 紧凑网格
         content_area = QScrollArea()
         content_area.setWidgetResizable(True)
         content_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -408,19 +387,20 @@ class NoticePlazaWindow(QMainWindow):
         
         self.cards_container = QWidget()
         self.cards_grid = QGridLayout()
-        self.cards_grid.setSpacing(20)
-        self.cards_grid.setContentsMargins(24, 24, 24, 24)
+        self.cards_grid.setSpacing(16)
+        self.cards_grid.setContentsMargins(20, 16, 20, 16)
         self.cards_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.cards_container.setLayout(self.cards_grid)
         
         content_area.setWidget(self.cards_container)
         main_layout.addWidget(content_area)
         
-        # 底部：分页
+        # 底部：分页 - 紧凑版
         footer_container = QWidget()
+        footer_container.setFixedHeight(56)
         footer_container.setStyleSheet("background-color: white; border-top: 1px solid #E5E5EA;")
         footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(24, 16, 24, 16)
+        footer_layout.setContentsMargins(24, 0, 24, 0)
         
         # 分页按钮样式
         page_btn_style = f"""
@@ -496,8 +476,6 @@ class NoticePlazaWindow(QMainWindow):
             btn.clicked.connect(lambda checked, c=cat.name: self.on_category_changed(c))
             self.category_group.addButton(btn)
             self.category_layout_container.addWidget(btn)
-        
-        self.category_layout_container.addStretch()
             
         # 加载平台
         platforms = self.db_manager.get_all_platforms()
@@ -511,8 +489,6 @@ class NoticePlazaWindow(QMainWindow):
             btn.clicked.connect(lambda checked, p=plat.name: self.on_platform_changed(p))
             self.platform_group.addButton(btn)
             self.platform_layout_container.addWidget(btn)
-            
-        self.platform_layout_container.addStretch()
         
         # 加载通告
         self.refresh_notices()
@@ -577,7 +553,7 @@ class NoticePlazaWindow(QMainWindow):
         self.refresh_notices()
         
     def add_to_my_links(self, notice):
-        """将通告添加到我的链接（简化版：显示详情弹窗）"""
+        """将通告直接添加到我的链接（无弹窗确认）"""
         import re
         
         # 获取完整内容
@@ -601,201 +577,45 @@ class NoticePlazaWindow(QMainWindow):
         url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
         links = re.findall(url_pattern, content)
         
-        # 创建详情弹窗
-        from PyQt6.QtWidgets import QDialog, QTextEdit
+        if not links:
+            QMessageBox.warning(self, "提示", "未在通告内容中检测到有效链接！")
+            return
         
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"通告详情 - {notice.platform}")
-        dialog.setFixedSize(500, 450)
-        dialog.setStyleSheet("QDialog { background: white; }")
+        # 获取当前用户
+        user = self.parent().current_user if self.parent() else None
+        if not user:
+            QMessageBox.warning(self, "提示", "请先登录后再添加链接！")
+            return
         
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        # 使用第一个匹配到的链接
+        link_url = links[0]
         
-        # 标签
-        tag_layout = QHBoxLayout()
-        platform_tag = QLabel(notice.platform)
-        platform_tag.setStyleSheet(f"""
-            background-color: #EEF2FF;
-            color: {COLORS['primary']};
-            border-radius: 4px;
-            padding: 4px 10px;
-            font-size: 12px;
-            font-weight: 600;
-        """)
-        tag_layout.addWidget(platform_tag)
+        # 检查链接是否已存在
+        existing_link = self.db_manager.get_link_by_url(link_url, user=user)
+        if existing_link:
+            QMessageBox.information(self, "提示", "该链接已存在于您的链接库中！")
+            return
         
-        if notice.category:
-            category_tag = QLabel(notice.category)
-            category_tag.setStyleSheet(f"""
-                background-color: #FEF3C7;
-                color: #D97706;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 12px;
-                font-weight: 600;
-            """)
-            tag_layout.addWidget(category_tag)
-        tag_layout.addStretch()
-        layout.addLayout(tag_layout)
+        # 创建新链接
+        # 链接名称：取内容前30个字符
+        link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
+        link_name = link_name.replace('\n', ' ')
         
-        # 内容显示
-        content_edit = QTextEdit()
-        content_edit.setPlainText(content)
-        content_edit.setReadOnly(True)
-        content_edit.setStyleSheet(f"""
-            QTextEdit {{
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 14px;
-                line-height: 1.6;
-                background: #FAFAFA;
-            }}
-        """)
-        layout.addWidget(content_edit)
-        
-        # 底部按钮
-        btn_layout = QHBoxLayout()
-        
-        # 复制内容按钮
-        copy_btn = QPushButton("复制全部内容")
-        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        copy_btn.setMinimumWidth(110)
-        copy_btn.setFixedHeight(36)
-        copy_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                color: {COLORS['text_secondary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['background']};
-                color: {COLORS['primary']};
-            }}
-        """)
-        copy_btn.clicked.connect(lambda: (QApplication.clipboard().setText(content), QMessageBox.information(dialog, "成功", "内容已复制到剪贴板！")))
-        btn_layout.addWidget(copy_btn)
-        
-        # 如果有链接，添加复制链接按钮
-        if links:
-            copy_link_btn = QPushButton("复制链接")
-            copy_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            copy_link_btn.setMinimumWidth(90)
-            copy_link_btn.setFixedHeight(36)
-            copy_link_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: white;
-                    color: {COLORS['text_secondary']};
-                    border: 1px solid {COLORS['border']};
-                    border-radius: 8px;
-                    padding: 8px 12px;
-                    font-weight: 600;
-                    font-size: 13px;
-                }}
-                QPushButton:hover {{
-                    background: {COLORS['background']};
-                    color: {COLORS['primary']};
-                }}
-            """)
-            copy_link_btn.clicked.connect(lambda: (QApplication.clipboard().setText(links[0]), QMessageBox.information(dialog, "成功", "链接已复制到剪贴板！")))
-            btn_layout.addWidget(copy_link_btn)
-        
-        # 加入链接库按钮
-        def do_add_to_links():
-            if not links:
-                QMessageBox.warning(dialog, "提示", "未在通告内容中检测到有效链接！\n\n请确认通告内容中包含 http:// 或 https:// 开头的链接。")
-                return
+        try:
+            self.db_manager.create_link(
+                name=link_name,
+                url=link_url,
+                user=user,
+                status='active',
+                category=notice.category or '默认分类',
+                description=f"来自通告广场"
+            )
             
-            # 获取当前用户
-            user = self.parent().current_user if self.parent() else None
-            if not user:
-                QMessageBox.warning(dialog, "提示", "请先登录后再添加链接！")
-                return
-            
-            # 使用第一个匹配到的链接
-            link_url = links[0]
-            
-            # 检查链接是否已存在
-            existing_link = self.db_manager.get_link_by_url(link_url, user=user)
-            if existing_link:
-                QMessageBox.information(dialog, "提示", "该链接已存在于您的链接库中！")
-                return
-            
-            # 创建新链接
-            # 链接名称：取内容前30个字符
-            link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
-            link_name = link_name.replace('\n', ' ')
-            
-            try:
-                self.db_manager.create_link(
-                    name=link_name,
-                    url=link_url,
-                    user=user,
-                    status='active',
-                    category=notice.category or '默认分类',
-                    description=f"来自通告广场"
-                )
-                QMessageBox.information(dialog, "成功", f"已成功添加到「我的链接」！\n\n链接：{link_url[:50]}...")
-                
-                # 尝试刷新主窗口的数据
-                if self.parent() and hasattr(self.parent(), 'refresh_data'):
-                    self.parent().refresh_data()
-            except Exception as e:
-                QMessageBox.warning(dialog, "失败", f"添加链接失败：{str(e)}")
-        
-        add_link_btn = QPushButton("加入链接库")
-        add_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_link_btn.setMinimumWidth(100)
-        add_link_btn.setFixedHeight(36)
-        add_link_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['primary']};
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['primary_light']};
-            }}
-        """)
-        add_link_btn.clicked.connect(do_add_to_links)
-        btn_layout.addWidget(add_link_btn)
-        
-        btn_layout.addStretch()
-        
-        close_btn = QPushButton("关闭")
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setMinimumWidth(70)
-        close_btn.setFixedHeight(36)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: #F3F4F6;
-                color: {COLORS['text_secondary']};
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: #E5E7EB;
-            }}
-        """)
-        close_btn.clicked.connect(dialog.close)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
-        
-        dialog.exec()
+            # 尝试刷新主窗口的数据
+            if self.parent() and hasattr(self.parent(), 'refresh_data'):
+                self.parent().refresh_data()
+        except Exception as e:
+            QMessageBox.warning(self, "失败", f"添加链接失败：{str(e)}")
 
     def copy_link(self, link):
         QApplication.clipboard().setText(link)

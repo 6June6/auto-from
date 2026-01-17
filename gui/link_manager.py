@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QSplitter, QProgressBar, QFrame, QScrollArea,
                              QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QPalette, QTextCursor
 from database import DatabaseManager, Link
 from core.ai_parser import AIParser
 from .icons import Icons
@@ -922,12 +922,12 @@ class SmartAddLinkDialog(QDialog):
         super().__init__(parent)
         self.db_manager = DatabaseManager()
         self.current_user = current_user
-        self.ai_thread = None
+        self.parsed_links = []
         self.init_ui()
         
     def init_ui(self):
         self.setWindowTitle("新增链接 - 智能解析")
-        self.resize(1000, 700)
+        self.resize(800, 500)
         self.setStyleSheet(f"background: {PREMIUM_COLORS['background']};")
         
         # 主布局
@@ -936,35 +936,7 @@ class SmartAddLinkDialog(QDialog):
         layout.setSpacing(16)
         self.setLayout(layout)
         
-        # 说明
-        info_card = QFrame()
-        info_card.setStyleSheet(f"""
-            QFrame {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #E8F4FD, stop:1 #F0E6FF);
-                border-radius: 10px;
-                border: 1px solid {PREMIUM_COLORS['primary']}30;
-            }}
-        """)
-        info_layout = QHBoxLayout(info_card)
-        info_layout.setContentsMargins(16, 12, 16, 12)
-        
-        info_label = QLabel("💡 直接粘贴包含链接的文本（如聊天记录），系统会自动识别并提取链接信息")
-        info_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
-        info_label.setWordWrap(True)
-        info_layout.addWidget(info_label)
-        layout.addWidget(info_card)
-        
-        # 分割器
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background: transparent;
-                height: 8px;
-            }
-        """)
-        layout.addWidget(splitter, 1)
-        
-        # 上部：输入区域
+        # 输入区域
         input_card = QFrame()
         input_card.setStyleSheet(f"""
             QFrame {{
@@ -981,31 +953,6 @@ class SmartAddLinkDialog(QDialog):
         input_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {PREMIUM_COLORS['text_heading']};")
         input_header.addWidget(input_label)
         input_header.addStretch()
-        
-        # AI 解析按钮 (暂时隐藏)
-        self.btn_ai_parse = QPushButton("✨ DeepSeek 智能解析")
-        self.btn_ai_parse.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_ai_parse.setFixedHeight(34)
-        self.btn_ai_parse.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #8b5cf6);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 0 16px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5, stop:1 #7c3aed);
-            }
-            QPushButton:disabled {
-                background: #ccc;
-            }
-        """)
-        self.btn_ai_parse.clicked.connect(self.start_ai_parse)
-        self.btn_ai_parse.hide()  # 暂时隐藏 DeepSeek 功能
-        # input_header.addWidget(self.btn_ai_parse)
-        
         input_layout.addLayout(input_header)
         
         self.text_edit = ChineseContextTextEdit()
@@ -1025,79 +972,43 @@ class SmartAddLinkDialog(QDialog):
         self.text_edit.textChanged.connect(self.on_text_changed)
         input_layout.addWidget(self.text_edit)
         
-        # 进度条
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.hide()
-        self.progress_bar.setFixedHeight(4)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                border-radius: 2px;
-                background: #f0f0f0;
-            }
-            QProgressBar::chunk {
-                background-color: #6366f1;
-                border-radius: 2px;
-            }
-        """)
-        input_layout.addWidget(self.progress_bar)
+        # 状态栏（解析结果 + 粘贴按钮）
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 8, 0, 0)
         
-        splitter.addWidget(input_card)
+        self.count_label = QLabel("解析结果：共找到 0 个链接")
+        self.count_label.setStyleSheet(f"color: {PREMIUM_COLORS['primary']}; font-weight: 600; font-size: 13px;")
+        status_layout.addWidget(self.count_label)
         
-        # 下部：解析结果
-        result_card = QFrame()
-        result_card.setStyleSheet(f"""
-            QFrame {{
-                background: white;
-                border-radius: 12px;
-                border: 1px solid {PREMIUM_COLORS['border_light']};
-            }}
-        """)
-        result_layout = QVBoxLayout(result_card)
-        result_layout.setContentsMargins(16, 16, 16, 16)
+        status_layout.addStretch()
         
-        result_header = QHBoxLayout()
-        result_label = QLabel("解析结果")
-        result_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {PREMIUM_COLORS['text_heading']};")
-        result_header.addWidget(result_label)
-        
-        self.count_label = QLabel("共找到 0 个链接")
-        self.count_label.setStyleSheet(f"color: {PREMIUM_COLORS['primary']}; font-size: 13px;")
-        result_header.addWidget(self.count_label)
-        result_header.addStretch()
-        
-        result_layout.addLayout(result_header)
-        
-        # 解析结果列表
-        self.result_list = ParseResultListWidget()
-        self.result_list.row_count_changed.connect(self.update_status)
-        result_layout.addWidget(self.result_list, 1)
-        
-        splitter.addWidget(result_card)
-        
-        # 底部按钮
-        button_layout = QHBoxLayout()
-        
-        btn_add_single = QPushButton("➕ 手动添加单条")
-        btn_add_single.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_add_single.setFixedHeight(40)
-        btn_add_single.setStyleSheet(f"""
+        btn_paste = QPushButton("📋 粘贴")
+        btn_paste.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_paste.setFixedHeight(32)
+        btn_paste.setMinimumWidth(100)
+        btn_paste.setStyleSheet(f"""
             QPushButton {{
-                background: white;
+                background: #F0F0F0;
                 color: {PREMIUM_COLORS['text_body']};
-                border: 1px solid {PREMIUM_COLORS['border']};
-                border-radius: 8px;
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 12px;
                 padding: 0 16px;
             }}
             QPushButton:hover {{
-                background: {PREMIUM_COLORS['background']};
-                border-color: {PREMIUM_COLORS['primary']};
+                background: #E0E0E0;
             }}
         """)
-        btn_add_single.clicked.connect(self.add_empty_row)
-        button_layout.addWidget(btn_add_single)
+        btn_paste.clicked.connect(self.paste_from_clipboard)
+        status_layout.addWidget(btn_paste)
         
+        input_layout.addLayout(status_layout)
+        
+        layout.addWidget(input_card, 1)
+        
+        # 底部按钮
+        button_layout = QHBoxLayout()
         button_layout.addStretch()
         
         btn_cancel = QPushButton("取消")
@@ -1119,7 +1030,8 @@ class SmartAddLinkDialog(QDialog):
         
         self.btn_save = QPushButton("保存全部")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save.setFixedSize(120, 40)
+        self.btn_save.setMinimumWidth(120)  # 使用最小宽度代替固定宽度
+        self.btn_save.setFixedHeight(40)
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
                 background: {PREMIUM_COLORS['primary']};
@@ -1127,6 +1039,7 @@ class SmartAddLinkDialog(QDialog):
                 border: none;
                 border-radius: 8px;
                 font-weight: 600;
+                padding: 0 16px;  # 增加内边距
             }}
             QPushButton:hover {{
                 background: #0056CC;
@@ -1144,75 +1057,55 @@ class SmartAddLinkDialog(QDialog):
         # 定时器用于防抖解析
         self.parse_timer = QTimer()
         self.parse_timer.setSingleShot(True)
+        self.parse_timer.timeout.connect(self.parse_content)
 
     def on_text_changed(self):
-        """文本变化时触发防抖解析（默认使用本地正则解析）"""
-        if self.ai_thread and self.ai_thread.isRunning():
-            return
-        
+        """文本变化时触发防抖解析"""
         self.parse_timer.stop()
-        
-        if not self.text_edit.toPlainText().strip():
-            self.result_list.clear()
-            return
-
-        try:
-            self.parse_timer.timeout.disconnect()
-        except:
-            pass
-            
-        # 默认使用本地正则解析，更快速
-        self.parse_timer.timeout.connect(self.parse_content_regex)
-        self.parse_timer.start(800)
+        self.parse_timer.start(500)
     
-    def start_ai_parse(self):
-        """开始 AI 解析"""
+    def paste_from_clipboard(self):
+        """从剪贴板粘贴"""
+        from PyQt6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        if text:
+            # 移动光标到末尾
+            self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+            
+            # 如果已有文本且不以换行符结尾，先添加换行符
+            current_text = self.text_edit.toPlainText()
+            if current_text and not current_text.endswith('\n'):
+                self.text_edit.insertPlainText('\n')
+                
+            # 插入文本
+            self.text_edit.insertPlainText(text)
+            
+    def parse_content(self):
+        """解析文本内容"""
         text = self.text_edit.toPlainText().strip()
         if not text:
-            show_warning(self, "提示", "请先粘贴文本")
+            self.parsed_links = []
+            self.update_status(0)
             return
             
-        self.btn_ai_parse.setEnabled(False)
-        self.btn_ai_parse.setText("🔄 正在解析...")
-        self.progress_bar.show()
-        
-        self.ai_thread = AIParseThread(text)
-        self.ai_thread.finished.connect(self.on_ai_parse_finished)
-        self.ai_thread.error.connect(self.on_ai_parse_error)
-        self.ai_thread.start()
-        
-    def on_ai_parse_finished(self, links):
-        """AI 解析完成"""
-        self.btn_ai_parse.setEnabled(True)
-        self.btn_ai_parse.setText("✨ DeepSeek 智能解析")
-        self.progress_bar.hide()
-        
-        if not links:
-            show_info(self, "提示", "未识别到有效的链接信息")
-            return
+        self.parsed_links = self.get_links_from_text(text)
+        self.update_status(len(self.parsed_links))
+
+    def update_status(self, count):
+        """更新状态显示"""
+        self.count_label.setText(f"解析结果：共找到 {count} 个链接")
+        self.btn_save.setEnabled(count > 0)
+        self.btn_save.setText(f"保存全部 ({count})")
             
-        self.populate_list(links)
-        show_info(self, "成功", f"AI 成功解析出 {len(links)} 个链接！")
-        
-    def on_ai_parse_error(self, error_msg):
-        """AI 解析出错"""
-        self.btn_ai_parse.setEnabled(True)
-        self.btn_ai_parse.setText("✨ DeepSeek 智能解析")
-        self.progress_bar.hide()
-        show_warning(self, "解析失败", f"AI 解析出错: {error_msg}\n请检查网络或配置。")
-    
-    def parse_content_regex(self):
-        """本地正则解析（快速预览）"""
-        text = self.text_edit.toPlainText()
+    def get_links_from_text(self, text):
+        """从文本中解析链接"""
         if not text:
-            return
+            return []
             
         url_pattern = r'https?://[a-zA-Z0-9\-._~:/?#[\]@!$&\'()*+,;=%]+'
         matches = list(re.finditer(url_pattern, text))
         
-        if not matches and self.result_list.row_count() > 0:
-            return
-
         links = []
         seen_urls = set()
         
@@ -1223,14 +1116,11 @@ class SmartAddLinkDialog(QDialog):
             seen_urls.add(url)
             
             start, end = match.span()
-            # context = text[max(0, start - 50):min(len(text), end + 50)]
-            
             name = self._extract_link_name(text, start, end)
-            
             category = self.guess_category(url)
             links.append({"name": name, "url": url, "category": category})
             
-        self.populate_list(links)
+        return links
     
     def _extract_link_name(self, text, url_start, url_end):
         """从文本中提取链接名称
@@ -1394,16 +1284,6 @@ class SmartAddLinkDialog(QDialog):
         
         return "新链接"
 
-    def populate_list(self, links):
-        """填充列表"""
-        self.result_list.clear()
-        
-        for link in links:
-            name = link.get('name', '')
-            url = link.get('url', '')
-            category = link.get('category', '其他')
-            self.result_list.add_row(name, url, category)
-
     def guess_category(self, url):
         """根据 URL 猜测分类 - 支持12个平台"""
         if "docs.qq.com" in url:
@@ -1412,7 +1292,7 @@ class SmartAddLinkDialog(QDialog):
             return "腾讯问卷"
         elif "shimo.im" in url:
             return "石墨文档"
-        elif "wjx.cn" in url:
+        elif "wjx.cn" in url or "wjx.top" in url:
             return "问卷星"
         elif "jsj.top" in url or "jinshuju.net" in url:
             return "金数据"
@@ -1428,7 +1308,7 @@ class SmartAddLinkDialog(QDialog):
             return "番茄表单"
         elif "credamo.com" in url:
             return "见数"
-        elif "mikecrm.com" in url:
+        elif "mikecrm.com" in url or "mike-x.com" in url:
             return "麦客表单"
         return "其他"
     
@@ -1439,6 +1319,7 @@ class SmartAddLinkDialog(QDialog):
             "wj.qq.com",         # 2. 腾讯问卷
             "shimo.im",          # 3. 石墨文档
             "wjx.cn",            # 4. 问卷星
+            "wjx.top",           # 4.1 问卷星
             "jsj.top",           # 5. 金数据
             "jinshuju.net",      # 5. 金数据（备用域名）
             "feishu.cn",         # 6. 飞书
@@ -1450,22 +1331,18 @@ class SmartAddLinkDialog(QDialog):
             "fanqier.cn",        # 10. 番茄表单
             "credamo.com",       # 11. 见数
             "mikecrm.com",       # 12. 麦客表单
+            "mike-x.com",        # 12.1 麦客企业版
         ]
         return any(domain in url for domain in supported_domains)
 
-    def add_empty_row(self):
-        """手动添加空行"""
-        self.result_list.add_row("", "", "其他")
-
-    def update_status(self, count):
-        """更新状态标签"""
-        self.count_label.setText(f"共找到 {count} 个链接")
-        self.btn_save.setEnabled(count > 0)
-
     def save_all(self):
         """保存所有链接"""
-        all_data = self.result_list.get_all_data()
+        # 确保解析的是最新内容
+        self.parse_content()
+        all_data = self.parsed_links
+        
         if not all_data:
+            show_warning(self, "提示", "未找到有效链接")
             return
         
         # 预检查：找出已存在和不支持的链接
@@ -1538,7 +1415,6 @@ class SmartAddLinkDialog(QDialog):
                         status='active',
                         description=f"批量导入更新 - {name}"
                     )
-                    print(f"更新已存在链接: {url}")
                     updated_count += 1
                 else:
                     self.db_manager.create_link(

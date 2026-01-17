@@ -702,6 +702,7 @@ class FixedTemplate(Document):
     field_value = StringField(default='', verbose_name="字段值")
     value_count = IntField(default=1, verbose_name="字段值数量")  # 字段值数量，默认为1
     placeholder = StringField(verbose_name="占位提示")  # 用于前端显示输入提示
+    value_placeholder_template = StringField(verbose_name="多值提示模板")  # 多值时的提示模板，支持 {index} 占位符，如 "粉丝数量 (值 {index})"
     category = StringField(default='通用', max_length=50, verbose_name="分类")
     description = StringField(verbose_name="说明")
     order = IntField(default=0, verbose_name="排序")

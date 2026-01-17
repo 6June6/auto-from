@@ -87,7 +87,7 @@ class HomeRecordRowWidget(QFrame):
     def __init__(self, record, parent=None):
         super().__init__(parent)
         self.record = record
-        self.setMinimumHeight(60)  # 改为最小高度，支持两行显示
+        self.setFixedHeight(48)  # 单行显示
         self.setStyleSheet("""
             HomeRecordRowWidget {
                 background: white;
@@ -128,30 +128,21 @@ class HomeRecordRowWidget(QFrame):
         card_label.setToolTip(card_name)
         layout.addWidget(card_label, 1)  # stretch=1
         
-        # 3. 链接 (自动扩展) - 显示名称 + 链接地址
-        link_display = "未知链接"
+        # 3. 链接 (自动扩展) - 只显示链接地址
+        link_url = "链接已删除"
         link_tooltip = "链接已删除"
         try:
             if self.record.link:
+                link_url = self.record.link.url or "未知链接"
                 link_name = self.record.link.name or ""
-                link_url = self.record.link.url or ""
-                # 同时显示名称和链接地址
-                if link_name.strip() and link_url.strip():
-                    link_display = f"{link_name}\n{link_url}"
-                elif link_name.strip():
-                    link_display = link_name
-                else:
-                    link_display = link_url
                 link_tooltip = f"{link_name}\n{link_url}" if link_name else link_url
         except Exception:
-            link_display = "链接已删除"
-            link_tooltip = "链接已删除"
+            pass
         
-        link_label = QLabel(link_display)
+        link_label = QLabel(link_url)
         link_label.setMinimumWidth(120)
-        link_label.setStyleSheet("color: #007AFF; font-size: 12px; line-height: 1.3;")
+        link_label.setStyleSheet("color: #007AFF; font-size: 12px;")
         link_label.setToolTip(link_tooltip)
-        link_label.setWordWrap(True)  # 允许换行
         layout.addWidget(link_label, 1)  # stretch=1
         
         # 4. 填写字段
@@ -168,7 +159,7 @@ class HomeRecordRowWidget(QFrame):
         success_label.setStyleSheet("color: #1D1D1F; font-size: 13px;")
         layout.addWidget(success_label, 0)
         
-        # 6. 状态
+        # 6. 状态 - 固定显示成功
         status_container = QWidget()
         status_container.setFixedWidth(HOME_RECORD_COLUMNS['status'])
         status_layout = QHBoxLayout(status_container)
@@ -176,26 +167,15 @@ class HomeRecordRowWidget(QFrame):
         status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         status_label = QLabel()
-        if self.record.success:
-            status_label.setText("✅ 成功")
-            status_label.setStyleSheet("""
-                color: #059669; 
-                background: #ecfdf5; 
-                padding: 4px 10px; 
-                border-radius: 12px; 
-                font-size: 12px; 
-                font-weight: 600;
-            """)
-        else:
-            status_label.setText("❌ 失败")
-            status_label.setStyleSheet("""
-                color: #dc2626; 
-                background: #fef2f2; 
-                padding: 4px 10px; 
-                border-radius: 12px; 
-                font-size: 12px; 
-                font-weight: 600;
-            """)
+        status_label.setText("✅ 成功")
+        status_label.setStyleSheet("""
+            color: #059669; 
+            background: #ecfdf5; 
+            padding: 4px 10px; 
+            border-radius: 12px; 
+            font-size: 12px; 
+            font-weight: 600;
+        """)
         status_layout.addWidget(status_label)
         layout.addWidget(status_container, 0)
 
@@ -543,6 +523,7 @@ class MultiCardFillWindow(QMainWindow):
         # 字段值输入框
         value_input = QLineEdit()
         value_input.setText(value)
+        value_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         value_input.setStyleSheet("""
             QLineEdit {
                 padding: 10px 12px;
@@ -568,14 +549,19 @@ class MultiCardFillWindow(QMainWindow):
 class AddCategoryDialog(QDialog):
     """新增分类对话框"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, default_name=""):
         super().__init__(parent)
         self.category_name = None
+        self.default_name = default_name
         self.init_ui()
     
     def init_ui(self):
         """初始化UI"""
-        self.setWindowTitle("新增分类")
+        # 根据是否有默认名称设置标题
+        if self.default_name:
+            self.setWindowTitle("重命名分类")
+        else:
+            self.setWindowTitle("新增分类")
         self.setFixedSize(400, 220)
         
         layout = QVBoxLayout()
@@ -592,6 +578,11 @@ class AddCategoryDialog(QDialog):
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("请输入分类名称")
         self.input_field.setMinimumHeight(44)
+        self.input_field.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
+        # 如果有默认名称，回显
+        if self.default_name:
+            self.input_field.setText(self.default_name)
+            self.input_field.selectAll()  # 全选文本，方便修改
         self.input_field.setStyleSheet("""
             QLineEdit {
                 padding: 0 15px;
@@ -720,6 +711,7 @@ class AddCardDialog(QDialog):
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("请输入")
         self.name_input.setMinimumHeight(42)
+        self.name_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         self.name_input.setStyleSheet("""
             QLineEdit {
                 padding: 10px 15px;
@@ -790,11 +782,6 @@ class AddCardDialog(QDialog):
         self.load_categories()
         
         # 右侧按钮
-        import_template_btn = QPushButton("导入官方模版")
-        import_template_btn.setMinimumHeight(42)
-        import_template_btn.setStyleSheet(self.get_button_style())
-        import_template_btn.clicked.connect(self.import_from_field_library)
-        
         new_field_btn = QPushButton("新增字段")
         new_field_btn.setMinimumHeight(42)
         new_field_btn.setStyleSheet(self.get_button_style())
@@ -802,7 +789,6 @@ class AddCardDialog(QDialog):
         
         category_layout.addWidget(category_label)
         category_layout.addWidget(self.category_combo, 1)
-        category_layout.addWidget(import_template_btn)
         category_layout.addWidget(new_field_btn)
         main_layout.addLayout(category_layout)
         
@@ -1004,7 +990,7 @@ class AddCardDialog(QDialog):
         if self.category_combo.count() == 0:
             self.category_combo.addItem("默认分类")
     
-    def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1):
+    def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None):
         """添加字段行
         
         Args:
@@ -1013,9 +999,10 @@ class AddCardDialog(QDialog):
             fixed_template_id: 固定模板ID
             placeholder: 占位提示
             value_count: 字段值数量（默认为1）
+            value_placeholder_template: 多值提示模板，支持 {index} 占位符
         """
         # 创建可拖拽的行组件
-        row_widget = DraggableFieldRow(key, value, self, fixed_template_id, placeholder, value_count)
+        row_widget = DraggableFieldRow(key, value, self, fixed_template_id, placeholder, value_count, value_placeholder_template)
         row_widget.setParent(self.fields_container)
         row_widget.show()
         
@@ -1114,6 +1101,7 @@ class AddCardDialog(QDialog):
         
         input_field = QLineEdit()
         input_field.setPlaceholderText("输入字段别名")
+        input_field.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         layout.addWidget(input_field)
         
         btn_layout = QHBoxLayout()
@@ -1346,15 +1334,34 @@ class AddCardDialog(QDialog):
             QMessageBox.warning(self, "提示", "请输入名片名称")
             return
         
-        # 收集字段（按顺序）
+        # 收集字段（按顺序）- 支持多个字段值
+        import json
         configs = []
         print(f"DEBUG: 准备复制名片，当前字段行数: {len(self.field_rows)}")
         
         for i, row_data in enumerate(self.field_rows):
             try:
                 key = row_data['key_input'].text().strip()
-                value = row_data['value_input'].text().strip()
-                print(f"  - 行 {i}: key='{key}', value='{value}'")
+                
+                # 收集所有字段值（与 save_card 方法保持一致）
+                widget = row_data['widget']
+                if hasattr(widget, 'get_all_values'):
+                    values = widget.get_all_values()
+                else:
+                    # 兼容旧代码
+                    values = [row_data['value_input'].text().strip()]
+                
+                # 处理值的存储格式
+                # 数据库 value 字段是 StringField，需要将多值序列化为 JSON 字符串
+                value_count = row_data.get('value_count', 1)
+                if value_count == 1:
+                    # 单值：直接保存字符串
+                    value = values[0] if values else ""
+                else:
+                    # 多值：序列化为 JSON 数组字符串（数据库只接受字符串）
+                    value = json.dumps(values, ensure_ascii=False)
+                
+                print(f"  - 行 {i}: key='{key}', value={value}, value_count={value_count}")
                 
                 if key:  # 只添加有字段名的
                     config = {"key": key, "value": value}
@@ -1362,6 +1369,9 @@ class AddCardDialog(QDialog):
                     template_id = row_data.get('fixed_template_id')
                     if template_id:
                         config['fixed_template_id'] = template_id
+                    # 保存字段值数量（仅当大于1时）
+                    if value_count > 1:
+                        config['value_count'] = value_count
                     configs.append(config)
             except RuntimeError:
                 print(f"  - 行 {i}: 组件已被删除，跳过")
@@ -1484,6 +1494,7 @@ class AddCardDialog(QDialog):
                     value = ""
                     fixed_template_id = None
                     placeholder = None
+                    value_placeholder_template = None  # 多值提示模板
                     value_count = 1  # 默认为1（兼容老版本）
                     has_value_count_in_config = False  # 标记配置中是否有 value_count
                     
@@ -1500,13 +1511,14 @@ class AddCardDialog(QDialog):
                         has_value_count_in_config = hasattr(config, 'value_count') and config.value_count is not None
                         value_count = getattr(config, 'value_count', 1) or 1
                     
-                    # 如果有固定模板ID，尝试获取placeholder
+                    # 如果有固定模板ID，尝试获取placeholder和value_placeholder_template
                     # 注意：value_count 只从配置获取，不再动态从模板获取（保证老数据兼容）
                     if fixed_template_id:
                         try:
                             template = self.db_manager.get_fixed_template_by_id(fixed_template_id)
                             if template:
                                 placeholder = template.placeholder
+                                value_placeholder_template = getattr(template, 'value_placeholder_template', None)
                         except Exception:
                             pass
                     
@@ -1527,7 +1539,7 @@ class AddCardDialog(QDialog):
                             # 解析失败，保持原字符串
                             pass
                     
-                    self.add_field_row(key, value, fixed_template_id, placeholder, value_count)
+                    self.add_field_row(key, value, fixed_template_id, placeholder, value_count, value_placeholder_template)
             except Exception as e:
                 print(f"解析配置失败: {e}")
 
@@ -1593,12 +1605,15 @@ class AddCardDialog(QDialog):
                 for template in templates:
                     # 获取字段值数量，默认为1
                     value_count = getattr(template, 'value_count', 1) or 1
+                    # 获取多值提示模板
+                    value_placeholder_template = getattr(template, 'value_placeholder_template', None)
                     self.add_field_row(
                         template.field_name,
                         template.field_value,
                         str(template.id),  # 固定模板ID
                         template.placeholder,  # 占位提示
-                        value_count  # 字段值数量
+                        value_count,  # 字段值数量
+                        value_placeholder_template  # 多值提示模板
                     )
                 print(f"DEBUG: 已加载 {len(templates)} 个固定模板")
             else:
@@ -1610,13 +1625,14 @@ class AddCardDialog(QDialog):
 class DraggableFieldRow(QWidget):
     """可拖拽的字段行 - 支持多个字段值"""
     
-    def __init__(self, key="", value="", parent_dialog=None, fixed_template_id=None, placeholder=None, value_count=1):
+    def __init__(self, key="", value="", parent_dialog=None, fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None):
         super().__init__()
         self.parent_dialog = parent_dialog
         self.dragging = False
         self.drag_start_pos = None
         self.fixed_template_id = fixed_template_id  # 固定模板ID，用户自己添加的为None
         self.placeholder = placeholder  # 占位提示
+        self.value_placeholder_template = value_placeholder_template  # 多值提示模板，支持 {index} 占位符
         self.value_count = max(1, value_count or 1)  # 字段值数量，至少为1
         self.value_inputs = []  # 存储多个值输入框
         self.init_ui(key, value)
@@ -1671,6 +1687,7 @@ class DraggableFieldRow(QWidget):
         self.key_input.setText(key)
         self.key_input.setPlaceholderText("请输入字段名")
         self.key_input.setMinimumHeight(38)
+        self.key_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         self.key_input.setStyleSheet("""
             QLineEdit {
                 padding: 8px 38px 8px 12px;
@@ -1802,10 +1819,27 @@ class DraggableFieldRow(QWidget):
         """创建字段值输入框"""
         value_input = QLineEdit()
         value_input.setText(value if value else "")
+        value_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         
         # 设置 Placeholder
         ph = self.placeholder or "请输入字段值"
-        if index > 1:
+        
+        # 尝试解析多值提示数组
+        placeholder_text = None
+        if self.value_placeholder_template:
+            import json
+            try:
+                placeholders = json.loads(self.value_placeholder_template)
+                if isinstance(placeholders, list) and index - 1 < len(placeholders) and placeholders[index - 1]:
+                    placeholder_text = placeholders[index - 1]
+            except:
+                # 兼容旧格式：支持 {index} 占位符
+                if "{index}" in self.value_placeholder_template:
+                    placeholder_text = self.value_placeholder_template.replace("{index}", str(index))
+        
+        if placeholder_text:
+            value_input.setPlaceholderText(placeholder_text)
+        elif index > 1:
             value_input.setPlaceholderText(f"{ph} (值 {index})")
         else:
             value_input.setPlaceholderText(ph)
@@ -2573,6 +2607,7 @@ class ChangePasswordDialog(QDialog):
         self.old_pwd.setEchoMode(QLineEdit.EchoMode.Password)
         self.old_pwd.setPlaceholderText("请输入当前密码")
         self.old_pwd.setMinimumHeight(40) # 设置输入框高度
+        self.old_pwd.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         layout.addWidget(self.old_pwd)
         
         # 新密码
@@ -2581,6 +2616,7 @@ class ChangePasswordDialog(QDialog):
         self.new_pwd.setEchoMode(QLineEdit.EchoMode.Password)
         self.new_pwd.setPlaceholderText("请输入新密码")
         self.new_pwd.setMinimumHeight(40) # 设置输入框高度
+        self.new_pwd.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         layout.addWidget(self.new_pwd)
         
         # 确认密码
@@ -2589,6 +2625,7 @@ class ChangePasswordDialog(QDialog):
         self.confirm_pwd.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_pwd.setPlaceholderText("请再次输入新密码")
         self.confirm_pwd.setMinimumHeight(40) # 设置输入框高度
+        self.confirm_pwd.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         layout.addWidget(self.confirm_pwd)
         
         layout.addStretch()
@@ -2997,6 +3034,7 @@ class FieldLibraryImportDialog(QDialog):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 搜索字段...")
         self.search_input.setMinimumHeight(38)
+        self.search_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         self.search_input.setStyleSheet("""
             QLineEdit {
                 padding: 8px 12px;
@@ -3437,9 +3475,9 @@ class AllRecordsDialog(QDialog):
             item_fill.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 4, item_fill)
             
-            # 状态
-            status_item = QTableWidgetItem("✅ 成功" if record.success else "❌ 失败")
-            status_item.setForeground(Qt.GlobalColor.green if record.success else Qt.GlobalColor.red)
+            # 状态 - 固定显示成功
+            status_item = QTableWidgetItem("✅ 成功")
+            status_item.setForeground(Qt.GlobalColor.green)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 5, status_item)
         
@@ -4442,6 +4480,7 @@ class MainWindow(QMainWindow):
         # 添加窗口配置选项
         self.window_actions = []
         for cols, label, icon in [
+            (2, "⊞  一行 2 个", "fa5s.th-large"),
             (3, "⊞  一行 3 个", "fa5s.th-large"),
             (4, "⊞  一行 4 个", "fa5s.th-large"),
         ]:
@@ -4464,18 +4503,79 @@ class MainWindow(QMainWindow):
         # 弹性空间，将后面的按钮推到右侧
         top_btns_layout.addStretch()
         
-        # 通告广场（靠右）
-        plaza_btn = QPushButton("通告广场")
-        plaza_btn.setStyleSheet(orange_btn_style)
-        plaza_btn.clicked.connect(self.open_notice_plaza)
-        top_btns_layout.addWidget(plaza_btn)
+        # 通告广场 + 开始填充 组合控件 - 精美胶囊设计
+        action_container = QWidget()
+        action_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FFFFFF, stop:1 #F8F9FA);
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+            }
+        """)
+        action_layout = QHBoxLayout(action_container)
+        action_layout.setContentsMargins(2, 2, 2, 2)
+        action_layout.setSpacing(0)
         
-        # 开始填充（靠右）
+        # 通告广场按钮 - 橙色主题（默认选中样式）
+        plaza_btn = QPushButton("通告广场")
+        plaza_btn.setFixedHeight(30)
+        plaza_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        plaza_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #F59E0B, stop:1 #D97706);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FBBF24, stop:1 #F59E0B);
+            }
+            QPushButton:pressed {
+                background: #B45309;
+            }
+        """)
+        plaza_btn.clicked.connect(self.open_notice_plaza)
+        action_layout.addWidget(plaza_btn)
+        
+        # 分隔线
+        action_sep = QFrame()
+        action_sep.setFixedSize(1, 20)
+        action_sep.setStyleSheet("background: #E0E0E0;")
+        action_layout.addWidget(action_sep)
+        
+        # 开始填充按钮 - 绿色主题（默认选中样式）
         start_fill_btn = QPushButton("开始填充")
+        start_fill_btn.setFixedHeight(30)
         start_fill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        start_fill_btn.setStyleSheet(orange_btn_style)
+        start_fill_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #10B981, stop:1 #059669);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #34D399, stop:1 #10B981);
+            }
+            QPushButton:pressed {
+                background: #047857;
+            }
+        """)
         start_fill_btn.clicked.connect(self.start_auto_fill)
-        top_btns_layout.addWidget(start_fill_btn)
+        action_layout.addWidget(start_fill_btn)
+        
+        top_btns_layout.addWidget(action_container)
         
         layout.addLayout(top_btns_layout)
         
@@ -4513,30 +4613,50 @@ class MainWindow(QMainWindow):
         # 复制
         btn_copy = create_tool_btn(Icons.copy('#007AFF'), '#007AFF', "复制选中链接", self.copy_selected_links)
         
-        # 新增链接按钮 (右侧) - 文字按钮
+        # 新增链接按钮 (右侧) - 精美胶囊设计
+        add_link_container = QWidget()
+        add_link_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FFFFFF, stop:1 #F8F9FA);
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+            }
+        """)
+        add_link_layout = QHBoxLayout(add_link_container)
+        add_link_layout.setContentsMargins(2, 2, 2, 2)
+        add_link_layout.setSpacing(0)
+        
         btn_add_link = QPushButton("新增链接")
+        btn_add_link.setFixedHeight(30)
         btn_add_link.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_add_link.setStyleSheet("""
             QPushButton {
-                background: #34C759;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #34C759, stop:1 #28A745);
                 color: white;
                 border: none;
                 border-radius: 6px;
                 padding: 6px 14px;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background: #2DB84D;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4ADE80, stop:1 #34C759);
+            }
+            QPushButton:pressed {
+                background: #1E7E34;
             }
         """)
         btn_add_link.clicked.connect(self.open_link_manager)
+        add_link_layout.addWidget(btn_add_link)
         
         action_bar.addWidget(btn_select)
         action_bar.addWidget(btn_delete)
         action_bar.addWidget(btn_copy)
         action_bar.addStretch()
-        action_bar.addWidget(btn_add_link)
+        action_bar.addWidget(add_link_container)
         
         layout.addLayout(action_bar)
         
@@ -4999,17 +5119,13 @@ class MainWindow(QMainWindow):
     def show_contact_info(self):
         """显示联系客服信息"""
         wechat = SystemConfig.get('CONTACT_WECHAT', 'your_wechat_id')
-        email = SystemConfig.get('CONTACT_EMAIL', 'your_email@example.com')
-        phone = SystemConfig.get('CONTACT_PHONE', '138-0000-0000')
         work_hours = SystemConfig.get('CONTACT_WORK_HOURS', '周一至周五 9:00-18:00')
         
         QMessageBox.information(
             self,
             "联系客服",
             "请通过以下方式联系客服续费：\n\n"
-            f"📱 微信：{wechat}\n"
-            f"📧 邮箱：{email}\n"
-            f"📞 电话：{phone}\n\n"
+            f"📱 微信：{wechat}\n\n"
             f"工作时间：{work_hours}"
         )
 
@@ -5033,7 +5149,7 @@ class MainWindow(QMainWindow):
             ("名片总数", stats['total_cards'], 'fa5s.address-card', "#007AFF", ""),
             ("链接总数", stats['total_links'], 'fa5s.link', "#34C759", f"活跃 {active_links}" if active_links > 0 else ""),
             ("今日新增通告", today_notices, 'fa5s.bullhorn', "#5856D6", f"{today_notices} 条"),
-            ("本月新增", "9999+", 'fa5s.fire', "#FF9500", "通告数据")
+            ("月更新通告", "9999+", 'fa5s.fire', "#FF9500", "通告数据")
         ]
         
         for label, value, icon, color, subtext in stat_items:
@@ -5329,23 +5445,42 @@ class MainWindow(QMainWindow):
             self.links_list.setItemWidget(item, row_widget)
             
     def create_link_row_widget(self, index, link):
-        """创建链接列表行组件"""
-        widget = QWidget()
+        """创建链接列表行组件 - 点击整行可选中"""
+        
+        # 自定义可点击的行组件
+        class ClickableRowWidget(QWidget):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.checkbox = None
+                self.link_data = None
+                
+            def mousePressEvent(self, event):
+                # 点击整行切换复选框状态
+                if self.checkbox and event.button() == Qt.MouseButton.LeftButton:
+                    self.checkbox.setChecked(not self.checkbox.isChecked())
+                super().mousePressEvent(event)
+        
+        widget = ClickableRowWidget()
         widget.setMinimumHeight(44)
+        widget.setCursor(Qt.CursorShape.PointingHandCursor)
         widget.setStyleSheet("""
-            QWidget {
+            ClickableRowWidget {
                 border-bottom: 1px solid #EEEEEE;
                 background: transparent;
+                border-radius: 6px;
+            }
+            ClickableRowWidget:hover {
+                background: #F5F7FA;
             }
         """)
         layout = QHBoxLayout()
-        layout.setContentsMargins(0, 8, 4, 8)  # 左边距减少到0
-        layout.setSpacing(8)  # 减少间距
+        layout.setContentsMargins(8, 8, 4, 8)
+        layout.setSpacing(8)
         widget.setLayout(layout)
         
         # 序号
         index_label = QLabel(str(index))
-        index_label.setFixedWidth(20)  # 序号宽度略微减少
+        index_label.setFixedWidth(20)
         index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         index_label.setStyleSheet("color: #606266; font-weight: bold;")
         layout.addWidget(index_label)
@@ -5372,22 +5507,20 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(checkbox)
         
-        # 链接显示 - 名称 + URL，自动撑满
-        # 优先显示标题，如果没有标题则只显示 URL
-        if link.name and link.name.strip():
-            display_text = f"{link.name}"
-        else:
-            display_text = link.url
-            
-        link_label = QLabel(display_text)
+        # 链接显示 - 只显示URL，固定宽度，超出省略号
+        link_label = QLabel()
+        link_label.setFixedWidth(280)
         link_label.setStyleSheet("""
             color: #409EFF;
             font-size: 13px;
         """)
-        link_label.setToolTip(f"{link.name}\n{link.url}")  # ToolTip显示完整信息
-        # 设置文本省略模式
+        link_label.setToolTip(f"{link.name}\n{link.url}" if link.name else link.url)
         link_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(link_label, 1)  # stretch=1 让链接撑满剩余空间
+        # 使用省略号显示
+        font_metrics = link_label.fontMetrics()
+        elided_text = font_metrics.elidedText(link.url, Qt.TextElideMode.ElideRight, 270)
+        link_label.setText(elided_text)
+        layout.addWidget(link_label, 1)
         
         # 复制按钮
         copy_btn = QPushButton()
@@ -5410,11 +5543,10 @@ class MainWindow(QMainWindow):
                 background: #D9ECFF;
             }
         """)
-        # 使用 functools.partial 或 lambda 绑定参数
         copy_btn.clicked.connect(lambda checked, u=link.url: self.copy_link_url(u))
         layout.addWidget(copy_btn)
         
-        # 将 checkbox 绑定到 widget 属性，方便后续获取状态
+        # 将 checkbox 绑定到 widget 属性
         widget.checkbox = checkbox
         widget.link_data = link
         
@@ -5908,15 +6040,14 @@ class MainWindow(QMainWindow):
         """重命名分类"""
         from database.models import Card, Category
         
-        new_name, ok = QInputDialog.getText(
-            self,
-            "重命名分类",
-            "请输入新的分类名称:",
-            QLineEdit.EchoMode.Normal,
-            old_name
-        )
+        # 使用自定义对话框替代 QInputDialog
+        dialog = AddCategoryDialog(self, default_name=old_name)
+        if not dialog.exec():
+            return
         
-        if ok and new_name.strip() and new_name.strip() != old_name:
+        new_name = dialog.get_category_name()
+        
+        if new_name and new_name.strip() and new_name.strip() != old_name:
             new_name = new_name.strip()
             
             # 检查新名称是否已存在

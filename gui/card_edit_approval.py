@@ -950,15 +950,10 @@ class MessageCenterDialog(QDialog):
         return card
     
     def handle_message_click(self, notification: Notification):
-        """处理消息点击"""
+        """处理消息点击 - 点击单条不标记已读，只有点击全部已读才标记"""
         # 根据类型处理点击
         if notification.type == 'card_edit' and notification.related_id:
-            # 标记为已读
-            if not notification.is_read:
-                DatabaseManager.mark_notification_read(str(notification.id))
-                notification.is_read = True
-                self.load_messages()
-                
+            # 不再自动标记已读，只打开详情
             request = DatabaseManager.get_card_edit_request_by_id(notification.related_id)
             if request:
                 dialog = CardEditApprovalDialog(request, self)
@@ -968,24 +963,18 @@ class MessageCenterDialog(QDialog):
                 QMessageBox.warning(self, "提示", "该请求已不存在或已被删除")
         
         elif notification.type == 'field_push' and notification.related_id:
-            # 对于字段推送，只有未读的才弹出确认框
-            if not notification.is_read:
-                # 延迟导入避免循环依赖
-                from .main_window import FieldPushReceivedDialog
-                
-                dialog = FieldPushReceivedDialog(notification, self.parent())
-                if dialog.exec():
-                    # 用户已处理，刷新列表
-                    self.load_messages()
-            else:
-                QMessageBox.information(self, "提示", "此字段推送已处理")
+            # 对于字段推送，弹出确认框（处理后在对话框内部标记已读）
+            # 延迟导入避免循环依赖
+            from .main_window import FieldPushReceivedDialog
+            
+            dialog = FieldPushReceivedDialog(notification, self.parent())
+            if dialog.exec():
+                # 用户已处理，刷新列表
+                self.load_messages()
         
         else:
-            # 其他类型消息仅标记已读
-            if not notification.is_read:
-                DatabaseManager.mark_notification_read(str(notification.id))
-                notification.is_read = True
-                self.load_messages()
+            # 其他类型消息：点击不标记已读，只显示提示
+            QMessageBox.information(self, "消息详情", f"{notification.title}\n\n{notification.content}")
     
     def mark_all_read(self):
         """全部已读"""

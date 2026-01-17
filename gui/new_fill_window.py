@@ -5641,9 +5641,9 @@ class NewFillWindow(QDialog):
         """检测表单类型"""
         if 'docs.qq.com/form' in url:
             return 'tencent_docs'
-        elif 'mikecrm.com' in url:
+        elif 'mikecrm.com' in url or 'mike-x.com' in url:
             return 'mikecrm'
-        elif 'wjx.cn' in url:
+        elif 'wjx.cn' in url or 'wjx.top' in url:
             return 'wjx'
         elif 'jsj.top' in url or 'jinshuju.net' in url:
             return 'jinshuju'
@@ -6122,6 +6122,19 @@ class NewFillWindow(QDialog):
         const cleanKey = cleanText(cardFieldKey);
         const cleanValue = cleanText(cardFieldValue || '');
         
+        // 【优化】优先判断表单标题的主要类型，避免附加说明干扰
+        // 例如："联系电话（可添加微信）" 应该被识别为电话字段，而不是微信字段
+        const phoneKeywordsInTitle = ['电话', '手机', '手机号', '电话号码', '联系电话', '固话'];
+        const titleIsPhoneField = phoneKeywordsInTitle.some(w => cleanTitle.includes(w));
+        const phoneKeywordsInKey = ['电话', '手机', '手机号', '电话号码', '联系电话', '固话', '联系方式'];
+        const keyIsPhoneField = phoneKeywordsInKey.some(w => cleanKey.includes(w));
+        
+        // 如果表单标题明确是电话字段，且名片key也是电话相关，则允许匹配
+        if (titleIsPhoneField && keyIsPhoneField) {{
+            console.log(`   ✅ 电话字段优先匹配: 表单"${{formFieldTitle}}" vs 名片"${{cardFieldKey}}"`);
+            return true;
+        }}
+        
         // 定义互斥字段组
         const incompatiblePairs = [
             // 电话/手机/固话 不应匹配到地址、姓名、其他非电话数据
@@ -6133,9 +6146,9 @@ class NewFillWindow(QDialog):
             // 姓名 不应匹配到地址、电话
             [['姓名', '名字', '收货人', '联系人'], 
              ['地址', '街道', '省市区', '电话', '手机', '固话', '河南', '河北']],
-            // 微信 不应匹配到地址、电话
+            // 微信 不应匹配到地址、电话（但如果表单标题同时包含电话关键词，跳过此规则）
             [['微信', '微信号', 'wx', 'vx'], 
-             ['地址', '街道', '省市区', '收货', '电话', '手机', '固话', '可以', '是否']],
+             ['地址', '街道', '省市区', '收货', '可以', '是否']],  // 移除对电话/手机的互斥，由优先判断逻辑处理
             // ID/账号 不应匹配到地址、电话
             [['id', '账号', '抖音id', '小红书id'], 
              ['地址', '街道', '省市区', '电话', '手机', '固话', '收货', '可以', '是否']],
@@ -7441,7 +7454,7 @@ class NewFillWindow(QDialog):
     // </fieldset>
     function getInputIdentifiers(input, inputIndex) {{
         const identifiers = [];
-        const MAX_LABEL_LENGTH = 50;
+        const MAX_LABEL_LENGTH = 150;
         
         // 辅助函数：添加标识符（带去重和优先级）
         function addIdentifier(text, priority = 0) {{
@@ -8690,7 +8703,7 @@ class NewFillWindow(QDialog):
     // </div>
     function getInputIdentifiers(input) {{
         const identifiers = [];
-        const MAX_LABEL_LENGTH = 50;
+        const MAX_LABEL_LENGTH = 150;
         
         // 辅助函数：添加标识符（带去重和清理）
         function addIdentifier(text, priority = 0) {{
@@ -9253,6 +9266,19 @@ class NewFillWindow(QDialog):
         const cleanKey = cleanText(cardFieldKey);
         const cleanValue = cleanText(cardFieldValue || '');
         
+        // 【优化】优先判断表单标题的主要类型，避免附加说明干扰
+        // 例如："联系电话（可添加微信）" 应该被识别为电话字段，而不是微信字段
+        const phoneKeywordsInTitle = ['电话', '手机', '手机号', '电话号码', '联系电话', '固话'];
+        const titleIsPhoneField = phoneKeywordsInTitle.some(w => cleanTitle.includes(w));
+        const phoneKeywordsInKey = ['电话', '手机', '手机号', '电话号码', '联系电话', '固话', '联系方式'];
+        const keyIsPhoneField = phoneKeywordsInKey.some(w => cleanKey.includes(w));
+        
+        // 如果表单标题明确是电话字段，且名片key也是电话相关，则允许匹配
+        if (titleIsPhoneField && keyIsPhoneField) {{
+            console.log(`   ✅ 电话字段优先匹配: 表单"${{formFieldTitle}}" vs 名片"${{cardFieldKey}}"`);
+            return true;
+        }}
+        
         // 定义互斥字段组：[表单字段关键词组, 名片字段关键词组]
         // 如果表单字段包含组1的词，而名片key或value包含组2的词，则不兼容
         const incompatiblePairs = [
@@ -9265,9 +9291,9 @@ class NewFillWindow(QDialog):
             // 姓名 vs 地址/电话
             [['姓名', '名字', '收货人', '联系人'], 
              ['地址', '街道', '省市区', '电话', '手机', '固话', '河南', '河北']],
-            // 微信 vs 电话/地址
+            // 微信 vs 地址（但如果表单标题同时包含电话关键词，跳过此规则）
             [['微信', '微信号', 'wx', 'vx'], 
-             ['地址', '街道', '省市区', '收货', '电话', '手机', '固话', '可以', '是否']],
+             ['地址', '街道', '省市区', '收货', '可以', '是否']],  // 移除对电话/手机的互斥，由优先判断逻辑处理
             // ID vs 地址/电话
             [['id', '账号', '抖音id', '小红书id'], 
              ['地址', '街道', '省市区', '电话', '手机', '固话', '可以', '是否']],
@@ -10171,22 +10197,26 @@ class NewFillWindow(QDialog):
     
     // 【核心】WPS表单专用：精确提取输入框对应的问题标识
     // WPS表单结构：
-    // <div class="ksapc-form-container-write">...</div>
-    // OR <div class="rc-component ...">...</div> (f.wps.cn)
+    // <div class="ksapc-form-container-write">
+    //   <div class="ksapc-theme-back">
+    //     问题标题文本
+    //     <input />
+    //   </div>
+    // </div>
     function getInputIdentifiers(input, inputIndex) {{
         const identifiers = [];
-        const MAX_LABEL_LENGTH = 100;
+        const MAX_LABEL_LENGTH = 150;
         
         // 辅助函数：添加标识符（带去重和优先级）
         function addIdentifier(text, priority = 0) {{
             if (!text) return;
             let cleaned = text.trim();
-            // 去除序号前缀（如 "01."、"1."、"1、"、"1 "等）
-            cleaned = cleaned.replace(/^[\d\s\.\、\*\-]+/, '').trim();
+            // 去除序号前缀（如 "01."、"1."等）
+            cleaned = cleaned.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
+            // 去除多余空白和特殊符号
+            cleaned = cleaned.replace(/^[\\s*]+|[\\s*]+$/g, '').trim();
             // 去除必填标记
-            cleaned = cleaned.replace(/[\*必填]/g, '').trim();
-            // 去除多余空白
-            cleaned = cleaned.replace(/\s+/g, ' ').trim();
+            cleaned = cleaned.replace(/[\\*必填]/g, '').trim();
             
             if (cleaned && cleaned.length > 0 && cleaned.length <= MAX_LABEL_LENGTH) {{
                 if (!identifiers.some(item => item.text === cleaned)) {{
@@ -10195,94 +10225,103 @@ class NewFillWindow(QDialog):
             }}
         }}
         
-        // 【方法1 - 最高优先级】WPS表单专用：查找容器 (ksapc 或 rc-component)
-        // f.wps.cn 常使用 rc-component 或 generic divs
-        let container = input.closest('.ksapc-theme-back, [class*="ksapc"], [class*="form-item"], [class*="question"], [class*="component"], .question-box, [role="group"]');
-        
+        // 【方法1 - 最高优先级】WPS表单专用：查找问题容器
+        // 注意：必须精确匹配问题容器，不能用 [class*="ksapc"] 因为会匹配到输入框本身的容器
+        let container = input.closest('.ksapc-questions-write-container');
+        if (!container) {{
+            // 备用：尝试其他可能的容器
+            container = input.closest('.ksapc-theme-back, [class*="form-item"], [class*="question-container"]');
+        }}
+        console.log(`[WPS DEBUG] 输入框#${{inputIndex + 1}} 容器: ${{container ? container.className : '未找到'}}`);
         if (container) {{
-            // 1.1 查找特定的标题元素
-            const titleEl = container.querySelector('[class*="title"], [class*="label"], [class*="header"], h2, h3, h4, strong, b');
-            if (titleEl) {{
-                const titleText = (titleEl.innerText || titleEl.textContent || '').trim();
-                if (titleText) {{
-                    addIdentifier(titleText, 100);
-                    console.log(`[WPS] 标题元素匹配: "${{titleText}}"`);
-                }}
-            }}
-            
-            // 1.2 提取容器中的纯文本（排除 input 自身和按钮）
-            let containerText = '';
-            // 遍历所有子节点提取文本
-            function traverse(node) {{
-                // 遇到 input 自身跳过
-                if (node === input) return;
+            // 【WPS专用】精确查找标题元素 - ksapc-question-title-title 是纯净标题
+            const wpsTitleEl = container.querySelector('.ksapc-question-title-title, pre.ksapc-question-title-title');
+            console.log(`[WPS DEBUG] 标题元素: ${{wpsTitleEl ? wpsTitleEl.className : '未找到'}}`);
+            if (wpsTitleEl) {{
+                let titleText = (wpsTitleEl.innerText || wpsTitleEl.textContent || '').trim();
+                console.log(`[WPS DEBUG] 原始标题文本: "${{titleText}}"`);
                 
-                // 遇到干扰标签跳过
-                if (node.nodeType === Node.ELEMENT_NODE) {{
-                    const tagName = node.tagName;
-                    if (['BUTTON', 'SCRIPT', 'STYLE', 'SVG', 'PATH', 'NOSCRIPT', 'IFRAME', 'SELECT', 'OPTION'].includes(tagName)) return;
-                    
-                    // 检查 hidden
-                    const style = window.getComputedStyle(node);
-                    if (style.display === 'none' || style.visibility === 'hidden') return;
-
-                    // 遇到特定干扰文本跳过
-                     const text = node.innerText || node.textContent || '';
-                    if (text.includes('提交') || text.includes('取消') || (text.includes('登录') && text.length < 10)) return;
+                // 【优化】如果标题包含多个空格，说明有额外的说明文字，只取第一部分
+                if (titleText.includes('   ') || titleText.includes('  ')) {{
+                    titleText = titleText.split(/\s{{2,}}/)[0].trim();
+                    console.log(`[WPS DEBUG] 清理后标题: "${{titleText}}"`);
                 }}
-
-                if (node.nodeType === Node.TEXT_NODE) {{
-                    const val = node.textContent.trim();
-                    if (val) {{
-                        containerText += val + ' ';
-                    }}
-                }} else if (node.nodeType === Node.ELEMENT_NODE) {{
-                    // 不再跳过包含 input 的节点，而是深入遍历
-                    // node.childNodes 是实时的，且是有序的
-                    Array.from(node.childNodes).forEach(child => traverse(child));
+                
+                if (titleText && titleText.length <= MAX_LABEL_LENGTH) {{
+                    addIdentifier(titleText, 100);  // WPS纯净标题最高优先级
+                    console.log(`[WPS] ✅ 精确标题匹配: "${{titleText}}"`);
                 }}
             }}
-            // 遍历容器的直接子节点
-            container.childNodes.forEach(child => traverse(child));
             
-            if (containerText.trim()) {{
-                // 分割多行文本，分别添加
-                const lines = containerText.split(/[\n\r]+/);
-                lines.forEach(line => {{
-                    if (line.trim().length > 1) {{
-                        addIdentifier(line.trim(), 95);
-                    }}
-                }});
-                if (lines.length === 0 && containerText.trim()) {{
-                     addIdentifier(containerText.trim(), 95);
+            // 【WPS专用】查找序号元素
+            const indexEl = container.querySelector('.ksapc-question-title-index');
+            if (indexEl && wpsTitleEl) {{
+                const indexText = (indexEl.innerText || indexEl.textContent || '').trim();
+                const titleText = (wpsTitleEl.innerText || wpsTitleEl.textContent || '').trim();
+                const fullTitle = indexText + titleText;
+                if (fullTitle && fullTitle.length <= MAX_LABEL_LENGTH) {{
+                    addIdentifier(fullTitle, 95);  // 带序号的完整标题
                 }}
-                console.log(`[WPS] 容器文本匹配: "${{containerText.trim().substring(0, 30)}}..."`);
+            }}
+            
+            // 【通用备用】如果WPS专用选择器没找到，尝试通用选择器
+            if (identifiers.length === 0) {{
+                const titleEl = container.querySelector('[class*="title-title"], [class*="label"], label, h3, h4');
+                if (titleEl) {{
+                    let titleText = (titleEl.innerText || titleEl.textContent || '').trim();
+                    // 如果标题包含换行，只取第一行
+                    if (titleText.includes('\\n')) {{
+                        titleText = titleText.split('\\n')[0].trim();
+                    }}
+                    const cleanTitle = titleText.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
+                    if (cleanTitle && cleanTitle.length <= MAX_LABEL_LENGTH) {{
+                        addIdentifier(cleanTitle, 90);
+                        console.log(`[WPS] 通用标题匹配: "${{cleanTitle}}"`);
+                    }}
+                }}
+            }}
+            
+            // 【兜底】提取容器中的直接文本节点
+            if (identifiers.length === 0) {{
+                const titleContainer = container.querySelector('.ksapc-question-title');
+                if (titleContainer) {{
+                    // 遍历直接子节点，找到包含标题的文本
+                    for (const child of titleContainer.querySelectorAll('*')) {{
+                        const text = (child.innerText || child.textContent || '').trim();
+                        // 跳过备注（note）和过长文本
+                        if (child.className && child.className.includes('note')) continue;
+                        if (text && text.length > 0 && text.length <= 50 && !text.includes('[填')) {{
+                            const cleanTitle = text.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
+                            if (cleanTitle) {{
+                                addIdentifier(cleanTitle, 85);
+                                console.log(`[WPS] 兜底标题匹配: "${{cleanTitle}}"`);
+                                break;
+                            }}
+                        }}
+                    }}
+                }}
             }}
         }}
         
-        // 【方法2】通用向上查找 (Backup)
-        let parent = input.parentElement;
-        for (let depth = 0; depth < 6 && parent; depth++) {{
-            // 查找标题元素
-            const titleEl = parent.querySelector(':scope > [class*="title"], :scope > [class*="label"], :scope > h3, :scope > h4');
-            if (titleEl) {{
-                addIdentifier(titleEl.innerText || titleEl.textContent, 90 - depth * 5);
-            }}
-            
-            // 查找前置兄弟元素 (Title usually comes before Input)
-            let sibling = parent.previousElementSibling;
-            if (sibling) {{
-                // 检查兄弟是否包含文本
-                const text = sibling.innerText || sibling.textContent || '';
-                if (text && text.length < MAX_LABEL_LENGTH && text.length > 1) {{
-                    addIdentifier(text, 85 - depth * 5);
+        // 【方法2】向上查找包含问题标题的容器
+        if (identifiers.length === 0) {{
+            let parent = input.parentElement;
+            for (let depth = 0; depth < 8 && parent; depth++) {{
+                const titleEl = parent.querySelector(':scope > h2, :scope > h3, :scope > h4, :scope [class*="title"], :scope [class*="label"]');
+                if (titleEl) {{
+                    const text = (titleEl.innerText || titleEl.textContent || '').trim();
+                    const cleanedText = text.replace(/^\\d{{1,2}}\\.\\s*\\*?\\s*/, '').trim();
+                    if (cleanedText && cleanedText.length <= MAX_LABEL_LENGTH) {{
+                        addIdentifier(cleanedText, 90);
+                        console.log(`[WPS] 向上查找匹配: "${{cleanedText}}"`);
+                        break;
+                    }}
                 }}
+                parent = parent.parentElement;
             }}
-            
-            parent = parent.parentElement;
         }}
         
-        // 【方法3】aria-labelledby
+        // 【方法3】aria-labelledby 属性
         const ariaLabelledBy = input.getAttribute('aria-labelledby');
         if (ariaLabelledBy) {{
             ariaLabelledBy.split(' ').forEach(id => {{
@@ -10300,10 +10339,25 @@ class NewFillWindow(QDialog):
             }});
         }}
         
-        // 【方法5】属性
+        // 【方法5】placeholder、title、aria-label 基础属性
         if (input.placeholder) addIdentifier(input.placeholder, 70);
         if (input.title) addIdentifier(input.title, 70);
         if (input.getAttribute('aria-label')) addIdentifier(input.getAttribute('aria-label'), 70);
+        
+        // 【方法6】前置兄弟元素（作为兜底）
+        let sibling = input.previousElementSibling;
+        for (let i = 0; i < 3 && sibling; i++) {{
+            if (sibling.tagName === 'H2' || sibling.tagName === 'H3' || 
+                sibling.tagName === 'LABEL' || sibling.className.includes('title') || 
+                sibling.className.includes('label')) {{
+                const text = (sibling.innerText || sibling.textContent || '').trim();
+                if (text && text.length <= MAX_LABEL_LENGTH) {{
+                    addIdentifier(text, 60);
+                    break;
+                }}
+            }}
+            sibling = sibling.previousElementSibling;
+        }}
         
         // 按优先级排序
         identifiers.sort((a, b) => {{
@@ -10402,6 +10456,75 @@ class NewFillWindow(QDialog):
         return false;
     }}
     
+    // 【新增】检测字段类型互斥（如"链接"类字段不应匹配"ID"类或"点赞"类卡片）
+    function areFieldsIncompatible(formField, cardKey) {{
+        const cleanForm = cleanText(formField);
+        const cleanCard = cleanText(cardKey);
+        
+        // 定义字段类型关键词组
+        const fieldTypes = {{
+            链接: ['链接', '主页链接', '账号链接', '蒲公英链接'],
+            ID: ['id', 'ID', '账号id', '主页id', '平台id'],
+            点赞: ['点赞', '赞藏', '获赞', '收藏', '互动', '赞'],
+            粉丝: ['粉丝', '粉丝数', '粉丝量'],
+            名字: ['名字', '昵称', '名称', '账号名'],
+            价格: ['价格', '报价', '报备', '返点'],
+            电话: ['电话', '手机', '联系方式', '手机号'],
+            微信: ['微信', 'wx', 'vx', '微信号'],
+        }};
+        
+        // 判断字段属于哪种类型
+        function getFieldType(text) {{
+            for (const [type, keywords] of Object.entries(fieldTypes)) {{
+                for (const kw of keywords) {{
+                    if (text.includes(kw)) return type;
+                }}
+            }}
+            return null;
+        }}
+        
+        const formType = getFieldType(cleanForm);
+        const cardType = getFieldType(cleanCard);
+        
+        // 定义互斥的类型对
+        const incompatibleTypes = [
+            ['链接', 'ID'],
+            ['链接', '点赞'],
+            ['链接', '粉丝'],
+            ['链接', '价格'],
+            ['链接', '电话'],
+            ['链接', '微信'],
+            ['ID', '链接'],
+            ['ID', '点赞'],
+            ['ID', '粉丝'],
+            ['ID', '名字'],
+            ['点赞', '链接'],
+            ['点赞', 'ID'],
+            ['点赞', '粉丝'],
+            ['粉丝', '链接'],
+            ['粉丝', 'ID'],
+            ['粉丝', '点赞'],
+            ['名字', 'ID'],
+            ['名字', '链接'],
+            ['电话', '链接'],
+            ['电话', 'ID'],
+            ['微信', '链接'],
+            ['微信', 'ID'],
+        ];
+        
+        // 检查是否互斥
+        if (formType && cardType && formType !== cardType) {{
+            for (const [type1, type2] of incompatibleTypes) {{
+                if (formType === type1 && cardType === type2) {{
+                    console.log(`[WPS] ⚠️ 字段类型互斥: 表单"${{formField}}"(${{formType}}) vs 卡片"${{cardKey}}"(${{cardType}})`);
+                    return true;
+                }}
+            }}
+        }}
+        
+        return false;
+    }}
+    
     // 计算最长连续公共子串长度
     function longestCommonSubstring(s1, s2) {{
         const m = s1.length, n = s2.length;
@@ -10447,11 +10570,12 @@ class NewFillWindow(QDialog):
                 const cleanIdentifierNoPrefix = cleanTextNoPrefix(identifier);
                 if (!cleanIdentifier) continue;
                 
-                // 【新增】反义词冲突检测 - 如果存在冲突则跳过此匹配
+                // 【保留】反义词冲突检测 - 只检测明确的反义词（如"非报备" vs "报备"）
                 if (hasNegationConflict(subKey, cleanIdentifier)) {{
-                    console.log(`[WPS] 跳过冲突匹配: 名片"${{subKey}}" vs 表单"${{cleanIdentifier}}"`);
+                    console.log(`[WPS] 跳过反义词冲突: 名片"${{subKey}}" vs 表单"${{cleanIdentifier}}"`);
                     continue;
                 }}
+                // 注意：移除了字段类型互斥检测，依靠完全匹配的高分自然选择最佳匹配
                 
                 const identifierCoreWords = extractCoreWords(identifier);
                 let currentScore = 0;
