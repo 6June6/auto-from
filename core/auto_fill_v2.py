@@ -64,7 +64,9 @@ class AutoFillEngineV2:
     // 获取输入框的所有可能标识 - 麦客CRM增强版
     function getInputIdentifiers(input) {{
         const identifiers = [];
-        const MAX_LABEL_LENGTH = 100;
+        // ⚡️ 修复：将最大长度从100降低到30，避免多个字段名连接成的长字符串被添加
+        // 这种长字符串会导致核心词匹配产生意外的高分
+        const MAX_LABEL_LENGTH = 30;
         
         // 辅助函数：添加标识符（带去重和清理）
         function addIdentifier(text, priority = 0) {{
@@ -78,6 +80,13 @@ class AutoFillEngineV2:
             if (cleaned === '.') return;
             // 去除多余空白
             cleaned = cleaned.replace(/\\s+/g, ' ').trim();
+            
+            // ⚡️ 修复：过滤掉包含多个空格的标识符（可能是多个字段名连接）
+            const spaceCount = (cleaned.match(/\\s/g) || []).length;
+            if (spaceCount > 2) {{
+                // 超过2个空格的标识符很可能是多个字段名连接，跳过
+                return;
+            }}
             
             if (cleaned && cleaned.length > 0 && cleaned.length <= MAX_LABEL_LENGTH) {{
                 // 去重
@@ -101,38 +110,48 @@ class AutoFillEngineV2:
             }});
         }}
         
-        // 1. 【麦客CRM增强】查找 .ReactModalPortal 或 .formMiddle 容器中的标签
-        let formContainer = input.closest('.formMiddle, .handleForm, .wrapper, [class*="form-item"], [class*="field"]');
-        if (formContainer) {{
+        // 1. 【麦客CRM增强】查找直接包含该输入框的最小容器中的标签
+        // ⚡️ 关键修复：只查找只包含当前输入框（不包含其他输入框）的容器
+        let formItemContainer = null;
+        let parent = input.parentElement;
+        let depth = 0;
+        while (parent && depth < 6) {{
+            // 检查这个容器是否只包含当前这一个输入框
+            const inputsInParent = parent.querySelectorAll('input, textarea');
+            if (inputsInParent.length === 1 && inputsInParent[0] === input) {{
+                // 这是直接包含该输入框的容器
+                formItemContainer = parent;
+            }} else if (inputsInParent.length > 1) {{
+                // 包含多个输入框，停止向上查找
+                break;
+            }}
+            parent = parent.parentElement;
+            depth++;
+        }}
+        
+        if (formItemContainer) {{
             // 查找标签元素（麦客CRM可能使用多种class名称）
             const labelSelectors = [
-                'label',
-                '.form-label',
-                '[class*="label"]',
-                '[class*="title"]',
-                'div[role="heading"]',
-                'h3',
-                'h4'
+                ':scope > label',
+                ':scope > .form-label',
+                ':scope > [class*="label"]',
+                ':scope > p > span',
+                ':scope > p',
+                ':scope > div > label'
             ];
             
             for (const selector of labelSelectors) {{
-                const labelEl = formContainer.querySelector(selector);
+                const labelEl = formItemContainer.querySelector(selector);
                 if (labelEl && labelEl !== input && !labelEl.contains(input)) {{
                     const text = (labelEl.innerText || labelEl.textContent || '').trim();
-                    addIdentifier(text, 95);
-                    console.log(`[麦客] 容器标签找到: "${{text}}" (选择器: ${{selector}})`);
-                    break;
+                    // 过滤掉太长的文本（可能是多个字段的组合）
+                    if (text && text.length > 0 && text.length <= 20) {{
+                        addIdentifier(text, 95);
+                        console.log(`[麦客] 容器标签找到: "${{text}}" (选择器: ${{selector}})`);
+                        break;
+                    }}
                 }}
             }}
-            
-            // 【关键】查找带图标的输入框结构：图标 + 文本可能在同一个父容器中
-            // 麦客CRM结构：<div class="xxx"><i class="icon"></i><span>标签文本</span><input></div>
-            const iconSiblings = formContainer.querySelectorAll('i + span, i + div, svg + span, svg + div, [class*="icon"] + span, [class*="icon"] + div');
-            iconSiblings.forEach(el => {{
-                const text = (el.innerText || el.textContent || '').trim();
-                addIdentifier(text, 90);
-                console.log(`[麦客] 图标后文本找到: "${{text}}"`);
-            }});
         }}
         
         // 2. Label 标签
@@ -162,45 +181,61 @@ class AutoFillEngineV2:
             addIdentifier(input.placeholder, 70);
         }}
         
-        // 6. 【麦客CRM增强】向上查找包含标签的父元素（扩大搜索范围）
-        let parent = input.parentElement;
-        let depth = 0;
-        while (parent && depth < 8) {{  // 增加深度到8层
-            // 查找父元素中的 label 或标题元素
-            const labelEl = parent.querySelector(':scope > label, :scope > div > label, :scope [class*="label"]:not(input), :scope [class*="title"]:not(input)');
-            if (labelEl && labelEl !== input && !labelEl.contains(input)) {{
-                const text = (labelEl.innerText || labelEl.textContent || '').trim();
-                addIdentifier(text, 75 - depth * 5);
-                console.log(`[麦客] 父元素[${{depth}}]标签找到: "${{text}}"`);
-            }}
-            
-            // 【关键优化】获取父元素的直接文本内容（排除子元素的文本）
-            let directText = '';
-            Array.from(parent.childNodes).forEach(node => {{
-                if (node.nodeType === Node.TEXT_NODE) {{
-                    const txt = node.textContent.trim();
-                    if (txt && txt.length > 0 && txt.length < 100) {{
-                        directText += txt + ' ';
-                    }}
-                }} else if (node.nodeType === Node.ELEMENT_NODE && node !== input && !node.contains(input)) {{
-                    // 获取不包含input的兄弟元素的文本（可能是图标后的标签）
-                    const tagName = node.tagName.toLowerCase();
-                    if (tagName === 'span' || tagName === 'div' || tagName === 'label') {{
-                        const txt = (node.innerText || node.textContent || '').trim();
-                        if (txt && txt.length > 0 && txt.length < 100) {{
+        // 6. 【麦客CRM增强】向上查找包含标签的父元素
+        // ⚡️ 关键修复：如果已经找到了有效的主标识符，就不再向上遍历
+        // 这样可以避免找到整个表单容器中其他字段的标签（如"主页名称"）
+        if (identifiers.length === 0) {{
+            let parent = input.parentElement;
+            let depth = 0;
+            while (parent && depth < 5) {{  // 减少深度到5层，避免遍历到表单容器
+                // 检查是否已经遍历到了表单级别的容器，如果是就停止
+                const parentClasses = parent.className || '';
+                if (parentClasses.includes('form') || parentClasses.includes('wrapper') || 
+                    parent.tagName === 'FORM' || parent.querySelectorAll('input, textarea').length > 1) {{
+                    // 这是表单容器，停止遍历
+                    console.log(`[麦客] 到达表单容器，停止向上遍历`);
+                    break;
+                }}
+                
+                // 查找父元素中的 label 或标题元素
+                const labelEl = parent.querySelector(':scope > label, :scope > div > label, :scope [class*="label"]:not(input), :scope [class*="title"]:not(input)');
+                if (labelEl && labelEl !== input && !labelEl.contains(input)) {{
+                    const text = (labelEl.innerText || labelEl.textContent || '').trim();
+                    addIdentifier(text, 75 - depth * 5);
+                    console.log(`[麦客] 父元素[${{depth}}]标签找到: "${{text}}"`);
+                    // ⚡️ 找到一个有效标签后就停止
+                    break;
+                }}
+                
+                // 获取父元素的直接文本内容（排除子元素的文本）
+                let directText = '';
+                Array.from(parent.childNodes).forEach(node => {{
+                    if (node.nodeType === Node.TEXT_NODE) {{
+                        const txt = node.textContent.trim();
+                        if (txt && txt.length > 0 && txt.length < 50) {{
                             directText += txt + ' ';
                         }}
+                    }} else if (node.nodeType === Node.ELEMENT_NODE && node !== input && !node.contains(input)) {{
+                        const tagName = node.tagName.toLowerCase();
+                        if (tagName === 'span' || tagName === 'div' || tagName === 'label') {{
+                            const txt = (node.innerText || node.textContent || '').trim();
+                            if (txt && txt.length > 0 && txt.length < 50) {{
+                                directText += txt + ' ';
+                            }}
+                        }}
                     }}
+                }});
+                
+                if (directText.trim()) {{
+                    addIdentifier(directText.trim(), 70 - depth * 5);
+                    console.log(`[麦客] 父元素[${{depth}}]直接文本: "${{directText.trim()}}"`);
+                    // ⚡️ 找到有效文本后就停止
+                    break;
                 }}
-            }});
-            
-            if (directText.trim()) {{
-                addIdentifier(directText.trim(), 70 - depth * 5);
-                console.log(`[麦客] 父元素[${{depth}}]直接文本: "${{directText.trim()}}"`);
+                
+                parent = parent.parentElement;
+                depth++;
             }}
-            
-            parent = parent.parentElement;
-            depth++;
         }}
         
         // 7. 前置兄弟元素（包括图标和文本）
@@ -316,119 +351,108 @@ class AutoFillEngineV2:
         return maxLen;
     }}
     
-    // 匹配关键词（增强版：动态覆盖率评分系统）
-    function matchKeyword(identifiers, keyword) {{
-        if (!keyword) return {{ matched: false, identifier: null, score: 0 }};
+    // ═══════════════════════════════════════════════════════════════
+    // 匹配关键词（简化版 - 按报名工具规则，直接找最高匹配度，无互斥逻辑）
+    // ═══════════════════════════════════════════════════════════════
+    function matchKeyword(identifiers, cardKey) {{
+        if (!cardKey) return {{ matched: false, identifier: null, score: 0 }};
         
-        const cleanKeyword = cleanText(keyword);
-        if (!cleanKeyword) return {{ matched: false, identifier: null, score: 0 }};
-        
-        const cleanKeywordNoPrefix = cleanTextNoPrefix(keyword);
-        
-        // 分割成子关键词
-        const subKeywords = splitKeywords(keyword).map(k => cleanText(k)).filter(k => k);
-        if (subKeywords.length === 0) subKeywords.push(cleanKeyword);
-        
-        const subKeywordsNoPrefix = splitKeywords(keyword).map(k => cleanTextNoPrefix(k)).filter(k => k);
-        if (subKeywordsNoPrefix.length === 0) subKeywordsNoPrefix.push(cleanKeywordNoPrefix);
+        // 分割名片key为子关键词
+        const cardKeywords = splitKeywords(cardKey).map(k => cleanText(k)).filter(k => k);
+        if (cardKeywords.length === 0) return {{ matched: false, identifier: null, score: 0 }};
         
         let bestScore = 0;
         let bestIdentifier = null;
         let bestSubKey = null;
         
-        for (let i = 0; i < subKeywords.length; i++) {{
-            const subKey = subKeywords[i];
-            const subKeyNoPrefix = subKeywordsNoPrefix[i] || subKey;
-            const subKeyCoreWords = extractCoreWords(subKey);
+        // 遍历每个表单标识符
+        for (const identifier of identifiers) {{
+            const cleanId = cleanText(identifier);
+            if (!cleanId || cleanId.length < 1) continue;
             
-            for (const identifier of identifiers) {{
-                const cleanIdentifier = cleanText(identifier);
-                const cleanIdentifierNoPrefix = cleanTextNoPrefix(identifier);
-                if (!cleanIdentifier) continue;
+            // 遍历每个名片子关键词，计算匹配分数
+            for (const ckw of cardKeywords) {{
+                if (!ckw || ckw.length < 1) continue;
                 
-                const identifierCoreWords = extractCoreWords(identifier);
                 let currentScore = 0;
                 
                 // 1. 完全匹配（100分）
-                if (cleanIdentifier === subKey) {{
+                if (cleanId === ckw) {{
                     currentScore = 100;
                 }}
-                // 2. 去前缀后完全匹配（98分）
-                else if (subKeyNoPrefix && cleanIdentifier === subKeyNoPrefix) {{
-                    currentScore = 98;
+                // 2. 表单标签包含名片子关键词（60-99分）
+                else if (ckw.length >= 2 && cleanId.includes(ckw)) {{
+                    const coverage = ckw.length / cleanId.length;
+                    currentScore = 60 + Math.floor(coverage * 39);
                 }}
-                // 3. 表单标签包含名片key（50-95分）
-                else if (cleanIdentifier.includes(subKey) && subKey.length >= 2) {{
-                    const coverage = subKey.length / cleanIdentifier.length;
-                    if (coverage >= 0.8) {{
-                        currentScore = 95;
-                    }} else if (coverage >= 0.5) {{
-                        currentScore = 50 + (coverage * 45);
-                    }} else {{
-                        currentScore = 50 + (coverage * 40);
-                    }}
+                // 3. 名片子关键词包含表单标签（60-99分）
+                else if (cleanId.length >= 2 && ckw.includes(cleanId)) {{
+                    const coverage = cleanId.length / ckw.length;
+                    currentScore = 60 + Math.floor(coverage * 39);
                 }}
-                // 4. 去前缀后的包含匹配
-                else if (subKeyNoPrefix && cleanIdentifier.includes(subKeyNoPrefix) && subKeyNoPrefix.length >= 2) {{
-                    const coverage = subKeyNoPrefix.length / cleanIdentifier.length;
-                    if (coverage >= 0.8) {{
-                        currentScore = 93;
-                    }} else {{
-                        currentScore = 48 + (coverage * 40);
-                    }}
-                }}
-                // 5. 名片key包含表单标签（反向包含）
-                else if (subKey.includes(cleanIdentifier) && cleanIdentifier.length >= 2) {{
-                    if (subKeyNoPrefix === cleanIdentifier) {{
-                        currentScore = 96;
-                    }} else {{
-                        const coverage = cleanIdentifier.length / (subKeyNoPrefix.length || subKey.length);
-                        currentScore = 55 + (coverage * 35);
-                    }}
-                }}
-                // 6. 去前缀版本的反向包含
-                else if (subKeyNoPrefix && subKeyNoPrefix.includes(cleanIdentifierNoPrefix) && cleanIdentifierNoPrefix.length >= 2) {{
-                    const coverage = cleanIdentifierNoPrefix.length / subKeyNoPrefix.length;
-                    currentScore = 53 + (coverage * 35);
-                }}
-                // 7. 核心词匹配
-                else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
-                    const commonCoreWords = subKeyCoreWords.filter(w => identifierCoreWords.includes(w));
-                    if (commonCoreWords.length > 0) {{
-                        const coreMatchRatio = commonCoreWords.length / Math.max(subKeyCoreWords.length, identifierCoreWords.length);
-                        
-                        if (commonCoreWords.length === subKeyCoreWords.length && 
-                            commonCoreWords.length === identifierCoreWords.length) {{
-                            currentScore = 88;
-                        }} else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1) {{
-                            currentScore = 80;
-                        }} else {{
-                            currentScore = 55 + Math.floor(coreMatchRatio * 25);
-                        }}
-                    }}
-                }}
-                // 8. 最长公共子串匹配（兜底）
-                else if (subKey.length >= 2 && cleanIdentifier.length >= 2) {{
-                    const lcs = longestCommonSubstring(subKey, cleanIdentifier);
-                    const maxLen = Math.max(subKey.length, cleanIdentifier.length);
-                    const minLen = Math.min(subKey.length, cleanIdentifier.length);
+                // 4. 核心词匹配（70-90分）- 要求核心词完全相同
+                else {{
+                    const idCoreWords = extractCoreWords(cleanId);
+                    const ckwCoreWords = extractCoreWords(ckw);
                     
-                    if (lcs >= 2) {{
-                        const coverage = lcs / maxLen;
-                        const matchRate = lcs / minLen;
+                    if (idCoreWords.length > 0 && ckwCoreWords.length > 0) {{
+                        const commonCore = idCoreWords.filter(w => ckwCoreWords.includes(w));
                         
-                        if (matchRate >= 0.6 && lcs >= 3) {{
-                            currentScore = 30 + (coverage * 20) + (matchRate * 15);
-                        }} else if (matchRate >= 0.5 && lcs >= 2) {{
-                            currentScore = 25 + (coverage * 15) + (matchRate * 10);
+                        if (commonCore.length > 0) {{
+                            const matchRatio = commonCore.length / Math.max(idCoreWords.length, ckwCoreWords.length);
+                            
+                            // 核心词完全相同
+                            if (commonCore.length === idCoreWords.length && 
+                                commonCore.length === ckwCoreWords.length) {{
+                                currentScore = 90;
+                            }}
+                            // 单核心词匹配
+                            else if (idCoreWords.length === 1 && ckwCoreWords.length === 1) {{
+                                currentScore = 85;
+                            }}
+                            // 部分核心词匹配
+                            else {{
+                                currentScore = 70 + Math.floor(matchRatio * 20);
+                            }}
                         }}
+                    }}
+                }}
+                
+                // 5. LCS匹配（兜底，30-70分）
+                if (currentScore === 0 && ckw.length >= 2 && cleanId.length >= 2) {{
+                    const lcs = longestCommonSubstring(cleanId, ckw);
+                    if (lcs >= 2) {{
+                        const maxLen = Math.max(cleanId.length, ckw.length);
+                        const coverage = lcs / maxLen;
+                        if (coverage >= 0.5) {{
+                            currentScore = 30 + Math.floor(coverage * 40);
+                        }}
+                    }}
+                }}
+                
+                // ⚡️ 否定词不匹配惩罚：
+                // 如果表单字段和名片字段的否定状态不一致，大幅降低分数
+                // 例如："报备" vs "非报备/不报备" 应该不匹配
+                if (currentScore > 0) {{
+                    const negationPatterns = ['非', '不', '无', '否', '未'];
+                    const idHasNegation = negationPatterns.some(neg => cleanId.includes(neg));
+                    const ckwHasNegation = negationPatterns.some(neg => ckw.includes(neg));
+                    
+                    // 检查是否是关键业务词的否定形式
+                    const businessKeywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发'];
+                    const hasBusinessKeyword = businessKeywords.some(bk => cleanId.includes(bk) || ckw.includes(bk));
+                    
+                    if (hasBusinessKeyword && idHasNegation !== ckwHasNegation) {{
+                        // 否定状态不一致，大幅降低分数
+                        console.log(`[否定词惩罚] "${{cleanId}}" vs "${{ckw}}": 否定状态不一致，分数从${{currentScore}}降为0`);
+                        currentScore = 0;
                     }}
                 }}
                 
                 if (currentScore > bestScore) {{
                     bestScore = currentScore;
                     bestIdentifier = identifier;
-                    bestSubKey = subKey;
+                    bestSubKey = ckw;
                 }}
             }}
         }}
@@ -525,6 +549,9 @@ class AutoFillEngineV2:
         console.log(`页面URL: ${{window.location.href}}`);
         console.log(`页面标题: ${{document.title}}`);
         
+        // ⚡️ 添加详细日志收集
+        const matchLogs = [];
+        
         // 等待输入框加载
         const hasInputs = await waitForInputs();
         
@@ -535,7 +562,8 @@ class AutoFillEngineV2:
                 totalCount: fillData.length,
                 success: false,
                 error: '未找到任何输入框',
-                results: []
+                results: [],
+                matchLogs: []
             }};
         }}
         
@@ -569,6 +597,13 @@ class AutoFillEngineV2:
             }}
             console.log(`   🔍 匹配过程:`);
             
+            // ⚡️ 为每个表单字段创建日志条目
+            const fieldLog = {{
+                formField: mainTitle,
+                identifiers: identifiers.slice(0, 5),
+                candidates: []
+            }};
+            
             // 收集所有匹配结果用于排序显示
             const allMatches = [];
             
@@ -587,6 +622,16 @@ class AutoFillEngineV2:
                     matchedKey: matchResult.matchedKey
                 }});
                 
+                // ⚡️ 记录分数>0的匹配候选
+                if (matchResult.score > 0) {{
+                    fieldLog.candidates.push({{
+                        cardKey: item.key.substring(0, 40),
+                        score: matchResult.score,
+                        matchedSubKey: matchResult.matchedKey,
+                        matchedIdentifier: matchResult.identifier
+                    }});
+                }}
+                
                 if (matchResult.matched && matchResult.score > bestMatch.score) {{
                     bestMatch = {{ 
                         item: item, 
@@ -596,6 +641,9 @@ class AutoFillEngineV2:
                     }};
                 }}
             }});
+            
+            // ⚡️ 按分数排序候选
+            fieldLog.candidates.sort((a, b) => b.score - a.score);
             
             // 按分数排序，只打印分数>0的匹配（最多显示前5个）
             allMatches.sort((a, b) => b.score - a.score);
@@ -629,12 +677,24 @@ class AutoFillEngineV2:
                         score: bestMatch.score,
                         success: true
                     }});
+                    // ⚡️ 记录选中结果
+                    fieldLog.selected = {{
+                        cardKey: bestMatch.item.key.substring(0, 40),
+                        value: String(bestMatch.item.value).substring(0, 30),
+                        score: bestMatch.score
+                    }};
                 }} else {{
                     console.warn(`   ⚠️ 填充失败（输入框可能是只读）`);
+                    fieldLog.selected = null;
+                    fieldLog.error = '填充失败（输入框可能是只读）';
                 }}
             }} else {{
                 console.log(`   ❌ 未匹配 (最高分: ${{bestMatch.score ? bestMatch.score.toFixed(1) : '0'}}, 需要>=50)`);
+                fieldLog.selected = null;
             }}
+            
+            // ⚡️ 添加到日志
+            matchLogs.push(fieldLog);
         }});
         
         // 记录未匹配的名片字段
@@ -658,12 +718,13 @@ class AutoFillEngineV2:
             console.log(`✅ 所有名片字段都已使用`);
         }}
         
-        // 返回结果
+        // 返回结果（包含详细匹配日志）
         const result = {{
             fillCount: fillCount,
             totalCount: allInputs.length,
             success: fillCount > 0,
-            results: results
+            results: results,
+            matchLogs: matchLogs
         }};
         
         console.log('\\n═══════════════════════════════════════════════════════════════');

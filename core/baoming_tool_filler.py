@@ -106,18 +106,24 @@ class BaomingToolAPI:
         """
         try:
             url = f"{self.BASE_URL}/enroll_web/v1/pc_code"
+            print(f"  📡 [API] GET {url}")
             response = self.session.get(url, timeout=10)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             if data.get('sta') == 0:
                 qr_data = data.get('data', {})
                 qrcode = qr_data.get('qrcode', '')
                 code = qr_data.get('code', '')
+                print(f"  📡 [API] 获取二维码成功, code={code[:20]}...")
                 return True, qrcode, code
             else:
+                print(f"  📡 [API] 获取二维码失败: {data.get('msg')}")
                 return False, data.get('msg', '获取二维码失败'), None
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return False, f"请求失败: {str(e)}", None
     
     def poll_login_status(self, code: str) -> Tuple[int, str, Optional[Dict]]:
@@ -138,8 +144,11 @@ class BaomingToolAPI:
                 'code': code,
                 'source': 'h5'
             }
+            print(f"  📡 [API] GET {url}?code={code[:20]}...&source=h5")
             response = self.session.get(url, params=params, timeout=10)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             sta = data.get('sta', -99)
             msg = data.get('msg', '')
@@ -148,13 +157,16 @@ class BaomingToolAPI:
                 user_data = data.get('data', {})
                 self.access_token = user_data.get('access_token')
                 self.user_info = user_data
+                print(f"  📡 [API] 登录成功, 用户: {user_data.get('uname', '未知')}, token={self.access_token[:20] if self.access_token else 'None'}...")
                 return 0, '登录成功', user_data
             elif sta == -1:
                 return -1, '等待扫码...', None
             else:
+                print(f"  📡 [API] 登录失败: {msg}")
                 return sta, msg, None
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return -99, f"请求失败: {str(e)}", None
     
     def get_short_detail(self) -> Tuple[bool, str, Optional[Dict]]:
@@ -165,6 +177,7 @@ class BaomingToolAPI:
             Tuple[bool, str, Optional[Dict]]: (成功标志, 消息, 详情数据)
         """
         if not self.eid:
+            print(f"  📡 [API] get_short_detail 缺少eid")
             return False, '缺少eid', None
             
         try:
@@ -172,16 +185,22 @@ class BaomingToolAPI:
             params = {
                 'eid': self.eid
             }
+            print(f"  📡 [API] GET {url}?eid={self.eid}")
             response = self.session.get(url, params=params, timeout=10)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             if data.get('msg') == 'ok' or data.get('sta') == 0:
                 detail = data.get('data', {})
+                print(f"  📡 [API] 获取简要信息成功, 标题: {detail.get('title', detail.get('sign_name', ''))[:30]}")
                 return True, '获取成功', detail
             else:
+                print(f"  📡 [API] 获取简要信息失败: {data.get('msg')}")
                 return False, data.get('msg', '获取简要信息失败'), None
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return False, f"请求失败: {str(e)}", None
     
     def get_enroll_detail(self) -> Tuple[bool, str, Optional[str]]:
@@ -192,6 +211,7 @@ class BaomingToolAPI:
             Tuple[bool, str, Optional[str]]: (成功标志, 消息, info_id)
         """
         if not self.eid or not self.access_token:
+            print(f"  📡 [API] get_enroll_detail 缺少eid或access_token")
             return False, '缺少eid或access_token', None
             
         try:
@@ -202,23 +222,29 @@ class BaomingToolAPI:
                 'referer': '',
                 'spider': 'h5'
             }
+            print(f"  📡 [API] GET {url}?eid={self.eid}&access_token={self.access_token[:20]}...")
             response = self.session.get(url, params=params, timeout=10)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             if data.get('sta') == 0:
                 detail = data.get('data', {})
                 info_id = detail.get('info_id')
                 if info_id:
                     self.info_id = info_id
+                    print(f"  📡 [API] 获取报名详情成功, info_id={info_id}")
                     return True, '获取成功', self.info_id
                 else:
                     # API 返回成功但没有 info_id，说明用户未报名过
-                    print(f"  ⚠️ [报名工具] detail 中没有 info_id，用户可能未报名过")
+                    print(f"  📡 [API] detail 中没有 info_id，用户可能未报名过")
                     return False, '未找到已有报名记录', None
             else:
+                print(f"  📡 [API] 获取报名详情失败: {data.get('msg')}")
                 return False, data.get('msg', '获取详情失败'), None
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return False, f"请求失败: {str(e)}", None
     
     def get_form_fields(self) -> Tuple[bool, str, Optional[List[Dict]]]:
@@ -229,6 +255,7 @@ class BaomingToolAPI:
             Tuple[bool, str, Optional[List[Dict]]]: (成功标志, 消息, 字段列表)
         """
         if not self.eid or not self.access_token:
+            print(f"  📡 [API] get_form_fields 缺少eid或access_token")
             return False, '缺少eid或access_token', None
             
         try:
@@ -237,17 +264,26 @@ class BaomingToolAPI:
                 'access_token': self.access_token,
                 'eid': self.eid
             }
+            print(f"  📡 [API] GET {url}?eid={self.eid}&access_token={self.access_token[:20]}...")
             response = self.session.get(url, params=params, timeout=10)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             if data.get('sta') == 0:
                 form_data = data.get('data', {})
                 req_info = form_data.get('req_info', [])
+                print(f"  📡 [API] 获取表单字段成功, 共 {len(req_info)} 个字段")
+                # 打印每个字段名
+                for i, field in enumerate(req_info):
+                    print(f"       字段{i+1}: {field.get('field_name', '未知')}")
                 return True, '获取成功', req_info
             else:
+                print(f"  📡 [API] 获取表单字段失败: {data.get('msg')}")
                 return False, data.get('msg', '获取表单字段失败'), None
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return False, f"请求失败: {str(e)}", None
     
     def submit_form(self, form_data: List[Dict]) -> Tuple[bool, str]:
@@ -383,17 +419,22 @@ class BaomingToolAPI:
                 'from': 'xcx'
             }
             
-            print(f"  📤 [报名工具] 调用更新接口...")
+            print(f"  📡 [API] POST {update_url}")
+            print(f"  📡 [API] 请求参数: info_id={self.info_id}, access_token={self.access_token[:20]}..., 表单字段数={len(form_data)}")
             response = self.session.post(update_url, json=update_payload, headers=headers, timeout=15)
+            print(f"  📡 [API] 响应状态码: {response.status_code}")
             data = response.json()
+            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
             
             if data.get('sta') == 0:
-                print(f"  ✅ [报名工具] 更新接口调用成功")
+                print(f"  📡 [API] 更新接口调用成功")
                 return True, '提交成功'
             else:
+                print(f"  📡 [API] 更新接口调用失败: {data.get('msg')}")
                 return False, data.get('msg', '提交失败')
                 
         except Exception as e:
+            print(f"  📡 [API] 请求异常: {e}")
             return False, f"请求失败: {str(e)}"
 
 
@@ -749,134 +790,19 @@ class BaomingToolFiller:
                     dp[i][j] = 0
         return max_len
 
-    def _has_negation_conflict(self, text1: str, text2: str) -> bool:
-        """检测反义词冲突（如"非报备" vs "报备"）"""
-        clean1 = self._clean_text(text1)
-        clean2 = self._clean_text(text2)
-        
-        # 定义反义词对
-        negation_pairs = [
-            ['非报备', '报备'],
-            ['非授权', '授权'],
-            ['非视频', '视频'],
-            ['非图文', '图文'],
-            ['不报备', '报备'],
-            ['无授权', '授权'],
-            ['非独家', '独家'],
-            ['税前', '税后'],
-            ['含税', '不含税']
-        ]
-        
-        for negative, positive in negation_pairs:
-            # 检测：一方包含"非X"，另一方包含"X"但不包含"非X"
-            has1_negative = negative in clean1
-            has2_negative = negative in clean2
-            has1_positive = positive in clean1 and not has1_negative
-            has2_positive = positive in clean2 and not has2_negative
-            
-            # 如果一方是否定形式，另一方是肯定形式，则存在冲突
-            if (has1_negative and has2_positive) or (has2_negative and has1_positive):
-                # print(f"     🚫 [冲突] \"{text1}\" vs \"{text2}\" ({negative}/{positive})")
-                return True
-        return False
-
-    def _are_fields_compatible(self, form_field: str, card_field: str) -> bool:
-        """互斥字段检测"""
-        clean_form = self._clean_text(form_field)
-        clean_card = self._clean_text(card_field)
-        
-        # --- 1. 微信相关特殊处理 (优先处理) ---
-        # 解决 微信名 vs 微信号、微信ID vs 微信昵称 等复杂情况
-        is_form_wechat = any(k in clean_form for k in ['微信', 'wx', 'vx'])
-        
-        if is_form_wechat:
-            # A. 表单是 微信名/昵称 类
-            if any(k in clean_form for k in ['名', '昵称']):
-                # 互斥：ID类 (号, id, 账号)
-                # 但要注意：如果名片也是 Name 类 (如 "微信名")，则不互斥
-                # 只有当名片是纯 ID 类时才互斥
-                # ⚡️ 修正：将 "微信", "wx", "vx" 也视为 ID 特征，除非它包含 "名/昵称"
-                is_card_id = any(k in clean_card for k in ['号', 'id', '账号', 'wx', 'vx']) or clean_card == '微信'
-                is_card_name = any(k in clean_card for k in ['名', '昵称'])
-                
-                if is_card_id and not is_card_name:
-                    return False
-                    
-                # 互斥：明显非微信的字段
-                if any(k in clean_card for k in ['地址', '电话', '手机', '邮箱', '链接', '主页']):
-                    return False
-                    
-                return True
-                
-            # B. 表单是 微信ID/账号 类 (默认为此)
-            else:
-                # 互斥：Name 类 (名, 昵称)
-                # 只有当名片明确是 Name 类时才互斥
-                is_card_name = any(k in clean_card for k in ['名', '昵称'])
-                if is_card_name:
-                    return False
-                    
-                # 互斥：明显非微信的字段
-                if any(k in clean_card for k in ['地址', '电话', '手机', '邮箱', '链接', '主页']):
-                    return False
-                    
-                return True
-
-        # --- 2. 通用互斥组 (非微信字段) ---
-        incompatible_pairs = [
-            # 电话 vs 地址/姓名/其他
-            (['电话', '手机', '联系方式', '固话'], 
-             ['地址', '收货', '街道', '姓名', '昵称', '名字', '省', '市', '区', '微信', '账号', 'id', '邮箱']),
-            # 地址 vs 电话
-            (['地址', '收货', '街道', '所在地', '地区'], 
-             ['电话', '手机', '固话', '微信', '账号', 'id', '粉丝', '价格', '邮箱']),
-            # 姓名 vs 地址/电话
-            (['姓名', '名字', '收货人'], 
-             ['地址', '街道', '电话', '手机', '微信', '账号', 'id', '邮箱']),
-            # 昵称 vs 微信/地址/电话
-            (['昵称', '名称', '用户名'], 
-             ['微信', '微信号', '地址', '电话', '手机', '邮箱']),
-            # ID/账号 vs 地址/电话/昵称
-            (['id', '账号'], 
-             ['地址', '电话', '手机', '昵称', '名字', '名称', '微信', '微信号']),
-            # 价格 vs 地址/电话
-            (['价格', '报价', '费用', '预算'], 
-             ['地址', '电话', '手机', '微信', '账号', 'id', '粉丝', '阅读', '点赞']),
-            # 粉丝 vs 地址/电话
-            (['粉丝'], 
-             ['地址', '电话', '手机', '微信', '账号', 'id', '价格', '报价'])
-        ]
-        
-        for form_keywords, card_keywords in incompatible_pairs:
-            # 检查表单字段是否包含组1关键词
-            form_match = any(kw in clean_form for kw in form_keywords)
-            
-            if form_match:
-                # 检查名片字段是否包含组2关键词
-                card_match = any(kw in clean_card for kw in card_keywords)
-                if card_match:
-                    # print(f"     🚫 [互斥] 表单:\"{form_field}\" vs 名片:\"{card_field}\"")
-                    return False
-                
-        return True
-
     def _calculate_match_score(self, field_name: str, config_name: str) -> Dict:
         """
-        计算匹配分数（核心算法）
+        计算匹配分数（简化版 - 直接找最高匹配度）
         
         Args:
-            field_name: 表单字段名 (Identifier)
-            config_name: 名片配置项名 (Keyword)
+            field_name: 表单字段名
+            config_name: 名片配置项名
         """
         if not config_name:
             return {'matched': False, 'score': 0}
             
         clean_identifier = self._clean_text(field_name)
         if not clean_identifier:
-            return {'matched': False, 'score': 0}
-            
-        # 1. 兼容性预检
-        if not self._are_fields_compatible(field_name, config_name):
             return {'matched': False, 'score': 0}
             
         clean_identifier_no_prefix = self._clean_text_no_prefix(field_name)
@@ -896,12 +822,8 @@ class BaomingToolFiller:
         for i, sub_key in enumerate(sub_keywords):
             if not sub_key: continue
             
-            # 2. 反义词冲突检测
-            if self._has_negation_conflict(field_name, sub_key):
-                continue
-            
             sub_key_no_prefix = sub_keywords_no_prefix[i] if i < len(sub_keywords_no_prefix) else sub_key
-            sub_key_core_words = self._extract_core_words(sub_key) # 注意这里是子关键词的核心词
+            sub_key_core_words = self._extract_core_words(sub_key)
             
             current_score = 0
             
@@ -921,8 +843,6 @@ class BaomingToolFiller:
                 elif coverage >= 0.5:
                     current_score = 50 + (coverage * 45)
                 else:
-                    # ⚡️ 优化：低覆盖率时大幅降低分数 (原: 50 + coverage * 40)
-                    # 例如 "视频" (2) in "视频出镜人物" (6), coverage=0.33 -> 30 + 13.2 = 43.2 (不匹配)
                     current_score = 30 + (coverage * 40)
                     
             # 4. 去前缀后的包含匹配
@@ -931,7 +851,6 @@ class BaomingToolFiller:
                 if coverage >= 0.8:
                     current_score = 93
                 else:
-                    # ⚡️ 优化：同上
                     current_score = 28 + (coverage * 40)
                     
             # 5. 名片key包含表单标签 (反向包含)
@@ -941,14 +860,11 @@ class BaomingToolFiller:
                 else:
                     base_len = len(sub_key_no_prefix) if sub_key_no_prefix else len(sub_key)
                     coverage = len(clean_identifier) / base_len
-                    # ⚡️ 优化：反向包含时也降低低覆盖率的分数 (原: 55 + coverage * 35)
-                    # 例如 "视频" (2) in "非报备视频报价" (7), coverage=0.28 -> 30 + 16.8 = 46.8 (不匹配)
                     current_score = 30 + (coverage * 60)
                     
             # 6. 去前缀版本的反向包含
             elif sub_key_no_prefix and clean_identifier_no_prefix in sub_key_no_prefix and len(clean_identifier_no_prefix) >= 2:
                  coverage = len(clean_identifier_no_prefix) / len(sub_key_no_prefix)
-                 # ⚡️ 优化：同上
                  current_score = 28 + (coverage * 60)
 
             # 7. 核心词匹配
@@ -961,13 +877,8 @@ class BaomingToolFiller:
                     if len(common_core_words) == len(sub_key_core_words) and len(common_core_words) == len(identifier_core_words):
                         current_score = 88
                     elif len(sub_key_core_words) == 1 and len(identifier_core_words) == 1:
-                        # ⚡️ 优化：单核心词匹配时，如果不是完全相同（已被前面逻辑捕获），说明有其他干扰词
-                        # 例如 "视频" vs "视频出镜人物"，ratio=0.33
-                        current_score = 60 # 稍微降低
+                        current_score = 60
                     else:
-                        # ⚡️ 优化：严格按照核心词比例打分 (原: 55 + ratio * 25)
-                        # ratio=0.33 -> 25 + 21 = 46 (不匹配)
-                        # ratio=0.5 -> 25 + 32 = 57 (匹配)
                         current_score = 25 + int(core_match_ratio * 65)
             
             # 8. 最长公共子串匹配 (兜底)
@@ -984,6 +895,21 @@ class BaomingToolFiller:
                         current_score = 30 + (coverage * 20) + (match_rate * 15)
                     elif match_rate >= 0.5 and lcs >= 2:
                         current_score = 25 + (coverage * 15) + (match_rate * 10)
+            
+            # ⚡️ 否定词惩罚：报备 vs 非报备 场景
+            if current_score > 0:
+                negation_patterns = ['非', '不', '无', '否', '未']
+                id_has_negation = any(neg in clean_identifier for neg in negation_patterns)
+                key_has_negation = any(neg in sub_key for neg in negation_patterns)
+                
+                # 业务关键词列表（需要区分否定状态的字段）
+                business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发']
+                has_business_keyword = any(bk in clean_identifier or bk in sub_key for bk in business_keywords)
+                
+                # 如果涉及业务关键词且否定状态不一致，大幅降低分数
+                if has_business_keyword and id_has_negation != key_has_negation:
+                    # print(f"     [否定词惩罚] \"{clean_identifier}\" vs \"{sub_key}\": 否定状态不一致，分数从{current_score}降为0")
+                    current_score = 0
             
             if current_score > best_score:
                 best_score = current_score

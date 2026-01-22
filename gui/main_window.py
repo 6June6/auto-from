@@ -821,31 +821,8 @@ class AddCardDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(15)
         
-        # 如果是编辑模式，在左侧添加"删除此名片"和"复制为新名片"按钮
+        # 如果是编辑模式，在左侧添加"复制为新名片"按钮
         if self.card:
-            # 删除按钮 - 红色文字样式
-            delete_btn = QPushButton("删除此名片")
-            delete_btn.setFixedSize(120, 44)
-            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            delete_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    border: none;
-                    font-size: 14px;
-                    font-weight: 500;
-                    color: #FF3B30;
-                }
-                QPushButton:hover {
-                    color: #D70015;
-                    text-decoration: underline;
-                }
-                QPushButton:pressed {
-                    color: #B80010;
-                }
-            """)
-            delete_btn.clicked.connect(self.delete_card)
-            button_layout.addWidget(delete_btn)
-            
             # 复制按钮
             copy_btn = QPushButton("复制为新名片")
             copy_btn.setFixedSize(140, 44)
@@ -963,6 +940,8 @@ class AddCardDialog(QDialog):
     
     def load_categories(self):
         """加载分类列表"""
+        # ⚡️ 修复：在修改 combo 内容前阻塞信号，避免 macOS Cocoa 层的竞态条件
+        self.category_combo.blockSignals(True)
         self.category_combo.clear()
         
         # 从 Category 表获取用户的分类
@@ -989,6 +968,9 @@ class AddCardDialog(QDialog):
         # 如果没有分类，添加默认分类
         if self.category_combo.count() == 0:
             self.category_combo.addItem("默认分类")
+        
+        # ⚡️ 恢复信号
+        self.category_combo.blockSignals(False)
     
     def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None):
         """添加字段行
@@ -1286,12 +1268,13 @@ class AddCardDialog(QDialog):
         # 保存到数据库
         try:
             if self.card:
-                # 编辑模式：更新现有名片
+                # 编辑模式：更新现有名片（不同步到其他名片）
                 self.db_manager.update_card(
                     card_id=self.card.id,
                     name=name,
                     configs=configs,
-                    category=category
+                    category=category,
+                    sync_fixed_templates=False  # 只修改当前名片，不影响其他名片
                 )
                 QMessageBox.information(self, "成功", "名片更新成功！")
             else:
@@ -4663,6 +4646,7 @@ class MainWindow(QMainWindow):
         # 4. 链接列表
         self.links_list = QListWidget()
         self.links_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.links_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 禁用水平滚动条
         self.links_list.setStyleSheet("""
             QListWidget {
                 background: transparent;

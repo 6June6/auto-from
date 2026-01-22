@@ -2732,10 +2732,15 @@ class NewFillWindow(QDialog):
         
         # 切换到编辑页 (index 1)
         self.right_panel_stack.setCurrentIndex(1)
+        
+        # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
+        QTimer.singleShot(50, self._refresh_left_panel_layout)
     
     def cancel_card_edit(self):
         """取消编辑"""
         self.right_panel_stack.setCurrentIndex(0)
+        # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
+        QTimer.singleShot(50, self._refresh_left_panel_layout)
         
     def save_card_edit(self):
         """保存编辑"""
@@ -2800,12 +2805,100 @@ class NewFillWindow(QDialog):
             
             # 切回详情页
             self.right_panel_stack.setCurrentIndex(0)
+            # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
+            QTimer.singleShot(50, self._refresh_left_panel_layout)
             
             # 简单提示（不弹窗）
             print(f"✅ 名片 '{name}' 更新成功")
             
         except Exception as e:
             QMessageBox.warning(self, "失败", f"保存失败：{str(e)}")
+    
+    def _auto_save_current_edit(self):
+        """自动保存当前编辑面板中的修改（静默保存，用于一键全填前）"""
+        print(f"🔍 [自动保存] 开始检查...")
+        
+        # 检查是否有当前名片和编辑字段
+        if not self.current_card:
+            print(f"🔍 [自动保存] 跳过：没有当前名片")
+            return
+        
+        if not hasattr(self, 'edit_field_rows'):
+            print(f"🔍 [自动保存] 跳过：没有 edit_field_rows 属性")
+            return
+            
+        if not self.edit_field_rows:
+            print(f"🔍 [自动保存] 跳过：edit_field_rows 为空")
+            return
+        
+        # 检查编辑面板是否处于活跃状态
+        if not hasattr(self, 'right_panel_stack'):
+            print(f"🔍 [自动保存] 跳过：没有 right_panel_stack")
+            return
+        
+        # 获取编辑面板中的名称
+        if not hasattr(self, 'edit_name_input'):
+            print(f"🔍 [自动保存] 跳过：没有 edit_name_input")
+            return
+        
+        name = self.edit_name_input.text().strip()
+        if not name:
+            print(f"🔍 [自动保存] 跳过：名称为空")
+            return
+        
+        # ⚡️ 检查编辑的是否是当前名片（避免保存错误的数据）
+        # 如果编辑面板的名称与当前名片不同，可能是残留的旧数据
+        if name != self.current_card.name:
+            # 检查是否在编辑页中（如果在编辑页，允许保存名称不同的情况，因为用户可能正在改名）
+            if self.right_panel_stack.currentIndex() != 1:
+                print(f"🔍 [自动保存] 跳过：编辑面板名称 '{name}' 与当前名片 '{self.current_card.name}' 不匹配，且不在编辑页")
+                return
+        
+        # 使用当前名片的分类
+        category = self.current_card.category if hasattr(self.current_card, 'category') and self.current_card.category else "默认分类"
+        
+        # 收集字段
+        configs = []
+        print(f"🔍 [自动保存] 收集字段，共 {len(self.edit_field_rows)} 行")
+        for row_widget in self.edit_field_rows:
+            key, value, fixed_template_id = row_widget.get_data()
+            print(f"  - key={key}, value={value}")
+            if key:  # 只添加有字段名的
+                config = {"key": key, "value": value}
+                if fixed_template_id:
+                    config['fixed_template_id'] = fixed_template_id
+                configs.append(config)
+        
+        if not configs:
+            print(f"🔍 [自动保存] 跳过：没有有效配置")
+            return
+        
+        print(f"🔍 [自动保存] 准备保存 {len(configs)} 个字段到名片 '{name}'")
+        
+        # 静默保存到数据库
+        try:
+            self.db_manager.update_card(
+                card_id=self.current_card.id,
+                name=name,
+                configs=configs,
+                category=category
+            )
+            
+            # 更新内存中的对象
+            self.current_card.name = name
+            self.current_card.configs = configs
+            self.current_card.category = category
+            
+            # ⚡️ 关键修复：清空该名片的 selected_values 缓存，确保使用最新数据
+            card_id = str(self.current_card.id)
+            if card_id in self.selected_values:
+                del self.selected_values[card_id]
+                print(f"🔄 [自动保存] 已清空名片 '{name}' 的选择值缓存")
+            
+            print(f"✅ [自动保存] 名片 '{name}' 已自动保存（一键全填前）")
+            
+        except Exception as e:
+            print(f"⚠️ [自动保存] 保存失败: {e}")
     
     def _refresh_synced_cards_data(self, saved_configs):
         """刷新被同步的其他名片的内存数据
@@ -2885,6 +2978,9 @@ class NewFillWindow(QDialog):
         """一键填充：单开模式填充当前名片，多开模式填充当前tab链接下所有webview"""
         print("🔄 一键填充...")
         
+        # ⚡️ 先自动保存当前编辑面板中的修改（如果有）
+        self._auto_save_current_edit()
+        
         # 获取当前标签页对应的链接
         current_index = self.tab_widget.currentIndex()
         if current_index <= 0:
@@ -2918,37 +3014,35 @@ class NewFillWindow(QDialog):
         
         if target_info:
             if target_info.get('web_view'):
-                # 确保使用最新的名片数据
+                # ⚡️ 从数据库获取最新的名片数据（确保修改后的数据被使用）
                 latest_card = self.current_card
-                # 尝试从数据库刷新以防万一
                 try:
                     db_card = self.db_manager.get_card_by_id(self.current_card.id)
                     if db_card:
-                        # 处理可能的 reload 方法缺失
-                        if hasattr(db_card, 'reload'):
-                            db_card.reload()
                         latest_card = db_card
                         # 更新缓存中的 card，以便下次使用
                         target_info['card'] = latest_card
                         # 更新 WebView 的属性
                         target_info['web_view'].setProperty("card_data", latest_card)
+                        # 同时更新 self.current_card
+                        self.current_card = latest_card
+                        # ⚡️ 关键修复：清空该名片的 selected_values 缓存，确保使用最新数据
+                        card_id = str(latest_card.id)
+                        if card_id in self.selected_values:
+                            del self.selected_values[card_id]
+                        print(f"✅ 已刷新名片数据: {latest_card.name}")
                 except Exception as e:
                     print(f"⚠️ 刷新名片失败: {e}")
 
-                # 设置标记，告诉 WebView 加载完成后自动填充
-                print(f"⚡️ 手动触发填充（重新导入）: {latest_card.name}")
+                # ⚡️ 直接执行填充逻辑，不刷新页面
+                print(f"⚡️ 直接执行填充（不刷新页面）: {latest_card.name}")
                 
-                # 标记此 WebView 需要在稍后自动填充（如果此时正好在加载中）
-                target_info['web_view'].setProperty("auto_fill_after_load", True)
-                
-                # 设置 is_auto_fill_active 标记
+                # 设置状态为填充中
+                target_info['web_view'].setProperty("status", "filling")
                 target_info['web_view'].setProperty("is_auto_fill_active", True)
                 
-                # ⚡️ 关键修复：刷新页面以重置网页状态，让 on_webview_loaded 自动触发填充
-                # 这样可以覆盖已填充的数据，而不只是填充空白字段
-                print(f"🔄 触发刷新并等待自动填充: {latest_card.name}")
-                target_info['web_view'].setProperty("status", "loading")  # 重置状态
-                target_info['web_view'].reload()
+                # 直接调用填充函数
+                self.execute_auto_fill_for_webview(target_info['web_view'], latest_card)
                 return
             else:
                 QMessageBox.warning(self, "提示", "页面尚未加载完成，请稍候")
@@ -3296,17 +3390,29 @@ class NewFillWindow(QDialog):
         for index, web_view in enumerate(loaded_webviews):
             card_data = web_view.property("card_data")
             
+            # ⚡️ 从数据库获取最新的名片数据
+            try:
+                latest_card = self.db_manager.get_card_by_id(card_data.id)
+                if latest_card:
+                    card_data = latest_card
+                    # 更新 WebView 的属性
+                    web_view.setProperty("card_data", latest_card)
+                    # ⚡️ 关键修复：清空该名片的 selected_values 缓存，确保使用最新数据
+                    card_id = str(latest_card.id)
+                    if card_id in self.selected_values:
+                        del self.selected_values[card_id]
+                    print(f"✅ 已刷新名片数据: {latest_card.name}")
+            except Exception as e:
+                print(f"⚠️ 刷新名片失败: {e}")
+            
             print(f"📝 填写 WebView #{index+1}: {card_data.name}")
             web_view.setProperty("status", "filling")
-            # ⚡️ 关键修复：设置 is_auto_fill_active 标记
-            # 这样登录后页面刷新时，on_webview_loaded 能够检测到并自动重填
+            # 设置 is_auto_fill_active 标记
             web_view.setProperty("is_auto_fill_active", True)
             
-            # ⚡️ 关键修复：刷新页面以重置网页状态，让 on_webview_loaded 自动触发填充
-            # 这样可以覆盖已填充的数据，而不只是填充空白字段
-            print(f"🔄 触发刷新并等待自动填充: {card_data.name}")
-            web_view.setProperty("status", "loading")  # 重置状态
-            web_view.reload()
+            # ⚡️ 直接执行填充逻辑，不刷新页面
+            print(f"⚡️ 直接执行填充（不刷新页面）: {card_data.name}")
+            self.execute_auto_fill_for_webview(web_view, card_data)
     
     def load_webviews_only(self, webview_infos):
         """批量加载WebView（不立即填充）"""
@@ -3377,7 +3483,8 @@ class NewFillWindow(QDialog):
         
         class WebEnginePage(QWebEnginePage):
             def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-                pass
+                """重写此方法以捕获JavaScript控制台消息"""
+                print(f"  [JS] {message}", flush=True)
             
             def javaScriptConfirm(self, securityOrigin, msg):
                 """自动接受离开页面的确认对话框（如登录跳转时的 beforeunload）"""
@@ -3782,6 +3889,9 @@ class NewFillWindow(QDialog):
         card_id = str(card.id)
         selected = self.selected_values.get(card_id, {})
         
+        print(f"🔍 [_get_fill_data_for_card] 名片: {card.name}, ID: {card_id}")
+        print(f"🔍 [_get_fill_data_for_card] card.configs 类型: {type(card.configs)}, 数量: {len(card.configs) if card.configs else 0}")
+        
         def parse_value(key, raw_value):
             """解析字段值：检测 JSON 数组格式，使用用户选择或默认第一个值"""
             # 优先使用用户已选择的值
@@ -3811,7 +3921,9 @@ class NewFillWindow(QDialog):
                     key = config.key
                     raw_value = getattr(config, 'value', '')
                 
-                fill_data[key] = parse_value(key, raw_value)
+                final_value = parse_value(key, raw_value)
+                fill_data[key] = final_value
+                print(f"  📝 字段: {key} = {final_value} (原始值: {raw_value})")
             return fill_data
         else:
             fill_data = []
@@ -3823,7 +3935,9 @@ class NewFillWindow(QDialog):
                     key = config.key
                     raw_value = getattr(config, 'value', '')
                 
-                fill_data.append({'key': key, 'value': parse_value(key, raw_value)})
+                final_value = parse_value(key, raw_value)
+                fill_data.append({'key': key, 'value': final_value})
+                print(f"  📝 字段: {key} = {final_value} (原始值: {raw_value})")
             return fill_data
     
     def execute_auto_fill_for_webview(self, web_view: QWebEngineView, card):
@@ -4158,7 +4272,9 @@ class NewFillWindow(QDialog):
                 # 重新匹配并显示表单
                 try:
                     filled_data = existing_filler.match_and_fill(card_config)
-                    self.show_baoming_form_page(web_view, existing_filler, filled_data, card)
+                    # ⚡️ 传递 form_short_info，确保使用新界面样式
+                    form_short_info = getattr(existing_filler, 'form_short_info', None)
+                    self.show_baoming_form_page(web_view, existing_filler, filled_data, card, form_short_info)
                     print(f"  ✅ 已重新渲染表单")
                 except Exception as e:
                     print(f"  ⚠️ 重新渲染失败: {e}")
@@ -4508,6 +4624,15 @@ class NewFillWindow(QDialog):
                     50% {{ opacity: 0.6; }}
                 }}
                 .loading {{ animation: pulse 1.5s infinite; }}
+                .tip {{
+                    color: #ff6b35;
+                    font-size: 12px;
+                    margin-top: 16px;
+                    padding: 8px 12px;
+                    background: #fff7e6;
+                    border-radius: 8px;
+                    border: 1px solid #ffd591;
+                }}
             </style>
         </head>
         <body>
@@ -4521,6 +4646,7 @@ class NewFillWindow(QDialog):
                     <button class="refresh-btn" id="refreshBtn" onclick="refreshQrCode()">🔄 刷新二维码</button>
                 </div>
                 <div class="status waiting loading" id="status">等待扫码...</div>
+                <div class="tip">⚠️ 请用不同微信扫码（因为发布者可能设置一个账号只能填写10份）</div>
             </div>
             <script>
                 window.__refreshQrCode__ = false;
@@ -5296,6 +5422,23 @@ class NewFillWindow(QDialog):
                     transform: none;
                     box-shadow: none;
                 }}
+                .logout-btn {{
+                    width: 100%;
+                    padding: 12px;
+                    background: #fff;
+                    color: #666;
+                    border: 1px solid #d9d9d9;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    cursor: pointer;
+                    margin-top: 12px;
+                    transition: all 0.2s;
+                }}
+                .logout-btn:hover {{
+                    color: #ff4d4f;
+                    border-color: #ff4d4f;
+                    background: #fff1f0;
+                }}
                 .result {{
                     text-align: center;
                     margin-top: 16px;
@@ -5323,10 +5466,18 @@ class NewFillWindow(QDialog):
                 {title_section}
                 {fields_html}
                 <button class="submit-btn" onclick="submitForm()">📤 立即提交表单</button>
+                <button class="logout-btn" onclick="logoutAccount()">🔄 退出登录 / 切换账号</button>
                 <div class="result" id="result"></div>
             </div>
             
             <script>
+                // 退出登录处理
+                function logoutAccount() {{
+                    if (confirm('确定要退出登录并切换账号吗？')) {{
+                        window.__logoutRequest__ = true;
+                    }}
+                }}
+                
                 // 图片上传处理
                 function handleImageUpload(index, input) {{
                     var file = input.files[0];
@@ -5497,9 +5648,23 @@ class NewFillWindow(QDialog):
                 return
 
             try:
+                # ⚡️ 先检查是否有退出登录请求
+                def check_logout(logout_requested):
+                    if sip.isdeleted(web_view) or not self._is_valid():
+                        return
+                    if logout_requested:
+                        timer.stop()
+                        self.handle_baoming_logout(web_view, card)
+                    else:
+                        # 再检查是否有提交请求
+                        web_view.page().runJavaScript(
+                            "window.__submitReady__ === true",
+                            lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready and not sip.isdeleted(web_view) and self._is_valid() else None
+                        )
+                
                 web_view.page().runJavaScript(
-                    "window.__submitReady__ === true",
-                    lambda ready: self.handle_baoming_submit(web_view, filler, card, timer) if ready and not sip.isdeleted(web_view) and self._is_valid() else None
+                    "window.__logoutRequest__ === true",
+                    check_logout
                 )
             except RuntimeError:
                 timer.stop()
@@ -5511,6 +5676,74 @@ class NewFillWindow(QDialog):
         timer.start(500)  # 每500ms检查一次
         
         web_view.setProperty("submit_timer", timer)
+    
+    def handle_baoming_logout(self, web_view: QWebEngineView, card):
+        """处理报名工具退出登录"""
+        print(f"  🔄 [报名工具] 用户请求退出登录，准备切换账号...")
+        
+        # 1. 停止所有定时器
+        login_timer = web_view.property("login_timer")
+        if login_timer:
+            login_timer.stop()
+            try:
+                login_timer.timeout.disconnect()
+            except:
+                pass
+            login_timer.deleteLater()
+            web_view.setProperty("login_timer", None)
+            
+        submit_timer = web_view.property("submit_timer")
+        if submit_timer:
+            submit_timer.stop()
+            try:
+                submit_timer.timeout.disconnect()
+            except:
+                pass
+            submit_timer.deleteLater()
+            web_view.setProperty("submit_timer", None)
+        
+        # 2. 清除登录状态和持久化存储的Token
+        filler = web_view.property("baoming_filler")
+        if filler:
+            # ⚡️ 关键：调用 _clear_token() 删除本地存储的token
+            if hasattr(filler, '_clear_token'):
+                filler._clear_token()
+                print(f"  🗑️ [报名工具] 已清除本地存储的Token")
+            # 清除内存中的登录状态
+            if hasattr(filler, 'api') and hasattr(filler.api, 'access_token'):
+                filler.api.access_token = None
+            if hasattr(filler, 'api') and hasattr(filler.api, 'user_info'):
+                filler.api.user_info = None
+        
+        web_view.setProperty("baoming_filler", None)
+        web_view.setProperty("baoming_card_config", None)
+        web_view.setProperty("baoming_filled_data", None)
+        web_view.setProperty("baoming_page_rendered", False)
+        
+        # 3. 获取原始URL
+        original_url = web_view.property("original_url")
+        if not original_url:
+            # 尝试从其他地方获取
+            original_url = web_view.property("baoming_url")
+        
+        print(f"  🔄 [报名工具] 重新初始化，URL: {original_url}")
+        
+        # 4. 显示加载提示
+        loading_html = """
+        <!DOCTYPE html>
+        <html>
+        <body style="margin:0;padding:0;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
+            <div style="text-align:center;color:#666;">
+                <div style="font-size:32px;margin-bottom:16px;">🔄</div>
+                <div>正在切换账号...</div>
+            </div>
+        </body>
+        </html>
+        """
+        web_view.setHtml(loading_html)
+        
+        # 5. 延迟重新初始化
+        QTimer.singleShot(500, lambda: self.init_baoming_tool_for_webview(web_view, original_url, card))
     
     def handle_baoming_submit(self, web_view: QWebEngineView, filler, card, timer):
         """处理报名工具提交"""

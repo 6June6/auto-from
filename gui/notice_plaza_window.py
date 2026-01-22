@@ -68,7 +68,7 @@ class NoticeCardWidget(QFrame):
         
     def init_ui(self):
         self.setFixedWidth(300)  # 更紧凑的宽度
-        self.setFixedHeight(280)  # 更紧凑的高度
+        self.setFixedHeight(340)  # 增加高度以显示更多内容
         
         # 阴影效果
         self.shadow = QGraphicsDropShadowEffect()
@@ -167,7 +167,7 @@ class NoticeCardWidget(QFrame):
         layout.addWidget(self.content_edit, 1)
         
         # 3. 底部按钮 - 更紧凑
-        join_btn = QPushButton("查看详情 / 加入链接")
+        join_btn = QPushButton("加入链接")
         join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         join_btn.setFixedHeight(34)
         join_btn.setStyleSheet(f"""

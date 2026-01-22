@@ -1167,7 +1167,8 @@ class DatabaseManager:
     @staticmethod
     def create_fixed_template(field_name: str, field_value: str, category: str = '通用',
                              description: str = None, placeholder: str = None,
-                             order: int = 0, value_count: int = 1, created_by=None) -> FixedTemplate:
+                             order: int = 0, value_count: int = 1, 
+                             value_placeholder_template: str = None, created_by=None) -> FixedTemplate:
         """
         创建固定模板
         
@@ -1179,6 +1180,7 @@ class DatabaseManager:
             placeholder: 占位提示（用于前端显示输入提示）
             order: 排序
             value_count: 字段值数量，默认为1
+            value_placeholder_template: 多值提示模板（JSON数组格式）
             created_by: 创建人
         
         Returns:
@@ -1190,6 +1192,7 @@ class DatabaseManager:
                 field_value=field_value,
                 value_count=value_count,
                 placeholder=placeholder,
+                value_placeholder_template=value_placeholder_template,
                 category=category,
                 description=description,
                 order=order,

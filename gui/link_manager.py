@@ -817,85 +817,11 @@ class LinkManagerDialog(QDialog):
 
 
 class ChineseContextTextEdit(QTextEdit):
-    """支持中文右键菜单的 QTextEdit"""
+    """禁用右键菜单的 QTextEdit"""
     
     def contextMenuEvent(self, event):
-        """重写右键菜单事件，显示中文菜单"""
-        from PyQt6.QtWidgets import QMenu
-        from PyQt6.QtGui import QAction
-        
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 8px 24px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #F0F0F0;
-            }
-            QMenu::item:disabled {
-                color: #999999;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #E0E0E0;
-                margin: 4px 8px;
-            }
-        """)
-        
-        # 撤销
-        undo_action = QAction("撤销", self)
-        undo_action.triggered.connect(self.undo)
-        undo_action.setEnabled(self.document().isUndoAvailable())
-        menu.addAction(undo_action)
-        
-        # 重做
-        redo_action = QAction("重做", self)
-        redo_action.triggered.connect(self.redo)
-        redo_action.setEnabled(self.document().isRedoAvailable())
-        menu.addAction(redo_action)
-        
-        menu.addSeparator()
-        
-        # 剪切
-        cut_action = QAction("剪切", self)
-        cut_action.triggered.connect(self.cut)
-        cut_action.setEnabled(self.textCursor().hasSelection())
-        menu.addAction(cut_action)
-        
-        # 复制
-        copy_action = QAction("复制", self)
-        copy_action.triggered.connect(self.copy)
-        copy_action.setEnabled(self.textCursor().hasSelection())
-        menu.addAction(copy_action)
-        
-        # 粘贴
-        paste_action = QAction("粘贴", self)
-        paste_action.triggered.connect(self.paste)
-        paste_action.setEnabled(self.canPaste())
-        menu.addAction(paste_action)
-        
-        # 删除
-        delete_action = QAction("删除", self)
-        delete_action.triggered.connect(lambda: self.textCursor().removeSelectedText())
-        delete_action.setEnabled(self.textCursor().hasSelection())
-        menu.addAction(delete_action)
-        
-        menu.addSeparator()
-        
-        # 全选
-        select_all_action = QAction("全选", self)
-        select_all_action.triggered.connect(self.selectAll)
-        select_all_action.setEnabled(bool(self.toPlainText()))
-        menu.addAction(select_all_action)
-        
-        menu.exec(event.globalPos())
+        """禁用右键菜单"""
+        event.ignore()
 
 
 class AIParseThread(QThread):
@@ -1039,7 +965,7 @@ class SmartAddLinkDialog(QDialog):
                 border: none;
                 border-radius: 8px;
                 font-weight: 600;
-                padding: 0 16px;  # 增加内边距
+                padding: 0 16px;
             }}
             QPushButton:hover {{
                 background: #0056CC;
