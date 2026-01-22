@@ -850,6 +850,34 @@ class AddCardDialog(QDialog):
             """)
             copy_btn.clicked.connect(self.copy_as_new_card)
             button_layout.addWidget(copy_btn)
+            
+            # 删除按钮
+            delete_btn = QPushButton("删除名片")
+            delete_btn.setFixedSize(120, 44)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # 红色 Outline 风格：白底红字，悬停变实心
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 1.5px solid #FF3B30;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #FF3B30;
+                }
+                QPushButton:hover {
+                    background-color: #FF3B30;
+                    color: white;
+                    border-color: #FF3B30;
+                }
+                QPushButton:pressed {
+                    background-color: #D32F2F;
+                    border-color: #D32F2F;
+                    color: white;
+                }
+            """)
+            delete_btn.clicked.connect(self.delete_card)
+            button_layout.addWidget(delete_btn)
         
         button_layout.addStretch()
         

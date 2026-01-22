@@ -68,273 +68,17 @@ class ClipboardWebPage(QWebEnginePage):
 
 
 class ChineseContextWebView(QWebEngineView):
-    """支持中文右键菜单的 WebView - 包括网页内部的输入框"""
-    
-    # 注入的 JavaScript 代码，用于拦截网页内部的右键菜单
-    CHINESE_CONTEXT_MENU_JS = """
-    (function() {
-        // 避免重复注入
-        if (window._chineseContextMenuInjected) return;
-        window._chineseContextMenuInjected = true;
-        
-        // 创建自定义右键菜单
-        const menuStyle = `
-            .custom-context-menu {
-                position: fixed;
-                background: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                padding: 4px 0;
-                z-index: 999999;
-                min-width: 120px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                font-size: 13px;
-            }
-            .custom-context-menu-item {
-                padding: 8px 16px;
-                cursor: pointer;
-                color: #333;
-                display: flex;
-                align-items: center;
-            }
-            .custom-context-menu-item:hover {
-                background: #F0F0F0;
-            }
-            .custom-context-menu-item.disabled {
-                color: #999;
-                cursor: default;
-            }
-            .custom-context-menu-item.disabled:hover {
-                background: transparent;
-            }
-            .custom-context-menu-separator {
-                height: 1px;
-                background: #E0E0E0;
-                margin: 4px 8px;
-            }
-        `;
-        
-        // 添加样式
-        const styleEl = document.createElement('style');
-        styleEl.textContent = menuStyle;
-        document.head.appendChild(styleEl);
-        
-        let currentMenu = null;
-        let targetElement = null;
-        
-        // 关闭菜单
-        function closeMenu() {
-            if (currentMenu) {
-                currentMenu.remove();
-                currentMenu = null;
-            }
-        }
-        
-        // 创建菜单项
-        function createMenuItem(text, action, disabled = false) {
-            const item = document.createElement('div');
-            item.className = 'custom-context-menu-item' + (disabled ? ' disabled' : '');
-            item.textContent = text;
-            if (!disabled) {
-                item.onclick = (e) => {
-                    e.stopPropagation();
-                    action();
-                    closeMenu();
-                };
-            }
-            return item;
-        }
-        
-        // 复制文本到剪贴板（通过 console.log 传递给 Python）
-        function copyToClipboard() {
-            const selectedText = window.getSelection().toString();
-            if (!selectedText) {
-                return;
-            }
-            // 通过特殊前缀的 console.log 传递给 Python 处理
-            console.log('__CLIPBOARD_COPY__:' + selectedText);
-        }
-        
-        // 剪切文本到剪贴板
-        function cutToClipboard() {
-            const selectedText = window.getSelection().toString();
-            if (!selectedText) return;
-            
-            copyToClipboard();
-            // 在可编辑元素中删除选中内容
-            if (targetElement && isEditable(targetElement)) {
-                document.execCommand('delete');
-            }
-        }
-        
-        // 创建分隔线
-        function createSeparator() {
-            const sep = document.createElement('div');
-            sep.className = 'custom-context-menu-separator';
-            return sep;
-        }
-        
-        // 检查是否是可编辑元素
-        function isEditable(el) {
-            if (!el) return false;
-            const tagName = el.tagName.toLowerCase();
-            if (tagName === 'input' || tagName === 'textarea') return true;
-            if (el.isContentEditable) return true;
-            return false;
-        }
-        
-        // 显示菜单
-        function showMenu(x, y, element) {
-            closeMenu();
-            targetElement = element;
-            
-            const menu = document.createElement('div');
-            menu.className = 'custom-context-menu';
-            
-            const isEdit = isEditable(element);
-            const hasSelection = window.getSelection().toString().length > 0;
-            
-            if (isEdit) {
-                // 可编辑元素的菜单
-                menu.appendChild(createMenuItem('撤销', () => document.execCommand('undo')));
-                menu.appendChild(createMenuItem('重做', () => document.execCommand('redo')));
-                menu.appendChild(createSeparator());
-                menu.appendChild(createMenuItem('剪切', cutToClipboard, !hasSelection));
-                menu.appendChild(createMenuItem('复制', copyToClipboard, !hasSelection));
-                menu.appendChild(createMenuItem('粘贴', () => document.execCommand('paste')));
-                menu.appendChild(createSeparator());
-                menu.appendChild(createMenuItem('全选', () => document.execCommand('selectAll')));
-            } else {
-                // 非编辑区域的菜单
-                menu.appendChild(createMenuItem('复制', copyToClipboard, !hasSelection));
-                menu.appendChild(createSeparator());
-                menu.appendChild(createMenuItem('全选', () => document.execCommand('selectAll')));
-            }
-            
-            document.body.appendChild(menu);
-            currentMenu = menu;
-            
-            // 调整位置，确保不超出视口
-            const rect = menu.getBoundingClientRect();
-            if (x + rect.width > window.innerWidth) {
-                x = window.innerWidth - rect.width - 5;
-            }
-            if (y + rect.height > window.innerHeight) {
-                y = window.innerHeight - rect.height - 5;
-            }
-            
-            menu.style.left = x + 'px';
-            menu.style.top = y + 'px';
-        }
-        
-        // 拦截右键事件
-        document.addEventListener('contextmenu', function(e) {
-            e.preventDefault();
-            showMenu(e.clientX, e.clientY, e.target);
-        }, true);
-        
-        // 点击其他地方关闭菜单
-        document.addEventListener('click', function(e) {
-            if (currentMenu && !currentMenu.contains(e.target)) {
-                closeMenu();
-            }
-        }, true);
-        
-        // 滚动时关闭菜单
-        document.addEventListener('scroll', closeMenu, true);
-        
-        // ESC 关闭菜单
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                closeMenu();
-            }
-        });
-        
-        console.log('[中文右键菜单] 已注入');
-    })();
-    """
+    """自定义 WebView - 禁用右键菜单"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
         # 使用自定义 Page 来处理剪贴板操作
         self._clipboard_page = ClipboardWebPage(self)
         self.setPage(self._clipboard_page)
-        
-        # 页面加载完成后注入中文右键菜单脚本
-        self.loadFinished.connect(self._inject_chinese_context_menu)
-    
-    def _inject_chinese_context_menu(self, ok):
-        """页面加载完成后注入中文右键菜单"""
-        if ok and self.page():
-            self.page().runJavaScript(self.CHINESE_CONTEXT_MENU_JS)
     
     def contextMenuEvent(self, event):
-        """Qt 层面的右键菜单（当网页没有捕获时的后备）"""
-        from PyQt6.QtWidgets import QMenu
-        from PyQt6.QtGui import QAction
-        
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 8px 24px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #F0F0F0;
-            }
-            QMenu::item:disabled {
-                color: #999999;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #E0E0E0;
-                margin: 4px 8px;
-            }
-        """)
-        
-        # 后退
-        back_action = QAction("后退", self)
-        back_action.triggered.connect(self.back)
-        back_action.setEnabled(self.history().canGoBack())
-        menu.addAction(back_action)
-        
-        # 前进
-        forward_action = QAction("前进", self)
-        forward_action.triggered.connect(self.forward)
-        forward_action.setEnabled(self.history().canGoForward())
-        menu.addAction(forward_action)
-        
-        # 刷新
-        reload_action = QAction("刷新", self)
-        reload_action.triggered.connect(self.reload)
-        menu.addAction(reload_action)
-        
-        menu.addSeparator()
-        
-        # 复制
-        copy_action = QAction("复制", self)
-        copy_action.triggered.connect(lambda: self.page().triggerAction(QWebEnginePage.WebAction.Copy))
-        copy_action.setEnabled(self.hasSelection())
-        menu.addAction(copy_action)
-        
-        # 粘贴
-        paste_action = QAction("粘贴", self)
-        paste_action.triggered.connect(lambda: self.page().triggerAction(QWebEnginePage.WebAction.Paste))
-        menu.addAction(paste_action)
-        
-        # 全选
-        select_all_action = QAction("全选", self)
-        select_all_action.triggered.connect(lambda: self.page().triggerAction(QWebEnginePage.WebAction.SelectAll))
-        menu.addAction(select_all_action)
-        
-        menu.exec(event.globalPos())
+        """禁用右键菜单"""
+        event.ignore()
 
 
 class FillCardItemWidget(QWidget):
@@ -1747,6 +1491,7 @@ class NewFillWindow(QDialog):
         # 左侧：名片名称输入框
         self.edit_name_input = QLineEdit()
         self.edit_name_input.setPlaceholderText("名片名称")
+        self.edit_name_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.edit_name_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 8px 12px;
@@ -1928,11 +1673,13 @@ class NewFillWindow(QDialog):
         batch_select_layout.addWidget(batch_label)
         
         self.batch_index_combo = QComboBox()
-        self.batch_index_combo.setFixedWidth(60)
+        self.batch_index_combo.setFixedWidth(150)  # 增加宽度以适应文字
         self.batch_index_combo.setFixedHeight(28)
-        for i in range(1, 7):
-            self.batch_index_combo.addItem(str(i), i)
-        # 默认选中第1个值
+        # 三种格式形式
+        self.batch_index_combo.addItem("数字形式", 1)
+        self.batch_index_combo.addItem("w形式", 2)
+        self.batch_index_combo.addItem("w为单位", 3)
+        # 默认选中第1个值（数字形式）
         self.batch_index_combo.setStyleSheet(f"""
             QComboBox {{
                 border: 1px solid #D9D9D9;
@@ -2587,17 +2334,18 @@ class NewFillWindow(QDialog):
         print(f"已复制: {text}")
     
     def batch_select_by_index(self, combo_index: int):
-        """批量选择第N个值 - 对所有名片生效
+        """批量选择格式 - 对所有名片生效
         
         Args:
-            combo_index: 下拉框的选中索引（0对应第1个值）
+            combo_index: 下拉框的选中索引（0=数字形式, 1=w形式, 2=w为单位）
         """
         if combo_index < 0:
             return
         
         target_index = combo_index
-        value_num = combo_index + 1  # 显示给用户的是第几个（1-based）
-        print(f"📋 批量选择第 {value_num} 个值（对所有名片生效）")
+        format_names = ["数字形式", "w形式", "w为单位"]
+        format_name = format_names[combo_index] if combo_index < len(format_names) else f"格式{combo_index + 1}"
+        print(f"📋 批量选择「{format_name}」（对所有名片生效）")
         
         import json
         
@@ -2649,10 +2397,10 @@ class NewFillWindow(QDialog):
                 if target_index < len(values_list):
                     selected_val = values_list[target_index]
                     self.selected_values[card_id][key] = selected_val
-                    print(f"  ✓ [{card.name}] 字段「{key}」-> 第{value_num}个值: {selected_val}")
+                    print(f"  ✓ [{card.name}] 字段「{key}」-> {format_name}: {selected_val}")
                 else:
                     self.selected_values[card_id][key] = ""
-                    print(f"  ⚠ [{card.name}] 字段「{key}」没有第{value_num}个值（共{len(values_list)}个），设为空")
+                    print(f"  ⚠ [{card.name}] 字段「{key}」没有「{format_name}」对应的值（共{len(values_list)}个格式），设为空")
         
         # 更新当前名片的 UI 下拉框显示
         if self.current_card and hasattr(self, 'current_card_combos') and hasattr(self, 'current_card_values_map'):
@@ -3124,6 +2872,29 @@ class NewFillWindow(QDialog):
             form_type = self.detect_form_type(link.url)
             new_profile = self.get_or_create_profile(str(new_card.id), form_type)
             
+            # ⚡️ 关键修复：如果是报名工具链接，必须清除旧的 filler 和相关属性
+            # 防止复用旧名片的 filler（其 card_id 是错误的）
+            if form_type == 'baominggongju':
+                # 停止旧的登录轮询定时器
+                login_timer = web_view.property("login_timer")
+                if login_timer:
+                    login_timer.stop()
+                    web_view.setProperty("login_timer", None)
+                
+                # 停止旧的提交检查定时器
+                submit_timer = web_view.property("submit_timer")
+                if submit_timer:
+                    submit_timer.stop()
+                    web_view.setProperty("submit_timer", None)
+                
+                # 清除旧的 filler 及相关属性
+                web_view.setProperty("baoming_filler", None)
+                web_view.setProperty("baoming_card_config", None)
+                web_view.setProperty("baoming_filled_data", None)
+                web_view.setProperty("baoming_page_rendered", False)
+                web_view.setProperty("baoming_card", None)
+                print(f"🧹 [报名工具] 已清除旧名片的 filler，准备使用新名片 {new_card.name} 重新初始化")
+            
             # 创建新的 Page（使用新名片的 Profile）
             class WebEnginePage(QWebEnginePage):
                 def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
@@ -3167,17 +2938,24 @@ class NewFillWindow(QDialog):
         if info['web_view']:
              def reload_target():
                 print(f"🚀 重新加载链接: {link.url}")
-                # 标记这是一个切换名片后的加载，需要自动填充
-                info['web_view'].setProperty("auto_fill_on_switch", True)
-                info['web_view'].load(QUrl(link.url))
                 info['loaded'] = False
+                
+                # ⚡️ 关键修复：报名工具链接使用自定义登录页面，不加载原始URL
+                if 'baominggongju.com' in link.url:
+                    print(f"  📱 [报名工具] 切换名片后，直接显示登录页面（不加载原网页）")
+                    self.init_baoming_tool_for_webview(info['web_view'], link.url, new_card)
+                else:
+                    # 其他链接正常加载原始URL
+                    info['web_view'].setProperty("auto_fill_on_switch", True)
+                    info['web_view'].load(QUrl(link.url))
              
              # 延迟 300ms 再加载目标页面
              QTimer.singleShot(300, reload_target)
              
-        # 5. 手动触发填充（补救措施）
+        # 5. 手动触发填充（补救措施）- 仅对非报名工具链接有效
         # 目标加载启动后，再过 2000ms 检查 (总共 2300ms 后)
-        QTimer.singleShot(2300, lambda: self._check_and_fill_if_needed(info['web_view'], new_card))
+        if 'baominggongju.com' not in link.url:
+            QTimer.singleShot(2300, lambda: self._check_and_fill_if_needed(info['web_view'], new_card))
 
     def _check_and_fill_if_needed(self, web_view, card):
         """检查页面是否需要补救填充"""
@@ -4417,6 +4195,62 @@ class NewFillWindow(QDialog):
         """在WebView中设置报名工具界面"""
         from core.baoming_tool_filler import BaomingToolFiller
         
+        # ⚡️ 关键修复：立即显示加载中页面，防止显示原网页内容
+        loading_html = '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    color: white;
+                }
+                .loading-container {
+                    text-align: center;
+                    padding: 40px;
+                }
+                .spinner {
+                    width: 50px;
+                    height: 50px;
+                    border: 4px solid rgba(255,255,255,0.3);
+                    border-top-color: white;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin: 0 auto 24px;
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+                .loading-text {
+                    font-size: 18px;
+                    font-weight: 500;
+                    opacity: 0.9;
+                }
+                .loading-sub {
+                    font-size: 14px;
+                    opacity: 0.7;
+                    margin-top: 8px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="loading-container">
+                <div class="spinner"></div>
+                <div class="loading-text">正在初始化报名工具...</div>
+                <div class="loading-sub">请稍候</div>
+            </div>
+        </body>
+        </html>
+        '''
+        web_view.setHtml(loading_html)
+        
         # 创建填充器实例并绑定到 web_view
         filler = BaomingToolFiller()
         web_view.setProperty("baoming_filler", filler)
@@ -5013,12 +4847,11 @@ class NewFillWindow(QDialog):
             # 字段描述
             desc_html = f'<div class="field-desc">{field_desc_escaped}</div>' if field_desc_escaped else ''
             
-            # ⚡️ 智能识别图片上传类型：
+            # ⚡️ 图片上传类型判断：严格根据 field_type 判断
             # 1. field_type == 6 (图片上传)
             # 2. field_type == 14 (富文本/图片上传)
-            # 3. 字段名包含"图片"、"上传"、"截图"、"照片"等关键词
-            is_image_field = (field_type in [FIELD_TYPE_IMAGE, FIELD_TYPE_RICH_TEXT] or 
-                              any(kw in field_name for kw in ['图片', '上传图片', '截图', '照片', '头像', '封面']))
+            # 注意：不再根据字段名关键词匹配，因为会导致误判（如"图片更换"被识别为图片上传）
+            is_image_field = field_type in [FIELD_TYPE_IMAGE, FIELD_TYPE_RICH_TEXT]
             
             # 根据字段类型生成不同的输入组件
             if field_type == FIELD_TYPE_CHECKBOX and options:
@@ -6290,11 +6123,14 @@ class NewFillWindow(QDialog):
             .trim();
     }}
     
-    // 去除数字前缀
+    // 去除数字前缀和Q+数字前缀
     function cleanTextNoPrefix(text) {{
         if (!text) return '';
         let cleaned = cleanText(text);
+        // 去除纯数字前缀（如 "1." "2*"）
         cleaned = cleaned.replace(/^\\d+\\.?\\*?/, '');
+        // ⚡️ 去除 Q+数字 前缀（如 "q12" "q1"），适配见数等平台的问题编号
+        cleaned = cleaned.replace(/^q\\d+/, '');
         return cleaned.trim();
     }}
     
@@ -6751,6 +6587,26 @@ class NewFillWindow(QDialog):
         return false;
     }}
     
+    // ⚡️ 辅助函数：在所有名片字段中查找最佳匹配（不受 usedCardKeys 限制，允许重复使用）
+    function findBestMatchAllowReuse(identifiers, formTitle = '') {{
+        let bestMatch = {{ item: null, score: 0, identifier: null, matchedKey: null }};
+        
+        for (const item of fillData) {{
+            // ⚡️ 关键：不跳过已使用的字段，允许重复使用
+            const matchResult = matchKeyword(identifiers, item.key, formTitle, item.value);
+            if (matchResult.matched && matchResult.score > bestMatch.score) {{
+                bestMatch = {{ 
+                    item: item, 
+                    score: matchResult.score,
+                    identifier: matchResult.identifier,
+                    matchedKey: matchResult.matchedKey
+                }};
+            }}
+        }}
+        
+        return bestMatch;
+    }}
+    
     // 处理联系地址（type=9 矩阵表格）
     function handleAddressField(fieldDiv, questionTitle) {{
         const rows = fieldDiv.querySelectorAll('tr[id^="drv"]');
@@ -6789,15 +6645,15 @@ class NewFillWindow(QDialog):
                 identifiers.push('所在地', '所在地区', '省市区', '城市', '地区');
             }}
             
-            // 传入子标题用于互斥检测
-            const match = findBestMatch(identifiers, subTitle);
+            // ⚡️ 关键修复：使用允许重复使用的匹配函数，只看匹配度最高
+            const match = findBestMatchAllowReuse(identifiers, subTitle);
             
             if (match.item && match.score >= 50) {{
                 const filled = fillInput(input, match.item.value);
                 if (filled) {{
                     usedCardKeys.add(match.item.key);
                     filledCount++;
-                    console.log(`   📍 地址字段 "${{subTitle}}": "${{match.item.value}}" (匹配: ${{match.item.key}})`);
+                    console.log(`   📍 地址字段 "${{subTitle}}": "${{match.item.value}}" (匹配: ${{match.item.key}}, 分数: ${{match.score}})`);
                     results.push({{
                         key: match.item.key,
                         value: match.item.value,
@@ -6919,7 +6775,8 @@ class NewFillWindow(QDialog):
                 case '1': // 文本输入
                 case '2': // 多行文本
                 case '6': // 数字输入
-                    const textInput = fieldDiv.querySelector('input[type="text"], textarea');
+                    // ⚡️ 扩展选择器：支持 text、tel、number 类型的输入框
+                    const textInput = fieldDiv.querySelector('input[type="text"], input[type="tel"], input[type="number"], textarea');
                     if (textInput && !textInput.readOnly && !textInput.disabled) {{
                         const identifiers = [title];
                         // 添加补充标识符
@@ -6930,7 +6787,12 @@ class NewFillWindow(QDialog):
                         if (title.includes('赞藏')) identifiers.push('赞藏数', '点赞', '收藏');
                         if (title.includes('价格')) identifiers.push('报价', '价格', '图文价格');
                         if (title.includes('微信')) identifiers.push('微信号', '微信', 'wx');
-                        if (title.includes('电话')) identifiers.push('手机', '电话', '手机号', '电话号码');
+                        // ⚡️ 增强手机号匹配：同时检测 '电话' 和 '手机'
+                        if (title.includes('电话') || title.includes('手机')) identifiers.push('手机', '电话', '手机号', '电话号码', '联系方式');
+                        // ⚡️ 新增：地区/城市相关字段识别
+                        if (title.includes('省') || title.includes('市') || title.includes('区') || title.includes('城市') || title.includes('地区')) {{
+                            identifiers.push('城市', '地区', '所在地', '省份', '所在城市', '地址');
+                        }}
                         
                         // 传入表单标题用于互斥检测
                         const match = findBestMatch(identifiers, title);
@@ -8488,11 +8350,14 @@ class NewFillWindow(QDialog):
             .trim();
     }}
     
-    // 去除数字前缀
+    // 去除数字前缀和Q+数字前缀
     function cleanTextNoPrefix(text) {{
         if (!text) return '';
         let cleaned = cleanText(text);
+        // 去除纯数字前缀（如 "1." "2*"）
         cleaned = cleaned.replace(/^\\d+\\.?\\*?/, '');
+        // ⚡️ 去除 Q+数字 前缀（如 "q12" "q1"），适配见数等平台的问题编号
+        cleaned = cleaned.replace(/^q\\d+/, '');
         return cleaned.trim();
     }}
     
@@ -8601,9 +8466,17 @@ class NewFillWindow(QDialog):
                 if (cleanIdentifier === subKey) {{
                     currentScore = 100;
                 }}
-                // 2. 去前缀后完全匹配
-                else if (subKeyNoPrefix && cleanIdentifier === subKeyNoPrefix) {{
+                // ⚡️ 1.5 表单标识符去前缀后完全匹配名片字段（如 "Q12 1月图文报备价格" -> "1月图文报备价格"）
+                else if (cleanIdentifierNoPrefix && cleanIdentifierNoPrefix === subKey) {{
+                    currentScore = 99;
+                }}
+                // 2. 去前缀后完全匹配（双方都去前缀）
+                else if (subKeyNoPrefix && cleanIdentifierNoPrefix === subKeyNoPrefix) {{
                     currentScore = 98;
+                }}
+                // 2.5 名片字段去前缀后与表单标识符匹配
+                else if (subKeyNoPrefix && cleanIdentifier === subKeyNoPrefix) {{
+                    currentScore = 97;
                 }}
                 // 3. 包含匹配
                 else if (cleanIdentifier.includes(subKey) && subKey.length >= 2) {{
@@ -8614,6 +8487,17 @@ class NewFillWindow(QDialog):
                         currentScore = 50 + (coverage * 45);
                     }} else {{
                         currentScore = 50 + (coverage * 40);
+                    }}
+                }}
+                // ⚡️ 3.5 表单去前缀后包含名片字段
+                else if (cleanIdentifierNoPrefix && cleanIdentifierNoPrefix.includes(subKey) && subKey.length >= 2) {{
+                    const coverage = subKey.length / cleanIdentifierNoPrefix.length;
+                    if (coverage >= 0.8) {{
+                        currentScore = 94;
+                    }} else if (coverage >= 0.5) {{
+                        currentScore = 50 + (coverage * 44);
+                    }} else {{
+                        currentScore = 50 + (coverage * 39);
                     }}
                 }}
                 // 4. 去前缀包含匹配
@@ -8633,6 +8517,11 @@ class NewFillWindow(QDialog):
                         const coverage = cleanIdentifier.length / (subKeyNoPrefix.length || subKey.length);
                         currentScore = 55 + (coverage * 35);
                     }}
+                }}
+                // ⚡️ 5.5 名片字段包含表单去前缀后的标识符
+                else if (subKey.includes(cleanIdentifierNoPrefix) && cleanIdentifierNoPrefix && cleanIdentifierNoPrefix.length >= 2) {{
+                    const coverage = cleanIdentifierNoPrefix.length / subKey.length;
+                    currentScore = 54 + (coverage * 35);
                 }}
                 // 6. 核心词匹配
                 else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
@@ -8662,6 +8551,22 @@ class NewFillWindow(QDialog):
                         }} else if (matchRate >= 0.5 && lcs >= 2) {{
                             currentScore = 25 + (coverage * 15) + (matchRate * 10);
                         }}
+                    }}
+                }}
+                
+                // ⚡️ 【关键】否定词惩罚检测 - 防止"报备"匹配到"非报备"
+                if (currentScore > 0) {{
+                    const negationPatterns = ['非', '不', '无', '否', '未'];
+                    const idHasNegation = negationPatterns.some(neg => cleanIdentifier.includes(neg));
+                    const ckwHasNegation = negationPatterns.some(neg => subKey.includes(neg));
+                    
+                    // 涉及业务关键词时，检测否定状态是否一致
+                    const businessKeywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发'];
+                    const hasBusinessKeyword = businessKeywords.some(bk => cleanIdentifier.includes(bk) || subKey.includes(bk));
+                    
+                    if (hasBusinessKeyword && idHasNegation !== ckwHasNegation) {{
+                        console.log(`[见数否定词惩罚] "${{cleanIdentifier}}" vs "${{subKey}}": 否定状态不一致，分数从${{currentScore}}降为0`);
+                        currentScore = 0;
                     }}
                 }}
                 
@@ -9426,11 +9331,14 @@ class NewFillWindow(QDialog):
             .trim();
     }}
     
-    // 去除数字前缀
+    // 去除数字前缀和Q+数字前缀
     function cleanTextNoPrefix(text) {{
         if (!text) return '';
         let cleaned = cleanText(text);
+        // 去除纯数字前缀（如 "1." "2*"）
         cleaned = cleaned.replace(/^\\d+\\.?\\*?/, '');
+        // ⚡️ 去除 Q+数字 前缀（如 "q12" "q1"），适配见数等平台的问题编号
+        cleaned = cleaned.replace(/^q\\d+/, '');
         return cleaned.trim();
     }}
     
@@ -10616,11 +10524,14 @@ class NewFillWindow(QDialog):
             .trim();
     }}
     
-    // 去除数字前缀
+    // 去除数字前缀和Q+数字前缀
     function cleanTextNoPrefix(text) {{
         if (!text) return '';
         let cleaned = cleanText(text);
+        // 去除纯数字前缀（如 "1." "2*"）
         cleaned = cleaned.replace(/^\\d+\\.?\\*?/, '');
+        // ⚡️ 去除 Q+数字 前缀（如 "q12" "q1"），适配见数等平台的问题编号
+        cleaned = cleaned.replace(/^q\\d+/, '');
         return cleaned.trim();
     }}
     
@@ -11774,6 +11685,7 @@ class EditFieldRow(QWidget):
         self.key_input = QLineEdit(key)
         self.key_input.setPlaceholderText("昵称")
         self.key_input.setFixedHeight(36)
+        self.key_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.key_input.setStyleSheet(f"""
             QLineEdit {{
                 border: 1px solid #E0E0E0;
@@ -11827,6 +11739,7 @@ class EditFieldRow(QWidget):
         self.value_input = QLineEdit(value)
         self.value_input.setPlaceholderText("值")
         self.value_input.setFixedHeight(36) # 增加高度
+        self.value_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.value_input.setStyleSheet(f"""
             QLineEdit {{
                 border: 1px solid #E0E0E0;
@@ -11902,6 +11815,7 @@ class EditFieldRow(QWidget):
         
         input_field = QLineEdit()
         input_field.setPlaceholderText("输入别名")
+        input_field.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         layout.addWidget(input_field)
         
         btn_layout = QHBoxLayout()
