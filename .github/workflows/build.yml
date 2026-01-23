@@ -61,7 +61,7 @@ jobs:
           retention-days: 3
 
   build-macos-intel:
-    runs-on: macos-13 # Intel Mac
+    runs-on: macos-15 # Intel Mac (macos-13 已停用)
     steps:
       - uses: actions/checkout@v4
 
