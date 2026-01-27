@@ -816,6 +816,84 @@ class BaomingToolFiller:
         sub_keywords_no_prefix = self._split_keywords_no_prefix(config_name)
         if not sub_keywords_no_prefix:
             sub_keywords_no_prefix = [self._clean_text_no_prefix(config_name)]
+        
+        # ⚡️ 平台关键词识别与互斥检测（新增）
+        # 定义平台关键词映射
+        platform_keywords_map = {
+            'wechat': ['微信', 'wx', 'vx', '微信号', '微信名', '微信昵称', '微信id'],
+            'xiaohongshu': ['小红书', '红书', '小红薯', '红薯', 'xhs', '蒲公英', '平台昵称', '账号昵称', '账号名', '主页'],
+            'douyin': ['抖音', 'dy', '抖音号'],
+            'weibo': ['微博', 'wb', '微博号'],
+            'bilibili': ['b站', 'bilibili', '哔哩哔哩', 'up主']
+        }
+        
+        def detect_platform(text: str) -> str:
+            """检测文本所属平台"""
+            if not text:
+                return 'unknown'
+            text_lower = text.lower()
+            for platform, keywords in platform_keywords_map.items():
+                for keyword in keywords:
+                    if keyword in text_lower:
+                        return platform
+            return 'unknown'
+        
+        # 检测表单字段和名片字段的平台归属
+        field_platform = detect_platform(clean_identifier)
+        config_platform = detect_platform(config_name.lower())
+        
+        # 如果两者平台不一致且都不是unknown，则大幅降低分数
+        platform_penalty_factor = 1.0
+        if field_platform != 'unknown' and config_platform != 'unknown':
+            if field_platform != config_platform:
+                # 不同平台，给予严厉惩罚
+                platform_penalty_factor = 0.05
+                print(f"     [平台互斥] 表单\"{field_name}\"({field_platform}) vs 名片\"{config_name[:30]}...\"({config_platform}) - 惩罚0.05")
+            else:
+                # 同一平台，给予加分
+                platform_penalty_factor = 1.2
+                print(f"     [平台匹配] 表单\"{field_name}\"({field_platform}) vs 名片\"{config_name[:30]}...\"({config_platform}) - 加分1.2")
+        
+        # ⚡️ 全局否定词检测：在计算分数前，先判断整体字段性质是否不匹配
+        negation_patterns = ['非', '不', '无', '否', '未']
+        # 用于否定词检测的核心业务关键词（如"非报备"、"不报备"等）
+        core_business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发']
+        # 用于判断表单字段是否涉及业务场景的扩展关键词
+        extended_business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发', 
+                                       '视频', '图文', '价格', '蒲公英', '后台', '平台']
+        
+        def has_negated_business_keyword(text):
+            """检测是否包含否定词+业务关键词组合"""
+            for neg in negation_patterns:
+                for bk in core_business_keywords:
+                    if f"{neg}{bk}" in text:
+                        return True
+            return False
+        
+        # 检测表单字段是否包含否定词
+        field_has_negation = has_negated_business_keyword(clean_identifier)
+        
+        # 检测表单字段是否涉及业务关键词（使用扩展列表）
+        field_has_business = any(bk in clean_identifier for bk in extended_business_keywords)
+        
+        # 计算名片字段中包含否定词的子关键词占比
+        negated_sub_count = sum(1 for sk in sub_keywords if has_negated_business_keyword(sk))
+        total_sub_count = len(sub_keywords)
+        
+        # 如果名片字段超过50%的子关键词包含否定词，则认为是"非报备"类别
+        is_negation_category = total_sub_count > 0 and (negated_sub_count / total_sub_count) > 0.5
+        
+        # 全局否定词不一致惩罚因子（用于降低优先级而非完全排除）
+        global_penalty_factor = 1.0
+        
+        if field_has_business:
+            # 表单字段涉及业务关键词，需要检查否定词一致性
+            if not field_has_negation and is_negation_category:
+                # 表单不含否定词，但名片是非报备类别 -> 大幅降低优先级
+                global_penalty_factor = 0.1
+            elif field_has_negation and not is_negation_category:
+                # 表单含否定词，但名片不是非报备类别 -> 大幅降低优先级
+                global_penalty_factor = 0.1
             
         best_score = 0
         
@@ -897,13 +975,23 @@ class BaomingToolFiller:
                         current_score = 25 + (coverage * 15) + (match_rate * 10)
             
             # ⚡️ 否定词惩罚：报备 vs 非报备 场景
+            # 更精确的检测：检测否定词是否直接修饰业务关键词
             if current_score > 0:
                 negation_patterns = ['非', '不', '无', '否', '未']
-                id_has_negation = any(neg in clean_identifier for neg in negation_patterns)
-                key_has_negation = any(neg in sub_key for neg in negation_patterns)
-                
-                # 业务关键词列表（需要区分否定状态的字段）
                 business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发']
+                
+                # 检测否定词+业务关键词的组合（如"非报备"、"不报备"）
+                def has_negated_business_keyword(text):
+                    for neg in negation_patterns:
+                        for bk in business_keywords:
+                            if f"{neg}{bk}" in text:
+                                return True
+                    return False
+                
+                id_has_negation = has_negated_business_keyword(clean_identifier)
+                key_has_negation = has_negated_business_keyword(sub_key)
+                
+                # 检测是否涉及业务关键词
                 has_business_keyword = any(bk in clean_identifier or bk in sub_key for bk in business_keywords)
                 
                 # 如果涉及业务关键词且否定状态不一致，大幅降低分数
@@ -913,6 +1001,14 @@ class BaomingToolFiller:
             
             if current_score > best_score:
                 best_score = current_score
+        
+        # 应用全局否定词惩罚因子
+        if global_penalty_factor < 1.0:
+            best_score = int(best_score * global_penalty_factor)
+        
+        # 应用平台惩罚/加分因子（新增）
+        if platform_penalty_factor != 1.0:
+            best_score = int(best_score * platform_penalty_factor)
                 
         return {'matched': best_score >= 50, 'score': best_score}
 

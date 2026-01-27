@@ -58,11 +58,12 @@ class TagButton(QPushButton):
 class NoticeCardWidget(QFrame):
     """通告卡片组件 - 简化版，直接显示内容"""
     
-    join_clicked = pyqtSignal(object)  # 链接信号，传递整个 notice 对象
+    join_clicked = pyqtSignal(object)  # 链接信号，传递卡片自身
     
     def __init__(self, notice, parent=None):
         super().__init__(parent)
         self.notice = notice
+        self.is_loading = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.init_ui()
         
@@ -167,27 +168,51 @@ class NoticeCardWidget(QFrame):
         layout.addWidget(self.content_edit, 1)
         
         # 3. 底部按钮 - 更紧凑
-        join_btn = QPushButton("加入链接")
-        join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        join_btn.setFixedHeight(34)
-        join_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['primary']};
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['primary_light']};
-            }}
-            QPushButton:pressed {{
-                background: {COLORS['primary_dark']};
-            }}
-        """)
-        join_btn.clicked.connect(lambda: self.join_clicked.emit(self.notice))
-        layout.addWidget(join_btn)
+        self.join_btn = QPushButton("加入链接")
+        self.join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.join_btn.setFixedHeight(34)
+        self._update_btn_style()
+        self.join_btn.clicked.connect(lambda: self.join_clicked.emit(self))
+        layout.addWidget(self.join_btn)
+    
+    def _update_btn_style(self, loading=False):
+        """更新按钮样式"""
+        if loading:
+            self.join_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #9CA3AF;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+            """)
+        else:
+            self.join_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {COLORS['primary']};
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{
+                    background: {COLORS['primary_light']};
+                }}
+                QPushButton:pressed {{
+                    background: {COLORS['primary_dark']};
+                }}
+            """)
+    
+    def set_loading(self, loading: bool):
+        """设置 loading 状态"""
+        self.is_loading = loading
+        self.join_btn.setEnabled(not loading)
+        self.join_btn.setText("添加中..." if loading else "加入链接")
+        self._update_btn_style(loading)
+        QApplication.processEvents()  # 立即更新UI
     
     def _get_full_content(self):
         """获取完整内容"""
@@ -552,56 +577,61 @@ class NoticePlazaWindow(QMainWindow):
         self.page += 1
         self.refresh_notices()
         
-    def add_to_my_links(self, notice):
+    def add_to_my_links(self, card: NoticeCardWidget):
         """将通告直接添加到我的链接（无弹窗确认）"""
         import re
         
-        # 获取完整内容
-        content = notice.content if notice.content else ""
-        if not content and notice.title:
-            # 兼容旧数据
-            parts = []
-            if notice.title:
-                parts.append(f"标题：{notice.title}")
-            if notice.brand:
-                parts.append(f"品牌：{notice.brand}")
-            if notice.product_info:
-                parts.append(f"产品：{notice.product_info}")
-            if notice.reward:
-                parts.append(f"报酬：{notice.reward}")
-            if notice.link:
-                parts.append(f"链接：{notice.link}")
-            content = "\n".join(parts)
+        notice = card.notice
         
-        # 尝试从内容中提取链接
-        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-        links = re.findall(url_pattern, content)
-        
-        if not links:
-            QMessageBox.warning(self, "提示", "未在通告内容中检测到有效链接！")
-            return
-        
-        # 获取当前用户
-        user = self.parent().current_user if self.parent() else None
-        if not user:
-            QMessageBox.warning(self, "提示", "请先登录后再添加链接！")
-            return
-        
-        # 使用第一个匹配到的链接
-        link_url = links[0]
-        
-        # 检查链接是否已存在
-        existing_link = self.db_manager.get_link_by_url(link_url, user=user)
-        if existing_link:
-            QMessageBox.information(self, "提示", "该链接已存在于您的链接库中！")
-            return
-        
-        # 创建新链接
-        # 链接名称：取内容前30个字符
-        link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
-        link_name = link_name.replace('\n', ' ')
+        # 设置 loading 状态
+        card.set_loading(True)
         
         try:
+            # 获取完整内容
+            content = notice.content if notice.content else ""
+            if not content and notice.title:
+                # 兼容旧数据
+                parts = []
+                if notice.title:
+                    parts.append(f"标题：{notice.title}")
+                if notice.brand:
+                    parts.append(f"品牌：{notice.brand}")
+                if notice.product_info:
+                    parts.append(f"产品：{notice.product_info}")
+                if notice.reward:
+                    parts.append(f"报酬：{notice.reward}")
+                if notice.link:
+                    parts.append(f"链接：{notice.link}")
+                content = "\n".join(parts)
+            
+            # 尝试从内容中提取链接
+            url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+            links = re.findall(url_pattern, content)
+            
+            if not links:
+                QMessageBox.warning(self, "提示", "未在通告内容中检测到有效链接！")
+                return
+            
+            # 获取当前用户
+            user = self.parent().current_user if self.parent() else None
+            if not user:
+                QMessageBox.warning(self, "提示", "请先登录后再添加链接！")
+                return
+            
+            # 使用第一个匹配到的链接
+            link_url = links[0]
+            
+            # 检查链接是否已存在
+            existing_link = self.db_manager.get_link_by_url(link_url, user=user)
+            if existing_link:
+                QMessageBox.information(self, "提示", "该链接已存在于您的链接库中！")
+                return
+            
+            # 创建新链接
+            # 链接名称：取内容前30个字符
+            link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
+            link_name = link_name.replace('\n', ' ')
+            
             self.db_manager.create_link(
                 name=link_name,
                 url=link_url,
@@ -611,11 +641,30 @@ class NoticePlazaWindow(QMainWindow):
                 description=f"来自通告广场"
             )
             
-            # 尝试刷新主窗口的数据
-            if self.parent() and hasattr(self.parent(), 'refresh_data'):
-                self.parent().refresh_data()
+            # 只刷新链接列表，避免刷新整个窗口导致卡顿
+            if self.parent() and hasattr(self.parent(), 'refresh_links_list'):
+                self.parent().refresh_links_list()
+            
+            # 成功后显示"已添加"
+            card.join_btn.setText("已添加 ✓")
+            card.join_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #10B981;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+            """)
+            
         except Exception as e:
             QMessageBox.warning(self, "失败", f"添加链接失败：{str(e)}")
+            card.set_loading(False)
+        finally:
+            # 如果不是成功状态，恢复按钮
+            if card.join_btn.text() == "添加中...":
+                card.set_loading(False)
 
     def copy_link(self, link):
         QApplication.clipboard().setText(link)

@@ -552,6 +552,11 @@ class NewFillWindow(QDialog):
         link_id = str(current_link.id)
         webview_infos = self.web_views_by_link.get(link_id, [])
         
+        # ⚡️ 获取当前标签页的容器，用于刷新布局
+        current_tab_widget = self.tab_widget.widget(current_index)
+        cards_container = getattr(current_tab_widget, 'cards_container', None)
+        scroll_area = getattr(current_tab_widget, 'scroll_area', None)
+        
         # ⚡️ 强制刷新每个 WebView - 使用隐藏/显示技巧
         for info in webview_infos:
             web_view = info.get('web_view')
@@ -560,6 +565,22 @@ class NewFillWindow(QDialog):
             if web_view:
                 # ⚡️ 关键修复：临时隐藏再显示，强制 WebView 重新渲染
                 web_view.hide()
+            
+            # ⚡️ 同时刷新占位符
+            if placeholder:
+                placeholder.updateGeometry()
+        
+        # ⚡️ 强制刷新父容器布局 - 关键修复
+        if cards_container:
+            if cards_container.layout():
+                cards_container.layout().invalidate()
+                cards_container.layout().activate()
+            cards_container.updateGeometry()
+            cards_container.update()
+        
+        if scroll_area:
+            scroll_area.updateGeometry()
+            scroll_area.update()
         
         # 处理事件队列
         QApplication.processEvents()
@@ -568,11 +589,30 @@ class NewFillWindow(QDialog):
         def show_all_webviews():
             if not self._is_valid():
                 return
+            
+            # ⚡️ 再次刷新父容器布局
+            if cards_container:
+                if cards_container.layout():
+                    cards_container.layout().invalidate()
+                    cards_container.layout().activate()
+                cards_container.updateGeometry()
+            
+            if scroll_area:
+                scroll_area.updateGeometry()
+            
             for info in webview_infos:
                 web_view = info.get('web_view')
+                placeholder = info.get('placeholder')
+                
                 if web_view:
                     web_view.show()
                     web_view.update()
+                    # ⚡️ 强制 WebView 重新计算几何尺寸
+                    web_view.updateGeometry()
+                    
+                if placeholder:
+                    placeholder.updateGeometry()
+            
             QApplication.processEvents()
         
         # 50ms 后显示
@@ -2416,6 +2456,63 @@ class NewFillWindow(QDialog):
                     combo.setCurrentIndex(-1)
                     combo.blockSignals(False)
     
+    def _apply_batch_format_for_card(self, card, format_index: int):
+        """为单个名片应用批量格式选择（内部方法）
+        
+        Args:
+            card: 名片对象
+            format_index: 格式索引（0=数字形式, 1=w形式, 2=w为单位）
+        """
+        import json
+        
+        card_id = str(card.id)
+        
+        # 确保该名片在 selected_values 中有记录
+        if card_id not in self.selected_values:
+            self.selected_values[card_id] = {}
+        
+        # 检查名片是否有配置
+        if not hasattr(card, 'configs') or not card.configs:
+            return
+        
+        # 遍历名片的所有字段配置
+        for config in card.configs:
+            key = ""
+            value = ""
+            
+            # 兼容字典和对象两种格式
+            if isinstance(config, dict):
+                key = config.get('key', '')
+                value = config.get('value', '')
+            elif hasattr(config, 'key'):
+                key = config.key
+                value = getattr(config, 'value', '')
+            
+            if not key:
+                continue
+            
+            # 解析多值字段
+            values_list = []
+            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, list):
+                        values_list = parsed
+                except json.JSONDecodeError:
+                    values_list = [value] if value else []
+            else:
+                values_list = [str(value)] if value is not None else []
+            
+            # 只处理多值字段（多于1个值）
+            if len(values_list) <= 1:
+                continue
+            
+            # 更新选中值
+            if format_index < len(values_list):
+                self.selected_values[card_id][key] = values_list[format_index]
+            else:
+                self.selected_values[card_id][key] = ""
+    
     def toggle_right_panel(self, panel: QFrame, btn: QPushButton):
         """折叠/展开右侧面板"""
         if panel.isVisible():
@@ -2481,14 +2578,21 @@ class NewFillWindow(QDialog):
         # 切换到编辑页 (index 1)
         self.right_panel_stack.setCurrentIndex(1)
         
-        # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
-        QTimer.singleShot(50, self._refresh_left_panel_layout)
+        # ⚡️ 修复：立即处理事件，让布局先稳定
+        QApplication.processEvents()
+        
+        # ⚡️ 修复：使用更长的延迟（100ms），确保右侧面板布局完成后再刷新左侧
+        QTimer.singleShot(100, self._refresh_left_panel_layout)
     
     def cancel_card_edit(self):
         """取消编辑"""
         self.right_panel_stack.setCurrentIndex(0)
-        # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
-        QTimer.singleShot(50, self._refresh_left_panel_layout)
+        
+        # ⚡️ 修复：立即处理事件，让布局先稳定
+        QApplication.processEvents()
+        
+        # ⚡️ 修复：使用更长的延迟（100ms），确保右侧面板布局完成后再刷新左侧
+        QTimer.singleShot(100, self._refresh_left_panel_layout)
         
     def save_card_edit(self):
         """保存编辑"""
@@ -2553,8 +2657,12 @@ class NewFillWindow(QDialog):
             
             # 切回详情页
             self.right_panel_stack.setCurrentIndex(0)
-            # ⚡️ 修复：切换页面后刷新左侧 WebView 布局，避免显示异常
-            QTimer.singleShot(50, self._refresh_left_panel_layout)
+            
+            # ⚡️ 修复：立即处理事件，让布局先稳定
+            QApplication.processEvents()
+            
+            # ⚡️ 修复：使用更长的延迟（100ms），确保右侧面板布局完成后再刷新左侧
+            QTimer.singleShot(100, self._refresh_left_panel_layout)
             
             # 简单提示（不弹窗）
             print(f"✅ 名片 '{name}' 更新成功")
@@ -2774,10 +2882,14 @@ class NewFillWindow(QDialog):
                         target_info['web_view'].setProperty("card_data", latest_card)
                         # 同时更新 self.current_card
                         self.current_card = latest_card
-                        # ⚡️ 关键修复：清空该名片的 selected_values 缓存，确保使用最新数据
+                        # ⚡️ 兼容处理：清空缓存前保存用户选择的格式索引，清空后重新应用
                         card_id = str(latest_card.id)
+                        batch_format_index = self.batch_index_combo.currentIndex() if hasattr(self, 'batch_index_combo') else 0
                         if card_id in self.selected_values:
                             del self.selected_values[card_id]
+                        # 重新应用用户选择的格式
+                        if batch_format_index > 0:
+                            self._apply_batch_format_for_card(latest_card, batch_format_index)
                         print(f"✅ 已刷新名片数据: {latest_card.name}")
                 except Exception as e:
                     print(f"⚠️ 刷新名片失败: {e}")
@@ -3175,10 +3287,14 @@ class NewFillWindow(QDialog):
                     card_data = latest_card
                     # 更新 WebView 的属性
                     web_view.setProperty("card_data", latest_card)
-                    # ⚡️ 关键修复：清空该名片的 selected_values 缓存，确保使用最新数据
+                    # ⚡️ 兼容处理：清空缓存前保存用户选择的格式索引，清空后重新应用
                     card_id = str(latest_card.id)
+                    batch_format_index = self.batch_index_combo.currentIndex() if hasattr(self, 'batch_index_combo') else 0
                     if card_id in self.selected_values:
                         del self.selected_values[card_id]
+                    # 重新应用用户选择的格式
+                    if batch_format_index > 0:
+                        self._apply_batch_format_for_card(latest_card, batch_format_index)
                     print(f"✅ 已刷新名片数据: {latest_card.name}")
             except Exception as e:
                 print(f"⚠️ 刷新名片失败: {e}")
@@ -6288,9 +6404,59 @@ class NewFillWindow(QDialog):
         const subKeywordsNoPrefix = splitKeywords(keyword).map(k => cleanTextNoPrefix(k)).filter(k => k);
         if (subKeywordsNoPrefix.length === 0) subKeywordsNoPrefix.push(cleanKeywordNoPrefix);
         
+        // ⚡️ 平台关键词识别与互斥检测（新增）
+        const platformKeywordsMap = {{
+            'wechat': ['微信', 'wx', 'vx', '微信号', '微信名', '微信昵称', '微信id'],
+            'xiaohongshu': ['小红书', '红书', '小红薯', '红薯', 'xhs', '蒲公英', '平台昵称', '账号昵称', '账号名', '主页'],
+            'douyin': ['抖音', 'dy', '抖音号'],
+            'weibo': ['微博', 'wb', '微博号'],
+            'bilibili': ['b站', 'bilibili', '哔哩哔哩', 'up主']
+        }};
+        
+        const detectPlatform = (text) => {{
+            if (!text) return 'unknown';
+            const textLower = text.toLowerCase();
+            for (const [platform, keywords] of Object.entries(platformKeywordsMap)) {{
+                for (const keyword of keywords) {{
+                    if (textLower.includes(keyword)) {{
+                        return platform;
+                    }}
+                }}
+            }}
+            return 'unknown';
+        }};
+        
+        // 检测名片字段的平台归属（全局检测一次）
+        const configPlatform = detectPlatform(keyword.toLowerCase());
+        
         let bestScore = 0;
         let bestIdentifier = null;
         let bestSubKey = null;
+        
+        // ⚡️【优先级优化】先检查名片key整体是否等于表单标识符（独立字段最高优先级）
+        for (const identifier of identifiers) {{
+            const cleanIdentifier = cleanText(identifier);
+            if (!cleanIdentifier) continue;
+            
+            // 名片key整体完全等于表单标识符 → 105分（最高优先级）
+            if (cleanKeyword === cleanIdentifier) {{
+                // 检测平台并应用惩罚因子
+                const fieldPlatform = detectPlatform(cleanIdentifier);
+                let finalScore = 105;
+                if (fieldPlatform !== 'unknown' && configPlatform !== 'unknown' && fieldPlatform !== configPlatform) {{
+                    finalScore = Math.floor(finalScore * 0.05);
+                    console.log(`[平台互斥] 表单"${{formTitle}}"(${{fieldPlatform}}) vs 名片"${{keyword.substring(0, 30)}}..."(${{configPlatform}}) → 惩罚0.05`);
+                }} else {{
+                    console.log(`[精确匹配] "${{cleanIdentifier}}" 名片key完全匹配 → 105分`);
+                }}
+                return {{
+                    matched: finalScore >= 50,
+                    identifier: identifier,
+                    score: finalScore,
+                    matchedKey: cleanKeyword
+                }};
+            }}
+        }}
         
         for (let i = 0; i < subKeywords.length; i++) {{
             const subKey = subKeywords[i];
@@ -6301,6 +6467,22 @@ class NewFillWindow(QDialog):
                 const cleanIdentifier = cleanText(identifier);
                 const cleanIdentifierNoPrefix = cleanTextNoPrefix(identifier);
                 if (!cleanIdentifier) continue;
+                
+                // 检测表单字段的平台归属
+                const fieldPlatform = detectPlatform(cleanIdentifier);
+                
+                // 计算平台惩罚/加分因子
+                let platformFactor = 1.0;
+                if (fieldPlatform !== 'unknown' && configPlatform !== 'unknown') {{
+                    if (fieldPlatform !== configPlatform) {{
+                        // 不同平台，大幅惩罚
+                        platformFactor = 0.05;
+                        console.log(`[平台互斥] 表单"${{formTitle}}"(${{fieldPlatform}}) vs 名片"${{keyword.substring(0, 30)}}..."(${{configPlatform}}) → 惩罚0.05`);
+                    }} else {{
+                        // 同一平台，加分
+                        platformFactor = 1.2;
+                    }}
+                }}
                 
                 const identifierCoreWords = extractCoreWords(identifier);
                 let currentScore = 0;
@@ -6347,19 +6529,25 @@ class NewFillWindow(QDialog):
                     const coverage = cleanIdentifierNoPrefix.length / subKeyNoPrefix.length;
                     currentScore = 53 + (coverage * 35);
                 }}
-                // 7. 核心词匹配
+                // 7. 核心词匹配 - ⚡️ 降低核心词匹配分数，优先字符串匹配
+                // 用户要求：不希望采用关键词匹配，直接比较字符串匹配度
                 else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
                     const commonCoreWords = subKeyCoreWords.filter(w => identifierCoreWords.includes(w));
                     if (commonCoreWords.length > 0) {{
                         const coreMatchRatio = commonCoreWords.length / Math.max(subKeyCoreWords.length, identifierCoreWords.length);
                         
+                        // ⚡️ 核心词完全一致才给较高分（但仍低于包含匹配）
                         if (commonCoreWords.length === subKeyCoreWords.length && 
-                            commonCoreWords.length === identifierCoreWords.length) {{
-                            currentScore = 88;
-                        }} else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1) {{
-                            currentScore = 80;
+                            commonCoreWords.length === identifierCoreWords.length &&
+                            subKeyCoreWords.length >= 2) {{
+                            // 核心词完全相同且至少2个核心词，给70分
+                            currentScore = 70;
+                        }} else if (coreMatchRatio >= 0.8 && commonCoreWords.length >= 2) {{
+                            // 核心词大部分匹配（80%+）且至少2个匹配，给60分
+                            currentScore = 60;
                         }} else {{
-                            currentScore = 55 + Math.floor(coreMatchRatio * 25);
+                            // 单个核心词匹配，只给40分（降低优先级）
+                            currentScore = 40 + Math.floor(coreMatchRatio * 10);
                         }}
                     }}
                 }}
@@ -6379,6 +6567,11 @@ class NewFillWindow(QDialog):
                             currentScore = 25 + (coverage * 15) + (matchRate * 10);
                         }}
                     }}
+                }}
+                
+                // ⚡️ 应用平台惩罚/加分因子（新增）
+                if (currentScore > 0 && platformFactor !== 1.0) {{
+                    currentScore = Math.floor(currentScore * platformFactor);
                 }}
                 
                 if (currentScore > bestScore) {{
@@ -6778,20 +6971,61 @@ class NewFillWindow(QDialog):
                     // ⚡️ 扩展选择器：支持 text、tel、number 类型的输入框
                     const textInput = fieldDiv.querySelector('input[type="text"], input[type="tel"], input[type="number"], textarea');
                     if (textInput && !textInput.readOnly && !textInput.disabled) {{
-                        const identifiers = [title];
-                        // 添加补充标识符
-                        if (title.includes('昵称')) identifiers.push('昵称', '用户名', '名字');
+                        // ⚡️【核心优化】智能提取核心标题，去除序号和说明文字
+                        // 例如: "1、账号类型（科技、文创、亲子、情侣、萌宠、生活类）" -> "账号类型"
+                        let coreTitle = title;
+                        // 1. 去除开头的序号（如 "1、" "2." "*1" "Q1"）
+                        coreTitle = coreTitle.replace(/^[\\*]*[\\dqQ]+[、.．:：\\s]*/g, '');
+                        // 2. 提取括号前的核心内容
+                        const bracketMatch = coreTitle.match(/^([^（(【\\[]+)/);
+                        if (bracketMatch && bracketMatch[1].trim().length >= 2) {{
+                            coreTitle = bracketMatch[1].trim();
+                        }}
+                        // 3. 如果核心部分太长，取第一个词组
+                        if (coreTitle.length > 10) {{
+                            const parts = coreTitle.split(/[，,、\\s]+/);
+                            if (parts[0] && parts[0].length >= 2) {{
+                                coreTitle = parts[0];
+                            }}
+                        }}
+                        // 4. 去除尾部的数字和单位
+                        coreTitle = coreTitle.replace(/\\d+[万wW以上以下以内左右]+.*$/, '');
+                        // 5. 如果结果太短，回退到原标题
+                        if (!coreTitle || coreTitle.length < 2) {{
+                            coreTitle = title;
+                        }}
+                        
+                        // 使用核心标题作为主标识符
+                        const identifiers = [coreTitle];
+                        // 如果核心标题与原标题不同，也加入原标题
+                        if (coreTitle !== title) {{
+                            identifiers.push(title);
+                        }}
+                        
+                        // 添加补充标识符（基于原标题检测）
+                        if (title.includes('昵称')) identifiers.push('昵称', '达人昵称', '用户名', '名字');
+                        if (title.includes('达人')) identifiers.push('达人昵称', '达人');
                         if (title.includes('id') || title.includes('ID')) identifiers.push('id', '账号', 'ID');
                         if (title.includes('链接')) identifiers.push('主页链接', '链接', '主页');
                         if (title.includes('粉丝')) identifiers.push('粉丝数', '粉丝');
                         if (title.includes('赞藏')) identifiers.push('赞藏数', '点赞', '收藏');
-                        if (title.includes('价格')) identifiers.push('报价', '价格', '图文价格');
+                        if (title.includes('价格') || title.includes('报价') || title.includes('底价')) identifiers.push('报价', '价格', '图文价格', '视频价格');
                         if (title.includes('微信')) identifiers.push('微信号', '微信', 'wx');
-                        // ⚡️ 增强手机号匹配：同时检测 '电话' 和 '手机'
-                        if (title.includes('电话') || title.includes('手机')) identifiers.push('手机', '电话', '手机号', '电话号码', '联系方式');
+                        // ⚡️ 增强手机号匹配：同时检测 '电话' 和 '手机' 和 '联系方式' 和 '联系'
+                        if (title.includes('电话') || title.includes('手机') || title.includes('联系方式') || (title.includes('联系') && !title.includes('联系人'))) {{
+                            identifiers.push('手机', '电话', '手机号', '电话号码', '联系方式', '联系电话');
+                        }}
                         // ⚡️ 新增：地区/城市相关字段识别
                         if (title.includes('省') || title.includes('市') || title.includes('区') || title.includes('城市') || title.includes('地区')) {{
                             identifiers.push('城市', '地区', '所在地', '省份', '所在城市', '地址');
+                        }}
+                        // ⚡️ 新增：账号类型相关字段识别
+                        if (title.includes('类型') || title.includes('类别') || title.includes('领域') || title.includes('分类')) {{
+                            identifiers.push('账号类型', '类型', '类别', '领域', '分类', '账号类别');
+                        }}
+                        // ⚡️ 新增：非报备相关字段识别
+                        if (title.includes('非报备') || title.includes('不报备')) {{
+                            identifiers.push('非报备', '不报备', '非报备价格', '非报备图文', '非报备视频');
                         }}
                         
                         // 传入表单标题用于互斥检测
@@ -7532,6 +7766,34 @@ class NewFillWindow(QDialog):
         document.querySelectorAll('input, textarea').forEach(input => {{
             const style = window.getComputedStyle(input);
             if (style.display !== 'none' && style.visibility !== 'hidden') {{
+                // ⚡️ 排除不应该被填充的输入框
+                // 1. 排除举报弹窗相关的输入框
+                const fieldset = input.closest('fieldset');
+                if (fieldset) {{
+                    const fieldsetText = fieldset.innerText || '';
+                    if (fieldsetText.includes('举报') || fieldsetText.includes('投诉')) {{
+                        console.log('[石墨] 跳过举报/投诉相关输入框');
+                        return;
+                    }}
+                }}
+                // 2. 排除模态框/弹窗中的输入框
+                const modal = input.closest('[class*="Modal"], [class*="Dialog"], [class*="Popup"], [role="dialog"]');
+                if (modal) {{
+                    const modalStyle = window.getComputedStyle(modal);
+                    if (modalStyle.display === 'none' || modalStyle.visibility === 'hidden' || modalStyle.opacity === '0') {{
+                        return;
+                    }}
+                }}
+                // 3. 排除搜索框等非表单输入框
+                if (input.type === 'search' || input.name === 'search' || input.id === 'search') {{
+                    return;
+                }}
+                // 4. 确保输入框真正可见（有尺寸）
+                const rect = input.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) {{
+                    return;
+                }}
+                
                 inputs.push(input);
             }}
         }});
@@ -7903,6 +8165,37 @@ class NewFillWindow(QDialog):
                     }}
                 }}
                 
+                // ⚡️ 【关键修复】反义词冲突检测 - 防止"报备"匹配到"非报备"
+                // 参考 WPS/见数的处理方案
+                if (currentScore > 0) {{
+                    const negationPairs = [
+                        ['非报备', '报备'],
+                        ['不报备', '报备'],
+                        ['非授权', '授权'],
+                        ['无授权', '授权'],
+                        ['非视频', '视频'],
+                        ['非图文', '图文']
+                    ];
+                    
+                    for (const [negativeWord, positiveWord] of negationPairs) {{
+                        // 检测名片字段是否包含否定词
+                        const subKeyHasNegative = subKey.includes(negativeWord);
+                        // 检测表单标识是否包含否定词
+                        const identifierHasNegative = cleanIdentifier.includes(negativeWord);
+                        // 检测是否只包含肯定词（包含肯定词但不包含否定词）
+                        const subKeyHasPositiveOnly = subKey.includes(positiveWord) && !subKeyHasNegative;
+                        const identifierHasPositiveOnly = cleanIdentifier.includes(positiveWord) && !identifierHasNegative;
+                        
+                        // 如果一方是否定形式，另一方是肯定形式，则存在冲突，分数清零
+                        if ((subKeyHasNegative && identifierHasPositiveOnly) || 
+                            (identifierHasNegative && subKeyHasPositiveOnly)) {{
+                            console.log(`[石墨] ⚠️ 反义词冲突: 名片"${{subKey}}" vs 表单"${{cleanIdentifier}}" (${{negativeWord}}/${{positiveWord}})，分数从${{currentScore}}降为0`);
+                            currentScore = 0;
+                            break;
+                        }}
+                    }}
+                }}
+                
                 if (currentScore > bestScore) {{
                     bestScore = currentScore;
                     bestIdentifier = identifier;
@@ -7923,73 +8216,232 @@ class NewFillWindow(QDialog):
     
     // 填充输入框 - React 深度兼容（修复石墨文档提交问题）
     function fillInput(input, value) {{
+        const stringValue = String(value);
+        
+        // ⚡️ 【关键修复】React 18+ 需要先重置 _valueTracker 才能正确触发更新
+        // React 使用 _valueTracker 来追踪输入值变化，如果不重置，React 会认为值没有变化
+        function resetReactValueTracker(element) {{
+            const tracker = element._valueTracker;
+            if (tracker) {{
+                tracker.setValue('');
+            }}
+        }}
+        
+        // ⚡️ 【新增】检测是否是石墨数字输入框（带 # 号图标的）
+        // 数字输入框的特征：被 InputWrapper-sc-pke9o8 包裹，有 # 号图标
+        const isNumberInput = input.closest('.InputWrapper-sc-pke9o8') !== null || 
+                              input.closest('[class*="InputWrapper-sc-"]') !== null ||
+                              (input.placeholder && input.placeholder.includes('数字'));
+        
+        if (isNumberInput) {{
+            console.log('[fillInput] 📊 检测到数字输入框，使用增强填充策略');
+        }}
+        
         // 1. 聚焦输入框
         input.focus();
-        input.click();
         
-        // 2. 清空现有内容
-        input.value = '';
-        
-        // 3. 使用原生 setter 设置值（React 关键）
+        // 2. 使用原生 setter 设置值（React 关键）
         const isTextArea = input.tagName === 'TEXTAREA';
         const proto = isTextArea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
         
-        try {{
-            const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            nativeValueSetter.call(input, value);
-        }} catch (e) {{
-            input.value = value;
+        // ⚡️ 【新增】对于数字输入框，先尝试使用 execCommand 方法（更接近真实用户输入）
+        if (isNumberInput) {{
+            try {{
+                // 先选中所有内容
+                input.select();
+                // 使用 execCommand 插入文本（这会触发真实的输入事件）
+                const execResult = document.execCommand('insertText', false, stringValue);
+                if (execResult && input.value === stringValue) {{
+                    console.log('[fillInput] ✅ execCommand 成功');
+                    // execCommand 成功，直接返回（跳过后续步骤）
+                    console.log(`[fillInput] 填充: "${{stringValue.substring(0, 20)}}..." -> 实际值: "${{input.value.substring(0, 20)}}..."`);
+                    return;
+                }}
+            }} catch (e) {{
+                console.log('[fillInput] execCommand 失败，使用备用方案:', e.message);
+            }}
         }}
         
-        // 4. 触发 React 合成事件 - 使用 InputEvent（关键！）
+        try {{
+            // ⚡️ 【关键】先重置 React 的 valueTracker
+            resetReactValueTracker(input);
+            
+            // 获取原生 setter
+            const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            
+            // 先清空
+            nativeValueSetter.call(input, '');
+            
+            // 再设置新值
+            nativeValueSetter.call(input, stringValue);
+        }} catch (e) {{
+            console.warn('[fillInput] 原生setter失败，使用直接赋值:', e);
+            input.value = stringValue;
+        }}
+        
+        // 3. ⚡️ 【关键】使用 InputEvent 而非普通 Event（React 17+ 更好支持）
         const inputEvent = new InputEvent('input', {{
             bubbles: true,
             cancelable: true,
             inputType: 'insertText',
-            data: value
+            data: stringValue
         }});
+        // 手动设置 simulated 标记，让 React 识别为用户输入
+        Object.defineProperty(inputEvent, 'simulated', {{ value: true }});
         input.dispatchEvent(inputEvent);
         
-        // 5. 触发 change 事件
+        // 4. 触发 change 事件（某些 React 组件监听这个）
         const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
         input.dispatchEvent(changeEvent);
         
-        // 6. 模拟键盘事件序列
-        const keyboardEvents = ['keydown', 'keypress', 'keyup'];
-        keyboardEvents.forEach(eventName => {{
-            const keyEvent = new KeyboardEvent(eventName, {{
-                bubbles: true,
-                cancelable: true,
-                key: value.slice(-1) || 'a',
-                code: 'KeyA'
-            }});
-            input.dispatchEvent(keyEvent);
-        }});
-        
-        // 7. 再次确认值已设置
-        if (input.value !== value) {{
-            input.value = value;
-            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        }}
-        
-        // 8. 触发 blur 完成编辑
-        input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-        
-        // 9. 尝试触发 React 内部状态更新
+        // 5. ⚡️ 【新增】尝试直接调用 React 的 onChange 处理器
         try {{
-            // React Fiber 节点查找
-            const reactKey = Object.keys(input).find(key => 
-                key.startsWith('__reactFiber$') || 
-                key.startsWith('__reactInternalInstance$') ||
+            // 查找 React Fiber 或 Props 节点
+            const reactPropsKey = Object.keys(input).find(key => 
                 key.startsWith('__reactProps$')
             );
-            if (reactKey && input[reactKey]) {{
-                const props = input[reactKey].memoizedProps || input[reactKey].pendingProps || {{}};
-                if (props.onChange) {{
-                    props.onChange({{ target: input, currentTarget: input }});
+            if (reactPropsKey && input[reactPropsKey]) {{
+                const props = input[reactPropsKey];
+                if (props.onChange && typeof props.onChange === 'function') {{
+                    // 构造 React 风格的事件对象
+                    const syntheticEvent = {{
+                        target: {{ ...input, value: stringValue }},
+                        currentTarget: input,
+                        type: 'change',
+                        nativeEvent: inputEvent,
+                        preventDefault: () => {{}},
+                        stopPropagation: () => {{}},
+                        persist: () => {{}}
+                    }};
+                    // ⚡️ 确保 target.value 返回正确的值
+                    Object.defineProperty(syntheticEvent.target, 'value', {{
+                        get: () => stringValue,
+                        configurable: true
+                    }});
+                    props.onChange(syntheticEvent);
+                    console.log('[fillInput] ✅ 已调用 React onChange');
                 }}
             }}
+        }} catch (e) {{
+            console.log('[fillInput] React props 调用跳过:', e.message);
+        }}
+        
+        // 6. ⚡️ 【新增】针对石墨特殊组件：模拟完整的输入过程
+        // 石墨可能使用 onCompositionEnd 来处理中文输入
+        try {{
+            // 触发 compositionstart
+            const compStartEvent = new CompositionEvent('compositionstart', {{
+                bubbles: true,
+                cancelable: true,
+                data: ''
+            }});
+            input.dispatchEvent(compStartEvent);
+            
+            // 触发 compositionend
+            const compEndEvent = new CompositionEvent('compositionend', {{
+                bubbles: true,
+                cancelable: true,
+                data: stringValue
+            }});
+            input.dispatchEvent(compEndEvent);
         }} catch (e) {{}}
+        
+        // 7. 模拟键盘事件（某些组件需要）
+        try {{
+            const keydownEvent = new KeyboardEvent('keydown', {{
+                bubbles: true,
+                cancelable: true,
+                key: stringValue.slice(-1) || 'a',
+                keyCode: 65
+            }});
+            input.dispatchEvent(keydownEvent);
+            
+            const keyupEvent = new KeyboardEvent('keyup', {{
+                bubbles: true,
+                cancelable: true,
+                key: stringValue.slice(-1) || 'a',
+                keyCode: 65
+            }});
+            input.dispatchEvent(keyupEvent);
+        }} catch (e) {{}}
+        
+        // 8. ⚡️ 【新增】针对数字输入框：通过 React Fiber 强制更新状态
+        if (isNumberInput) {{
+            try {{
+                // 方法1：查找 React Fiber 节点并尝试更新
+                const fiberKey = Object.keys(input).find(key => 
+                    key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')
+                );
+                if (fiberKey) {{
+                    let fiber = input[fiberKey];
+                    // 向上遍历 Fiber 树，找到状态组件
+                    while (fiber) {{
+                        if (fiber.stateNode && fiber.stateNode.setState) {{
+                            // 找到有状态的组件
+                            console.log('[fillInput] 🔧 找到 React 状态组件，尝试强制更新');
+                            break;
+                        }}
+                        // 尝试找到 memoizedState
+                        if (fiber.memoizedState && typeof fiber.memoizedState === 'object') {{
+                            console.log('[fillInput] 🔧 找到 memoizedState');
+                        }}
+                        fiber = fiber.return;
+                    }}
+                }}
+                
+                // 方法2：再次重置 valueTracker 并重新设置值
+                resetReactValueTracker(input);
+                const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                nativeValueSetter.call(input, stringValue);
+                
+                // 再次触发事件
+                input.dispatchEvent(new InputEvent('input', {{
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: 'insertText',
+                    data: stringValue
+                }}));
+            }} catch (e) {{
+                console.log('[fillInput] Fiber 更新跳过:', e.message);
+            }}
+        }}
+        
+        // 9. 最终验证并补救
+        if (input.value !== stringValue) {{
+            console.warn('[fillInput] ⚠️ 值未正确设置，尝试最终补救');
+            input.value = stringValue;
+            // 再次重置 tracker 并触发事件
+            resetReactValueTracker(input);
+            input.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: stringValue }}));
+            input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }}
+        
+        // 10. ⚡️ 【重要修改】延迟触发 blur，给 React 足够时间处理状态更新
+        // 对于数字输入框，不立即触发 blur，而是等待一小段时间
+        if (isNumberInput) {{
+            // 数字输入框：延迟 blur 或不触发（避免 React 重新渲染清空值）
+            setTimeout(() => {{
+                // 再次检查并确保值正确
+                if (input.value !== stringValue) {{
+                    resetReactValueTracker(input);
+                    const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                    try {{
+                        nativeValueSetter.call(input, stringValue);
+                    }} catch(e) {{
+                        input.value = stringValue;
+                    }}
+                    input.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: stringValue }}));
+                }}
+                // 最后触发 blur
+                input.dispatchEvent(new FocusEvent('blur', {{ bubbles: true }}));
+            }}, 50);
+        }} else {{
+            // 普通输入框：立即触发 blur
+            input.dispatchEvent(new FocusEvent('blur', {{ bubbles: true }}));
+        }}
+        
+        // 11. 打印调试信息
+        console.log(`[fillInput] 填充: "${{stringValue.substring(0, 20)}}..." -> 实际值: "${{input.value.substring(0, 20)}}..."`);
     }}
     
     // 主执行函数 - 以输入框为主体，为每个输入框找最佳匹配的名片字段
@@ -8206,7 +8658,7 @@ class NewFillWindow(QDialog):
             // 去除序号前缀
             cleaned = cleaned.replace(/^[\\d\\*\\.、]+\\s*/, '').trim();
             // 去除必填标记
-            cleaned = cleaned.replace(/[\\*必填]/g, '').trim();
+            cleaned = cleaned.replace(/\\*/g, '').replace(/必填/g, '').trim();
             // 去除多余空白
             cleaned = cleaned.replace(/\\s+/g, ' ').trim();
             
@@ -8555,13 +9007,23 @@ class NewFillWindow(QDialog):
                 }}
                 
                 // ⚡️ 【关键】否定词惩罚检测 - 防止"报备"匹配到"非报备"
+                // 更精确的检测：检测否定词是否直接修饰业务关键词（如"非报备"、"不报备"）
                 if (currentScore > 0) {{
                     const negationPatterns = ['非', '不', '无', '否', '未'];
-                    const idHasNegation = negationPatterns.some(neg => cleanIdentifier.includes(neg));
-                    const ckwHasNegation = negationPatterns.some(neg => subKey.includes(neg));
-                    
-                    // 涉及业务关键词时，检测否定状态是否一致
                     const businessKeywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发'];
+                    
+                    // 检测否定词+业务关键词的组合
+                    const hasNegatedBusinessKeyword = (text) => {{
+                        for (const neg of negationPatterns) {{
+                            for (const bk of businessKeywords) {{
+                                if (text.includes(neg + bk)) return true;
+                            }}
+                        }}
+                        return false;
+                    }};
+                    
+                    const idHasNegation = hasNegatedBusinessKeyword(cleanIdentifier);
+                    const ckwHasNegation = hasNegatedBusinessKeyword(subKey);
                     const hasBusinessKeyword = businessKeywords.some(bk => cleanIdentifier.includes(bk) || subKey.includes(bk));
                     
                     if (hasBusinessKeyword && idHasNegation !== ckwHasNegation) {{
@@ -8850,7 +9312,7 @@ class NewFillWindow(QDialog):
             // 去除序号前缀（如 "*1."、"2."、"* 3."等）
             cleaned = cleaned.replace(/^[\\*\\s]*\\d+[\\. 、]+\\s*/, '').trim();
             // 去除必填标记
-            cleaned = cleaned.replace(/[\\*必填]/g, '').trim();
+            cleaned = cleaned.replace(/\\*/g, '').replace(/必填/g, '').trim();
             // 去除多余空白
             cleaned = cleaned.replace(/\\s+/g, ' ').trim();
             
@@ -9484,102 +9946,230 @@ class NewFillWindow(QDialog):
         return true;
     }}
     
-    // 【核心】匹配关键词 - 动态覆盖率评分系统
-    function matchKeyword(identifiers, keyword, formTitle = '', cardValue = '') {{
-        if (!keyword) return {{ matched: false, identifier: null, score: 0 }};
+    // ═══════════════════════════════════════════════════════════════
+    // 【核心】匹配关键词 - 麦客CRM算法移植版
+    // 特点：1.直接匹配优先 2.否定词严格检测 3.图文/视频区分
+    // ═══════════════════════════════════════════════════════════════
+    function matchKeyword(identifiers, cardKey, formTitle = '', cardValue = '') {{
+        if (!cardKey) return {{ matched: false, identifier: null, score: 0 }};
         
         // 先检查互斥性
-        if (formTitle && !areFieldsCompatible(formTitle, keyword, cardValue)) {{
+        if (formTitle && !areFieldsCompatible(formTitle, cardKey, cardValue)) {{
             return {{ matched: false, identifier: null, score: 0, blocked: true }};
         }}
-        
-        const subKeywords = splitKeywords(keyword);
-        if (subKeywords.length === 0) return {{ matched: false, identifier: null, score: 0 }};
         
         let bestScore = 0;
         let bestIdentifier = null;
         let bestSubKey = null;
         
-        for (const subKey of subKeywords) {{
-            const cleanSubKey = normalizeText(subKey);
-            if (!cleanSubKey || cleanSubKey.length < 1) continue;
+        // ⚡️【关键】否定词+业务关键词检测函数
+        const negationPatterns = ['非', '不', '无', '否', '未'];
+        const businessKeywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发'];
+        
+        const hasNegatedBusinessKeyword = (text) => {{
+            for (const neg of negationPatterns) {{
+                for (const bk of businessKeywords) {{
+                    if (text.includes(neg + bk)) return true;
+                }}
+            }}
+            return false;
+        }};
+        
+        // ⚡️【关键】图文/视频类型检测
+        const hasGraphicKeyword = (text) => text.includes('图文');
+        const hasVideoKeyword = (text) => text.includes('视频');
+        
+        // 遍历每个表单标识符
+        for (const identObj of identifiers) {{
+            const identifier = typeof identObj === 'string' ? identObj : identObj.text;
+            const cleanId = cleanText(identifier);
+            if (!cleanId || cleanId.length < 1) continue;
             
-            const subKeyCoreWords = extractCoreWords(subKey);
-            
-            for (const identObj of identifiers) {{
-                const identifier = typeof identObj === 'string' ? identObj : identObj.text;
-                const cleanIdentifier = normalizeText(identifier);
-                if (!cleanIdentifier || cleanIdentifier.length < 1) continue;
+            // ⚡️【关键优化】第一步：检查表单标识是否在整个名片key中找到完全匹配
+            const fullCleanCardKey = cleanText(cardKey);
+            if (fullCleanCardKey.includes(cleanId) && cleanId.length >= 2) {{
+                // 表单标识完全包含在名片key中，计算覆盖率
+                const coverage = cleanId.length / fullCleanCardKey.length;
+                let directScore = 0;
                 
-                const identifierCoreWords = extractCoreWords(identifier);
+                // 检查是否是作为独立别名存在
+                const originalParts = cardKey.split(/[、，,;；|｜\\/／]/);
+                const isExactAlias = originalParts.some(part => cleanText(part) === cleanId);
+                
+                // 检查是否是独立字段（名片key整体等于表单标识）
+                const isExactKeyMatch = fullCleanCardKey === cleanId;
+                
+                if (isExactKeyMatch) {{
+                    directScore = 105;
+                }} else if (isExactAlias) {{
+                    directScore = 100;
+                }} else if (coverage >= 0.8) {{
+                    directScore = 95;
+                }} else if (coverage >= 0.5) {{
+                    directScore = 85;
+                }} else {{
+                    directScore = 70 + Math.floor(coverage * 20);
+                }}
+                
+                // ⚡️【关键】否定词不匹配惩罚 - 针对直接匹配
+                const idHasNegation = hasNegatedBusinessKeyword(cleanId);
+                const cardKeyHasNegation = hasNegatedBusinessKeyword(fullCleanCardKey);
+                const hasBusinessKw = businessKeywords.some(bk => cleanId.includes(bk) || fullCleanCardKey.includes(bk));
+                
+                if (hasBusinessKw && idHasNegation !== cardKeyHasNegation) {{
+                    console.log(`   🚫 否定词惩罚(直接): 表单"${{cleanId}}" vs 名片"${{fullCleanCardKey.substring(0,25)}}..." 分数${{directScore}}→0`);
+                    directScore = 0;
+                }}
+                
+                // ⚡️【关键】图文/视频类型不匹配惩罚
+                if (directScore > 0) {{
+                    const idHasGraphic = hasGraphicKeyword(cleanId);
+                    const idHasVideo = hasVideoKeyword(cleanId);
+                    const cardHasGraphic = hasGraphicKeyword(fullCleanCardKey);
+                    const cardHasVideo = hasVideoKeyword(fullCleanCardKey);
+                    
+                    // 表单要图文，名片是视频 -> 惩罚
+                    if (idHasGraphic && !idHasVideo && cardHasVideo && !cardHasGraphic) {{
+                        console.log(`   🚫 类型不匹配: 表单要"图文" 名片是"视频" 分数${{directScore}}→0`);
+                        directScore = 0;
+                    }}
+                    // 表单要视频，名片是图文 -> 惩罚
+                    if (idHasVideo && !idHasGraphic && cardHasGraphic && !cardHasVideo) {{
+                        console.log(`   🚫 类型不匹配: 表单要"视频" 名片是"图文" 分数${{directScore}}→0`);
+                        directScore = 0;
+                    }}
+                }}
+                
+                if (directScore > bestScore) {{
+                    bestScore = directScore;
+                    bestIdentifier = identifier;
+                    bestSubKey = cleanId;
+                }}
+            }}
+            
+            // 如果已经找到最高优先级匹配（105分），直接返回
+            if (bestScore >= 105) break;
+        }}
+        
+        // 如果直接匹配已经得到较高分数（>=80），不再做子关键词匹配，避免干扰
+        if (bestScore >= 80) {{
+            return {{ 
+                matched: bestScore >= 50, 
+                identifier: bestIdentifier, 
+                score: bestScore,
+                matchedKey: bestSubKey
+            }};
+        }}
+        
+        // 分割名片key为子关键词（用于处理没有直接匹配的情况）
+        const cardKeywords = splitKeywords(cardKey).map(k => cleanText(k)).filter(k => k);
+        if (cardKeywords.length === 0) {{
+            return {{ matched: bestScore >= 50, identifier: bestIdentifier, score: bestScore, matchedKey: bestSubKey }};
+        }}
+        
+        // 遍历每个表单标识符
+        for (const identObj of identifiers) {{
+            const identifier = typeof identObj === 'string' ? identObj : identObj.text;
+            const cleanId = cleanText(identifier);
+            if (!cleanId || cleanId.length < 1) continue;
+            
+            // 遍历每个名片子关键词，计算匹配分数
+            for (const ckw of cardKeywords) {{
+                if (!ckw || ckw.length < 1) continue;
+                
                 let currentScore = 0;
                 
-                // 1. 完全匹配 - 100分
-                if (cleanIdentifier === cleanSubKey) {{
+                // 1. 完全匹配（100分）
+                if (cleanId === ckw) {{
                     currentScore = 100;
                 }}
-                // 2. 标识符包含关键词
-                else if (cleanIdentifier.includes(cleanSubKey) && cleanSubKey.length >= 2) {{
-                    const ratio = cleanSubKey.length / cleanIdentifier.length;
-                    if (ratio >= 0.8) currentScore = 95;
-                    else if (ratio >= 0.5) currentScore = 90;
-                    else currentScore = 85;
+                // 2. 表单标签包含名片子关键词（60-95分）
+                else if (ckw.length >= 2 && cleanId.includes(ckw)) {{
+                    const coverage = ckw.length / cleanId.length;
+                    currentScore = 60 + Math.floor(coverage * 35);
                 }}
-                // 3. 关键词包含标识符
-                else if (cleanSubKey.includes(cleanIdentifier) && cleanIdentifier.length >= 2) {{
-                    const ratio = cleanIdentifier.length / cleanSubKey.length;
-                    currentScore = ratio >= 0.5 ? 85 : 80;
+                // 3. 名片子关键词包含表单标签（60-95分）
+                else if (cleanId.length >= 2 && ckw.includes(cleanId)) {{
+                    const coverage = cleanId.length / ckw.length;
+                    currentScore = 60 + Math.floor(coverage * 35);
                 }}
-                // 4. 核心词匹配 - 增强版：要求更严格
-                else if (subKeyCoreWords.length > 0 && identifierCoreWords.length > 0) {{
-                    const commonCoreWords = subKeyCoreWords.filter(w => identifierCoreWords.includes(w));
-                    if (commonCoreWords.length > 0) {{
-                        // 检查是否存在冲突的核心词（如同时包含"电话"和"地址"）
-                        const conflictWords = [['电话', '地址'], ['手机', '地址'], ['电话', '街道'], ['手机', '街道']];
-                        let hasConflict = false;
-                        for (const [w1, w2] of conflictWords) {{
-                            if ((subKeyCoreWords.includes(w1) && identifierCoreWords.includes(w2)) ||
-                                (subKeyCoreWords.includes(w2) && identifierCoreWords.includes(w1))) {{
-                                hasConflict = true;
-                                break;
-                            }}
-                        }}
+                // 4. 核心词匹配
+                else {{
+                    const idCoreWords = extractCoreWords(cleanId);
+                    const ckwCoreWords = extractCoreWords(ckw);
+                    
+                    if (idCoreWords.length > 0 && ckwCoreWords.length > 0) {{
+                        const commonCore = idCoreWords.filter(w => ckwCoreWords.includes(w));
                         
-                        if (!hasConflict) {{
-                            const coreMatchRatio = commonCoreWords.length / Math.max(subKeyCoreWords.length, identifierCoreWords.length);
-                            if (commonCoreWords.length === subKeyCoreWords.length && 
-                                commonCoreWords.length === identifierCoreWords.length) {{
-                                currentScore = 90;
-                            }} else if (subKeyCoreWords.length === 1 && identifierCoreWords.length === 1) {{
-                                currentScore = 85;
-                            }} else {{
-                                currentScore = 60 + Math.floor(coreMatchRatio * 25);
+                        if (commonCore.length > 0) {{
+                            const matchRatio = commonCore.length / Math.max(idCoreWords.length, ckwCoreWords.length);
+                            
+                            if (commonCore.length === idCoreWords.length && 
+                                commonCore.length === ckwCoreWords.length &&
+                                commonCore.length >= 2) {{
+                                currentScore = 70;
+                            }} else if (commonCore.length >= 2) {{
+                                currentScore = 55 + Math.floor(matchRatio * 15);
+                            }} else if (idCoreWords.length === 1 || ckwCoreWords.length === 1) {{
+                                // 单核心词匹配 - 大幅降低分数
+                                currentScore = 40;
                             }}
                         }}
                     }}
                 }}
-                // 5. 连续子串匹配
-                else if (cleanSubKey.length >= 2 && cleanIdentifier.length >= 2) {{
-                    const lcsLen = longestCommonSubstring(cleanSubKey, cleanIdentifier);
-                    const minLen = Math.min(cleanSubKey.length, cleanIdentifier.length);
-                    if (lcsLen >= 2) {{
-                        const lcsRatio = lcsLen / minLen;
-                        if (lcsRatio >= 0.8) currentScore = 75;
-                        else if (lcsRatio >= 0.6 && lcsLen >= 3) currentScore = 65;
-                        else if (lcsRatio >= 0.5 && lcsLen >= 3) currentScore = 55;
+                
+                // 5. LCS匹配（兜底，30-60分）
+                if (currentScore === 0 && ckw.length >= 2 && cleanId.length >= 2) {{
+                    const lcs = longestCommonSubstring(cleanId, ckw);
+                    if (lcs >= 2) {{
+                        const maxLen = Math.max(cleanId.length, ckw.length);
+                        const coverage = lcs / maxLen;
+                        if (coverage >= 0.5) {{
+                            currentScore = 30 + Math.floor(coverage * 30);
+                        }}
+                    }}
+                }}
+                
+                // ⚡️【关键】否定词不匹配惩罚 - 针对子关键词匹配
+                if (currentScore > 0) {{
+                    const idHasNegation = hasNegatedBusinessKeyword(cleanId);
+                    const ckwHasNegation = hasNegatedBusinessKeyword(ckw);
+                    const hasBusinessKw = businessKeywords.some(bk => cleanId.includes(bk) || ckw.includes(bk));
+                    
+                    if (hasBusinessKw && idHasNegation !== ckwHasNegation) {{
+                        console.log(`   🚫 否定词惩罚(子词): 表单"${{cleanId}}" vs 名片"${{ckw}}" 分数${{currentScore}}→0`);
+                        currentScore = 0;
+                    }}
+                }}
+                
+                // ⚡️【关键】图文/视频类型不匹配惩罚 - 针对子关键词匹配
+                if (currentScore > 0) {{
+                    const idHasGraphic = hasGraphicKeyword(cleanId);
+                    const idHasVideo = hasVideoKeyword(cleanId);
+                    const ckwHasGraphic = hasGraphicKeyword(ckw);
+                    const ckwHasVideo = hasVideoKeyword(ckw);
+                    
+                    if (idHasGraphic && !idHasVideo && ckwHasVideo && !ckwHasGraphic) {{
+                        console.log(`   🚫 类型不匹配(子词): 表单要"图文" 名片是"视频" 分数${{currentScore}}→0`);
+                        currentScore = 0;
+                    }}
+                    if (idHasVideo && !idHasGraphic && ckwHasGraphic && !ckwHasVideo) {{
+                        console.log(`   🚫 类型不匹配(子词): 表单要"视频" 名片是"图文" 分数${{currentScore}}→0`);
+                        currentScore = 0;
                     }}
                 }}
                 
                 if (currentScore > bestScore) {{
                     bestScore = currentScore;
                     bestIdentifier = identifier;
-                    bestSubKey = subKey;
+                    bestSubKey = ckw;
                 }}
             }}
         }}
         
+        const threshold = 50;
         return {{ 
-            matched: bestScore >= 50, 
+            matched: bestScore >= threshold, 
             identifier: bestIdentifier, 
             score: bestScore,
             matchedKey: bestSubKey
@@ -9755,15 +10345,30 @@ class NewFillWindow(QDialog):
             let inputEl = null;
             let inputType = 'text';
             
-            if (dataType === 'text' || dataType === 'textarea' || dataType === 'number' || dataType === 'email' || dataType === 'phone') {{
+            // 番茄表单的 data-type 类型包括：
+            // - name: 姓名字段
+            // - text-evaluation: 文本评价字段（填空）
+            // - mobile: 手机号
+            // - text, textarea, number, email, phone 等常规类型
+            // - select, dropdown: 下拉选择
+            // - radio, checkbox: 单选/多选
+            const textTypes = ['text', 'textarea', 'number', 'email', 'phone', 'name', 'text-evaluation', 'mobile', 'address', 'link'];
+            
+            if (textTypes.includes(dataType)) {{
                 inputEl = fieldDiv.querySelector('.fq-input__inner, input[type="text"], input:not([type]), textarea');
                 inputType = 'text';
-            }} else if (dataType === 'select' || dataType === 'dropdown') {{
+            }} else if (dataType === 'select' || dataType === 'dropdown' || dataType === 'single-select' || dataType === 'multi-select') {{
                 inputEl = fieldDiv;
                 inputType = 'select';
-            }} else if (dataType === 'radio' || dataType === 'checkbox') {{
+            }} else if (dataType === 'radio' || dataType === 'checkbox' || dataType === 'single-choice' || dataType === 'multi-choice') {{
                 inputEl = fieldDiv;
-                inputType = dataType;
+                inputType = dataType.includes('radio') || dataType.includes('single') ? 'radio' : 'checkbox';
+            }} else {{
+                // 尝试通用查找输入框
+                inputEl = fieldDiv.querySelector('.fq-input__inner, input[type="text"], input:not([type]), textarea');
+                if (inputEl) {{
+                    inputType = 'text';
+                }}
             }}
             
             if (title || inputEl) {{
@@ -9785,7 +10390,10 @@ class NewFillWindow(QDialog):
     }}
     
     // ═══════════════════════════════════════════════════════════════
-    // 主执行函数
+    // 主执行函数 - 两阶段匹配算法（参考麦客CRM）
+    // 第一阶段：预扫描 - 计算所有表单字段与名片字段的匹配分数矩阵
+    // 第二阶段：全局最优分配 - 按分数从高到低排序（贪心算法）
+    // 第三阶段：执行填充 - 按预分配的结果执行填充
     // ═══════════════════════════════════════════════════════════════
     
     async function executeAutoFill() {{
@@ -9810,15 +10418,16 @@ class NewFillWindow(QDialog):
             return;
         }}
         
-        console.log('\\n🎯 开始智能填写...');
+        console.log('\\n🎯 开始两阶段智能匹配...');
         console.log('═══════════════════════════════════════════════════════════════');
         
-        // 遍历每个字段
-        for (const field of fields) {{
+        // ═══════════════════════════════════════════════════════════════
+        // 第一阶段：预扫描 - 构建表单字段信息和标识符
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第一阶段：预扫描表单字段...');
+        
+        const fieldInfos = fields.map((field, index) => {{
             const {{ element: fieldDiv, input: inputEl, dataType, inputType, title }} = field;
-            
-            console.log(`\\n📋 字段 #${{field.index + 1}}: "${{title}}"`);
-            console.log(`   类型: ${{dataType}}`);
             
             // 构建标识符
             const identifiers = [title];
@@ -9855,40 +10464,123 @@ class NewFillWindow(QDialog):
                 identifiers.push('电话', '手机', '电话号码', '联系电话');
             }}
             
-            // 传入表单标题用于互斥检测
-            const match = findBestMatch(identifiers, title);
+            return {{
+                field,
+                fieldDiv,
+                inputEl,
+                dataType,
+                inputType,
+                title,
+                identifiers,
+                index
+            }};
+        }});
+        
+        // ═══════════════════════════════════════════════════════════════
+        // 第二阶段：计算匹配分数矩阵并全局最优分配
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第二阶段：计算匹配分数矩阵...');
+        
+        // 计算所有表单字段与名片字段的匹配分数矩阵
+        const matchMatrix = [];
+        fieldInfos.forEach((fieldInfo, fieldIndex) => {{
+            fillData.forEach((item, cardIndex) => {{
+                const matchResult = matchKeyword(fieldInfo.identifiers, item.key, fieldInfo.title, item.value);
+                if (matchResult.score > 0) {{
+                    matchMatrix.push({{
+                        fieldIndex,
+                        cardIndex,
+                        fieldInfo,
+                        cardItem: item,
+                        score: matchResult.score,
+                        matched: matchResult.matched,
+                        identifier: matchResult.identifier,
+                        matchedKey: matchResult.matchedKey
+                    }});
+                }}
+            }});
+        }});
+        
+        // 按分数降序排序（高分优先）
+        matchMatrix.sort((a, b) => b.score - a.score);
+        
+        console.log(`   找到 ${{matchMatrix.length}} 个潜在匹配`);
+        if (matchMatrix.length > 0) {{
+            console.log(`   最高分: ${{matchMatrix[0].score.toFixed(1)}} (表单:"${{matchMatrix[0].fieldInfo.title}}" ↔ 名片:"${{matchMatrix[0].cardItem.key.substring(0, 30)}}...")`);
+        }}
+        
+        // 贪心算法：按分数优先级分配匹配
+        console.log('\\n📊 全局最优分配（贪心算法）...');
+        const usedFieldIndices = new Set();
+        const usedCardIndices = new Set();
+        const finalMatches = new Map(); // fieldIndex -> matchInfo
+        
+        for (const match of matchMatrix) {{
+            // 跳过已使用的表单字段或名片字段
+            if (usedFieldIndices.has(match.fieldIndex) || usedCardIndices.has(match.cardIndex)) {{
+                continue;
+            }}
+            
+            // 只接受分数>=50的匹配
+            if (match.score >= 50) {{
+                finalMatches.set(match.fieldIndex, match);
+                usedFieldIndices.add(match.fieldIndex);
+                usedCardIndices.add(match.cardIndex);
+                console.log(`   ✅ 分配: 表单#${{match.fieldIndex + 1}}"${{match.fieldInfo.title}}" ← 名片"${{match.cardItem.key.substring(0, 25)}}..." (分数:${{match.score.toFixed(1)}})`);
+            }}
+        }}
+        
+        console.log(`\\n   共分配 ${{finalMatches.size}} 个匹配`);
+        
+        // ═══════════════════════════════════════════════════════════════
+        // 第三阶段：按表单顺序执行填充
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第三阶段：执行填充...');
+        
+        for (const fieldInfo of fieldInfos) {{
+            const {{ field, fieldDiv, inputEl, dataType, inputType, title, index }} = fieldInfo;
+            
+            console.log(`\\n📋 字段 #${{index + 1}}: "${{title}}"`);
+            console.log(`   类型: ${{dataType}}`);
+            
+            // 检查是否有预分配的匹配
+            const preMatch = finalMatches.get(index);
             let filled = false;
             
-            if (match.item && match.score >= 50) {{
+            if (preMatch) {{
+                const cardItem = preMatch.cardItem;
+                
                 switch (inputType) {{
                     case 'text':
                         if (inputEl && inputEl.tagName) {{
-                            filled = fillInput(inputEl, match.item.value);
+                            filled = fillInput(inputEl, cardItem.value);
                         }}
                         break;
                     case 'select':
-                        filled = handleSelect(fieldDiv, match.item.value);
+                        filled = handleSelect(fieldDiv, cardItem.value);
                         break;
                     case 'radio':
                     case 'checkbox':
-                        filled = handleRadioCheckbox(fieldDiv, match.item.value);
+                        filled = handleRadioCheckbox(fieldDiv, cardItem.value);
                         break;
                 }}
                 
                 if (filled) {{
-                    usedCardKeys.add(match.item.key);
+                    usedCardKeys.add(cardItem.key);
                     fillCount++;
-                    console.log(`   ✅ 填入: "${{match.item.value}}" (匹配: ${{match.item.key}}, 分数: ${{match.score.toFixed(1)}})`);
+                    console.log(`   ✅ 填入: "${{cardItem.value}}" (匹配: ${{cardItem.key}}, 分数: ${{preMatch.score.toFixed(1)}})`);
                     results.push({{
-                        key: match.item.key,
-                        value: match.item.value,
+                        key: cardItem.key,
+                        value: cardItem.value,
                         matched: title,
-                        score: match.score,
+                        score: preMatch.score,
                         success: true
                     }});
+                }} else {{
+                    console.warn(`   ⚠️ 填充失败（输入框可能是只读）`);
                 }}
             }} else {{
-                console.log(`   ❌ 未找到匹配 (最高分: ${{match.score ? match.score.toFixed(1) : 0}})`);
+                console.log(`   ❌ 未找到匹配 (无预分配)`);
             }}
         }}
         
@@ -10018,7 +10710,7 @@ class NewFillWindow(QDialog):
         return js_code
     
     def generate_feishu_fill_script(self, fill_data: list) -> str:
-        """生成飞书问卷(feishu.cn)专用的填充脚本 - 富文本编辑器适配"""
+        """生成飞书问卷(feishu.cn)专用的填充脚本 - 支持新旧版本"""
         import json
         fill_data_json = json.dumps(fill_data, ensure_ascii=False)
         
@@ -10030,29 +10722,92 @@ class NewFillWindow(QDialog):
     let fillCount = 0;
     const results = [];
     
+    // 检测表单版本
+    function detectFormVersion() {{
+        // 新版/移动端: bitable-form-item
+        const newVersionItems = document.querySelectorAll('.bitable-form-item[data-index]');
+        // 旧版: base-form-container_card_item
+        const oldVersionItems = document.querySelectorAll('.base-form-container_card_item');
+        
+        if (newVersionItems.length > 0) {{
+            return 'new';
+        }} else if (oldVersionItems.length > 0) {{
+            return 'old';
+        }}
+        return null;
+    }}
+    
     // 等待飞书表单加载完成
     function waitForForm(maxAttempts = 25, interval = 400) {{
         return new Promise((resolve) => {{
             let attempts = 0;
             const checkForm = setInterval(() => {{
-                // 飞书问卷的字段卡片
-                const cardItems = document.querySelectorAll('.base-form-container_card_item');
                 attempts++;
-                console.log(`🔍 尝试 ${{attempts}}/${{maxAttempts}}: 找到 ${{cardItems.length}} 个字段卡片`);
+                const version = detectFormVersion();
                 
-                if (cardItems.length > 0 || attempts >= maxAttempts) {{
+                // 新版表单
+                const newItems = document.querySelectorAll('.bitable-form-item[data-index]');
+                // 旧版表单
+                const oldItems = document.querySelectorAll('.base-form-container_card_item');
+                
+                const totalItems = newItems.length + oldItems.length;
+                console.log(`🔍 尝试 ${{attempts}}/${{maxAttempts}}: 找到 ${{totalItems}} 个字段 (新版:${{newItems.length}}, 旧版:${{oldItems.length}})`);
+                
+                if (totalItems > 0 || attempts >= maxAttempts) {{
                     clearInterval(checkForm);
-                    resolve(cardItems.length > 0);
+                    resolve({{ found: totalItems > 0, version: version }});
                 }}
             }}, interval);
         }});
     }}
     
-    // 获取所有字段信息（标题 + 编辑器）
-    function getAllFields() {{
+    // 获取所有字段信息 - 新版表单
+    function getAllFieldsNewVersion() {{
         const fields = [];
         
-        // 飞书问卷使用 .base-form-container_card_item 作为字段容器
+        // 新版飞书表单使用 .bitable-form-item[data-index] 作为字段容器
+        document.querySelectorAll('.bitable-form-item[data-index]').forEach((item, index) => {{
+            // 向上查找包含标题的父容器
+            const fieldContainer = item.closest('[id^="field-item-"]') || item.closest('.ud__form__item');
+            if (!fieldContainer) return;
+            
+            // 获取字段标题 - 新版在 label 元素中
+            const labelEl = fieldContainer.querySelector('.ud__form__item__label label');
+            const title = labelEl ? labelEl.innerText.trim() : '';
+            
+            // 获取可编辑的富文本区域
+            const editor = item.querySelector('[contenteditable="true"].adit-container');
+            
+            // 获取选择器类型字段（支持移动端和桌面端两种结构）
+            // 移动端: .bitable-selector-option-wrapper
+            // 桌面端: .bitable-single-selector-editor, .b-select-dropdown-menu
+            const selectorMobile = item.querySelector('.bitable-selector-option-wrapper');
+            const selectorDesktop = item.querySelector('.bitable-single-selector-editor, .b-select-dropdown-menu');
+            const selector = selectorMobile || selectorDesktop;
+            const selectorType = selectorMobile ? 'mobile' : (selectorDesktop ? 'desktop' : null);
+            
+            if (title) {{
+                fields.push({{
+                    index: index,
+                    title: title,
+                    editor: editor,
+                    selector: selector,
+                    selectorType: selectorType,
+                    container: item,
+                    fieldType: selector ? 'select' : 'text'
+                }});
+                console.log(`  字段 ${{index + 1}}: "${{title}}" (${{selector ? '选择(' + selectorType + ')' : '文本'}})`);
+            }}
+        }});
+        
+        return fields;
+    }}
+    
+    // 获取所有字段信息 - 旧版表单
+    function getAllFieldsOldVersion() {{
+        const fields = [];
+        
+        // 旧版飞书问卷使用 .base-form-container_card_item 作为字段容器
         document.querySelectorAll('.base-form-container_card_item').forEach((card, index) => {{
             // 获取字段标题
             const titleEl = card.querySelector('.base-form-container_title_wrapper span');
@@ -10066,13 +10821,24 @@ class NewFillWindow(QDialog):
                     index: index,
                     title: title,
                     editor: editor,
-                    card: card
+                    selector: null,
+                    container: card,
+                    fieldType: 'text'
                 }});
                 console.log(`  字段 ${{index + 1}}: "${{title}}"`);
             }}
         }});
         
         return fields;
+    }}
+    
+    // 获取所有字段信息（自动识别版本）
+    function getAllFields(version) {{
+        if (version === 'new') {{
+            return getAllFieldsNewVersion();
+        }} else {{
+            return getAllFieldsOldVersion();
+        }}
     }}
     
     // 清理文本用于匹配
@@ -10175,11 +10941,115 @@ class NewFillWindow(QDialog):
         }}
     }}
     
+    // 填充选择器类型字段（支持移动端和桌面端）
+    async function fillSelector(field, value) {{
+        try {{
+            const selector = field.selector;
+            const selectorType = field.selectorType;
+            if (!selector) return false;
+            
+            console.log(`    尝试填充选择器 (类型: ${{selectorType}}), 值: "${{value}}"`);
+            
+            let options = [];
+            let matched = false;
+            
+            if (selectorType === 'desktop') {{
+                // 桌面端选择器处理
+                // 点击下拉菜单打开选项
+                const dropdownMenu = selector.querySelector('.b-select-dropdown-menu') || selector;
+                dropdownMenu.click();
+                await new Promise(r => setTimeout(r, 400));
+                
+                // 桌面端选项在 .b-select-option 内，文本在 .ud__tag__content
+                options = field.container.querySelectorAll('.b-select-option');
+                console.log(`    桌面端找到 ${{options.length}} 个选项`);
+                
+                for (const opt of options) {{
+                    const contentEl = opt.querySelector('.ud__tag__content');
+                    const optText = contentEl ? contentEl.innerText.trim() : opt.innerText.trim();
+                    console.log(`      检查选项: "${{optText}}"`);
+                    
+                    if (optText.includes(value) || value.includes(optText)) {{
+                        opt.click();
+                        matched = true;
+                        console.log(`    ✅ 桌面端选择: "${{optText}}"`);
+                        break;
+                    }}
+                }}
+                
+                // 模糊匹配
+                if (!matched) {{
+                    for (const opt of options) {{
+                        const contentEl = opt.querySelector('.ud__tag__content');
+                        const optText = (contentEl ? contentEl.innerText.trim() : opt.innerText.trim()).toLowerCase();
+                        const valLower = value.toLowerCase();
+                        if (optText.includes(valLower) || valLower.includes(optText)) {{
+                            opt.click();
+                            matched = true;
+                            console.log(`    ✅ 桌面端模糊选择: "${{opt.innerText.trim()}}"`);
+                            break;
+                        }}
+                    }}
+                }}
+            }} else {{
+                // 移动端选择器处理
+                selector.click();
+                await new Promise(r => setTimeout(r, 300));
+                
+                // 查找选项列表
+                const optionList = document.querySelector('.bitable-selector-option-list, .ud__select__dropdown');
+                if (!optionList) {{
+                    console.warn('    未找到移动端选项列表');
+                    return false;
+                }}
+                
+                options = optionList.querySelectorAll('.bitable-selector-option, .ud__select__option');
+                console.log(`    移动端找到 ${{options.length}} 个选项`);
+                
+                for (const opt of options) {{
+                    const optText = opt.innerText.trim();
+                    if (optText.includes(value) || value.includes(optText)) {{
+                        opt.click();
+                        matched = true;
+                        console.log(`    ✅ 移动端选择: "${{optText}}"`);
+                        break;
+                    }}
+                }}
+                
+                // 模糊匹配
+                if (!matched) {{
+                    for (const opt of options) {{
+                        const optText = opt.innerText.trim().toLowerCase();
+                        const valLower = value.toLowerCase();
+                        if (optText.includes(valLower) || valLower.includes(optText)) {{
+                            opt.click();
+                            matched = true;
+                            console.log(`    ✅ 移动端模糊选择: "${{opt.innerText.trim()}}"`);
+                            break;
+                        }}
+                    }}
+                }}
+            }}
+            
+            // 关闭下拉（点击其他地方）
+            if (!matched) {{
+                console.warn(`    ⚠️ 未找到匹配选项: "${{value}}"`);
+                document.body.click();
+            }}
+            
+            await new Promise(r => setTimeout(r, 200));
+            return matched;
+        }} catch (e) {{
+            console.error(`    ❌ 选择失败: ${{e.message}}`);
+            return false;
+        }}
+    }}
+    
     // 主执行函数 - 以字段为主体，为每个字段找最佳匹配的名片数据
     async function executeAutoFill() {{
-        const hasForm = await waitForForm();
+        const formResult = await waitForForm();
         
-        if (!hasForm) {{
+        if (!formResult.found) {{
             console.warn('⚠️ 未找到飞书问卷表单');
             window.__autoFillResult__ = {{
                 fillCount: 0,
@@ -10190,14 +11060,16 @@ class NewFillWindow(QDialog):
             return;
         }}
         
-        console.log('\\n📋 扫描飞书问卷字段...');
-        const allFields = getAllFields();
+        console.log(`\\n📋 检测到飞书表单版本: ${{formResult.version === 'new' ? '新版/移动端' : '旧版'}}`);
+        console.log('扫描飞书问卷字段...');
+        const allFields = getAllFields(formResult.version);
         console.log(`找到 ${{allFields.length}} 个可填写字段`);
         
         console.log('\\n🎯 开始匹配和填写...');
         
         // 以字段为主体遍历，为每个字段找最佳匹配的名片数据
-        allFields.forEach((field, index) => {{
+        for (let index = 0; index < allFields.length; index++) {{
+            const field = allFields[index];
             let bestMatch = {{ item: null, score: 0 }};
             
             // 在所有名片字段中找最佳匹配
@@ -10210,7 +11082,15 @@ class NewFillWindow(QDialog):
             
             // 如果找到匹配且分数足够高，填写
             if (bestMatch.item && bestMatch.score >= 50) {{
-                const success = fillEditor(field.editor, bestMatch.item.value);
+                let success = false;
+                
+                // 根据字段类型选择填充方式
+                if (field.fieldType === 'select' && field.selector) {{
+                    success = await fillSelector(field, bestMatch.item.value);
+                }} else if (field.editor) {{
+                    success = fillEditor(field.editor, bestMatch.item.value);
+                }}
+                
                 if (success) {{
                     console.log(`✅ 填写字段${{index + 1}}: "${{bestMatch.item.key}}" -> "${{field.title}}" (分数: ${{bestMatch.score}})`);
                     fillCount++;
@@ -10223,7 +11103,10 @@ class NewFillWindow(QDialog):
                     }});
                 }}
             }}
-        }});
+            
+            // 添加小延迟避免填写过快
+            await new Promise(r => setTimeout(r, 50));
+        }}
         
         // 记录未匹配的名片字段
         const filledKeys = new Set(results.filter(r => r.success).map(r => r.key));
@@ -10357,7 +11240,7 @@ class NewFillWindow(QDialog):
             // 去除多余空白和特殊符号
             cleaned = cleaned.replace(/^[\\s*]+|[\\s*]+$/g, '').trim();
             // 去除必填标记
-            cleaned = cleaned.replace(/[\\*必填]/g, '').trim();
+            cleaned = cleaned.replace(/\\*/g, '').replace(/必填/g, '').trim();
             
             if (cleaned && cleaned.length > 0 && cleaned.length <= MAX_LABEL_LENGTH) {{
                 if (!identifiers.some(item => item.text === cleaned)) {{
