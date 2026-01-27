@@ -967,7 +967,7 @@ class AddCardDialog(QDialog):
         """
     
     def load_categories(self):
-        """加载分类列表"""
+        """加载分类列表 - 性能优化版"""
         # ⚡️ 修复：在修改 combo 内容前阻塞信号，避免 macOS Cocoa 层的竞态条件
         self.category_combo.blockSignals(True)
         self.category_combo.clear()
@@ -975,13 +975,17 @@ class AddCardDialog(QDialog):
         # 从 Category 表获取用户的分类
         user_categories = self.db_manager.get_user_categories(self.current_user)
         
-        # 同时从现有名片中获取分类（兼容旧数据）
-        cards = self.db_manager.get_all_cards(user=self.current_user)
+        # ⚡️ 性能优化：使用 distinct 查询获取名片分类，而不是加载所有名片
         card_categories = set()
-        for card in cards:
-            category = card.category if hasattr(card, 'category') and card.category else None
-            if category:
-                card_categories.add(category)
+        try:
+            from database.models import Card
+            # 只查询分类字段，不加载完整名片数据
+            distinct_categories = Card.objects(user=self.current_user).distinct('category')
+            for cat in distinct_categories:
+                if cat:
+                    card_categories.add(cat)
+        except Exception:
+            pass
         
         # 合并所有分类（去重）
         all_categories = set()
@@ -1000,7 +1004,7 @@ class AddCardDialog(QDialog):
         # ⚡️ 恢复信号
         self.category_combo.blockSignals(False)
     
-    def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None):
+    def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None, batch_mode=False):
         """添加字段行
         
         Args:
@@ -1010,6 +1014,7 @@ class AddCardDialog(QDialog):
             placeholder: 占位提示
             value_count: 字段值数量（默认为1）
             value_placeholder_template: 多值提示模板，支持 {index} 占位符
+            batch_mode: 批量模式，为True时不立即更新位置（性能优化）
         """
         # 创建可拖拽的行组件
         row_widget = DraggableFieldRow(key, value, self, fixed_template_id, placeholder, value_count, value_placeholder_template)
@@ -1027,8 +1032,9 @@ class AddCardDialog(QDialog):
             'value_count': value_count
         })
         
-        # 更新位置
-        self._update_field_positions(animate=False)
+        # 批量模式下不立即更新位置，由调用者统一更新
+        if not batch_mode:
+            self._update_field_positions(animate=False)
     
     def remove_field_row(self, row_widget):
         """删除字段行"""
@@ -1466,11 +1472,9 @@ class AddCardDialog(QDialog):
                 fail_msg.exec()
     
     def load_card_data(self):
-        """加载名片数据（编辑模式）"""
+        """加载名片数据（编辑模式）- 性能优化版"""
         if not self.card:
             return
-        
-        print(f"DEBUG: 加载名片数据: {self.card.name}")
         
         # 回显名片名称
         self.name_input.setText(self.card.name)
@@ -1481,11 +1485,10 @@ class AddCardDialog(QDialog):
         if index >= 0:
             self.category_combo.setCurrentIndex(index)
         
-        # 清空现有字段（如果有）
-        print(f"DEBUG: 清空现有字段，当前数量: {len(self.field_rows)}")
-        while self.field_rows:
-            row_data = self.field_rows[0]
-            self.remove_field_row(row_data['widget'])
+        # 清空现有字段（如果有）- 直接删除，不触发动画
+        for row_data in self.field_rows:
+            row_data['widget'].deleteLater()
+        self.field_rows.clear()
         
         # 回显字段配置 - 支持多个字段值
         if hasattr(self.card, 'configs') and self.card.configs:
@@ -1497,60 +1500,72 @@ class AddCardDialog(QDialog):
                 else:
                     configs = self.card.configs
                 
-                print(f"DEBUG: 解析出 {len(configs)} 个配置项")
+                # ⚡️ 性能优化：批量预加载所有固定模板（一次数据库查询）
+                template_ids = set()
+                for config in configs:
+                    tid = None
+                    if isinstance(config, dict):
+                        tid = config.get('fixed_template_id')
+                    elif hasattr(config, 'fixed_template_id'):
+                        tid = getattr(config, 'fixed_template_id', None)
+                    if tid:
+                        template_ids.add(tid)
                 
-                # 添加字段行
+                # 批量获取模板并缓存
+                templates_cache = {}
+                if template_ids:
+                    try:
+                        all_templates = self.db_manager.get_all_fixed_templates(is_active=None)
+                        for t in all_templates:
+                            templates_cache[str(t.id)] = t
+                    except Exception:
+                        pass
+                
+                # ⚡️ 批量添加字段行（不触发位置更新）
                 for config in configs:
                     key = ""
                     value = ""
                     fixed_template_id = None
                     placeholder = None
-                    value_placeholder_template = None  # 多值提示模板
-                    value_count = 1  # 默认为1（兼容老版本）
-                    has_value_count_in_config = False  # 标记配置中是否有 value_count
+                    value_placeholder_template = None
+                    value_count = 1
                     
                     if isinstance(config, dict):
                         key = config.get('key', '')
                         value = config.get('value', '')
                         fixed_template_id = config.get('fixed_template_id')
-                        has_value_count_in_config = 'value_count' in config
                         value_count = config.get('value_count', 1)
-                    elif hasattr(config, 'key'):  # 对象格式
+                    elif hasattr(config, 'key'):
                         key = config.key
                         value = getattr(config, 'value', '')
                         fixed_template_id = getattr(config, 'fixed_template_id', None)
-                        has_value_count_in_config = hasattr(config, 'value_count') and config.value_count is not None
                         value_count = getattr(config, 'value_count', 1) or 1
                     
-                    # 如果有固定模板ID，尝试获取placeholder和value_placeholder_template
-                    # 注意：value_count 只从配置获取，不再动态从模板获取（保证老数据兼容）
-                    if fixed_template_id:
-                        try:
-                            template = self.db_manager.get_fixed_template_by_id(fixed_template_id)
-                            if template:
-                                placeholder = template.placeholder
-                                value_placeholder_template = getattr(template, 'value_placeholder_template', None)
-                        except Exception:
-                            pass
+                    # 从缓存获取模板信息（避免数据库查询）
+                    if fixed_template_id and str(fixed_template_id) in templates_cache:
+                        template = templates_cache[str(fixed_template_id)]
+                        placeholder = template.placeholder
+                        value_placeholder_template = getattr(template, 'value_placeholder_template', None)
                     
-                    # 确保value_count至少为1
                     value_count = max(1, value_count or 1)
                     
-                    # 解析值：检测 value 是否是 JSON 数组字符串（兼容老数据）
-                    # 不管 value_count 是多少，都尝试解析
+                    # 解析值
                     if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
                         try:
                             parsed_values = json.loads(value)
                             if isinstance(parsed_values, list):
                                 value = parsed_values
-                                # 如果解析出的是数组，更新 value_count 为数组长度
                                 if len(parsed_values) > value_count:
                                     value_count = len(parsed_values)
                         except json.JSONDecodeError:
-                            # 解析失败，保持原字符串
                             pass
                     
-                    self.add_field_row(key, value, fixed_template_id, placeholder, value_count, value_placeholder_template)
+                    # 批量模式添加，不立即更新位置
+                    self.add_field_row(key, value, fixed_template_id, placeholder, value_count, value_placeholder_template, batch_mode=True)
+                
+                # ⚡️ 所有字段添加完成后，一次性更新位置
+                self._update_field_positions(animate=False)
+                
             except Exception as e:
                 print(f"解析配置失败: {e}")
 
@@ -1609,26 +1624,25 @@ class AddCardDialog(QDialog):
         return "\n".join(too_long)
 
     def load_fixed_templates(self):
-        """加载固定模板到字段列表（新增名片时调用）- 支持多字段值"""
+        """加载固定模板到字段列表（新增名片时调用）- 支持多字段值，性能优化版"""
         try:
             templates = self.db_manager.get_all_fixed_templates(is_active=True)
             if templates:
+                # ⚡️ 批量添加所有模板字段
                 for template in templates:
-                    # 获取字段值数量，默认为1
                     value_count = getattr(template, 'value_count', 1) or 1
-                    # 获取多值提示模板
                     value_placeholder_template = getattr(template, 'value_placeholder_template', None)
                     self.add_field_row(
                         template.field_name,
                         template.field_value,
-                        str(template.id),  # 固定模板ID
-                        template.placeholder,  # 占位提示
-                        value_count,  # 字段值数量
-                        value_placeholder_template  # 多值提示模板
+                        str(template.id),
+                        template.placeholder,
+                        value_count,
+                        value_placeholder_template,
+                        batch_mode=True  # 批量模式
                     )
-                print(f"DEBUG: 已加载 {len(templates)} 个固定模板")
-            else:
-                print("DEBUG: 没有可用的固定模板")
+                # ⚡️ 所有字段添加完成后，一次性更新位置
+                self._update_field_positions(animate=False)
         except Exception as e:
             print(f"加载固定模板失败: {e}")
 
