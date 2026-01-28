@@ -44,6 +44,19 @@ def build_app():
     is_mac = sys.platform == 'darwin'
     is_windows = sys.platform == 'win32'
     
+    # 检查加密配置文件
+    secure_config_path = Path('.secure_config')
+    if not secure_config_path.exists():
+        print("⚠️ 警告: .secure_config 文件不存在！")
+        print("   请先运行: python -m core.crypto 生成加密配置")
+        print("   或手动创建加密配置文件")
+        response = input("   是否继续打包？(y/N): ")
+        if response.lower() != 'y':
+            return False
+    
+    # 路径分隔符：macOS/Linux 用 :，Windows 用 ;
+    path_sep = ';' if is_windows else ':'
+    
     # 基础打包命令
     cmd = [
         'pyinstaller',
@@ -53,6 +66,11 @@ def build_app():
         '--clean',     # 清理临时文件
         'main.py'
     ]
+    
+    # 添加加密配置文件
+    if secure_config_path.exists():
+        cmd.extend(['--add-data', f'.secure_config{path_sep}.'])
+        print("✅ 将打包加密配置文件: .secure_config")
     
     # macOS 特定配置
     if is_mac:
@@ -66,9 +84,6 @@ def build_app():
         print("🪟 检测到 Windows 系统")
         # 可以后续添加图标: --icon=icon.ico
         pass
-    
-    # 添加数据文件
-    # cmd.extend(['--add-data', 'data:data'])  # 如果需要打包数据库
     
     print(f"📝 执行命令: {' '.join(cmd)}\n")
     

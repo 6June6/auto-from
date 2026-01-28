@@ -27,12 +27,20 @@ class ConfigCrypto:
     _SALT_PARTS = [b'\x8f', b'\x2a', b'\x91', b'\xc5', b'\x3d', b'\xe7', b'\x6b', b'\xf4',
                    b'\x18', b'\x73', b'\xd9', b'\x5e', b'\xa2', b'\x0f', b'\xcc', b'\x47']
     
+    # 固定的应用密钥种子（混淆保护，分散存储）
+    # 这些值经过混淆，组合后用于生成加密密钥
+    _KEY_SEEDS = [
+        'aUtO', 'fOrM', 'fIlL', 'eR_',
+        'sEcR', 'eT_K', 'eY_2', '025_',
+        'pRoD', 'uCtI', 'oN_v', '2.0!'
+    ]
+    
     def __init__(self, key_source: Optional[str] = None):
         """
         初始化加密器
         
         Args:
-            key_source: 密钥来源，默认使用机器特征
+            key_source: 密钥来源（可选，默认使用固定应用密钥）
         """
         self._key = self._derive_key(key_source)
         if CRYPTO_AVAILABLE:
@@ -45,6 +53,12 @@ class ConfigCrypto:
         """获取盐值"""
         return b''.join(cls._SALT_PARTS)
     
+    @classmethod
+    def _get_app_key(cls) -> str:
+        """获取固定的应用密钥（混淆存储）"""
+        # 组合分散的密钥种子
+        return ''.join(cls._KEY_SEEDS)
+    
     def _derive_key(self, key_source: Optional[str] = None) -> bytes:
         """
         从来源派生密钥
@@ -56,8 +70,8 @@ class ConfigCrypto:
             32字节密钥
         """
         if key_source is None:
-            # 使用机器特征作为密钥来源
-            key_source = self._get_machine_id()
+            # 使用固定的应用密钥（跨平台一致）
+            key_source = self._get_app_key()
         
         if CRYPTO_AVAILABLE:
             kdf = PBKDF2HMAC(
@@ -79,28 +93,6 @@ class ConfigCrypto:
             key = base64.urlsafe_b64encode(key)
         
         return key
-    
-    def _get_machine_id(self) -> str:
-        """
-        获取机器唯一标识
-        
-        Returns:
-            机器ID字符串
-        """
-        import platform
-        import uuid
-        
-        # 组合多个机器特征
-        features = [
-            platform.node(),  # 主机名
-            platform.machine(),  # 架构
-            str(uuid.getnode()),  # MAC 地址
-        ]
-        
-        # 添加固定的应用标识
-        features.append("auto-form-filler-v2")
-        
-        return "|".join(features)
     
     def encrypt(self, data: str) -> str:
         """
@@ -185,10 +177,28 @@ class SecureConfig:
         Args:
             base_dir: 配置文件所在目录
         """
-        self.base_dir = base_dir or Path(__file__).resolve().parent.parent
+        self.base_dir = base_dir or self._get_base_dir()
         self.config_path = self.base_dir / self.CONFIG_FILE
         self.crypto = ConfigCrypto()
         self._config_cache: Optional[Dict[str, Any]] = None
+    
+    @staticmethod
+    def _get_base_dir() -> Path:
+        """
+        获取基础目录，支持 PyInstaller 打包环境
+        """
+        import sys
+        
+        # PyInstaller 打包后的路径
+        if getattr(sys, 'frozen', False):
+            # 打包环境：_MEIPASS 是 PyInstaller 解压资源的临时目录
+            if hasattr(sys, '_MEIPASS'):
+                return Path(sys._MEIPASS)
+            # onefile 模式下，资源在可执行文件同目录
+            return Path(sys.executable).parent
+        else:
+            # 开发环境
+            return Path(__file__).resolve().parent.parent
     
     def _load_raw_config(self) -> Dict[str, Any]:
         """加载原始加密配置"""

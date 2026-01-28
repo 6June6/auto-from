@@ -25,6 +25,30 @@ jobs:
           pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
           pip install pyinstaller pillow
 
+      - name: Generate secure config
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python -c "
+          from core.crypto import SecureConfig
+          secure = SecureConfig()
+          secure.set_multiple({
+              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
+              'MONGODB_DB_NAME': 'auto-form-db',
+              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
+              'DEEPSEEK_CONFIG': {
+                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
+                  'apiUrl': 'https://api.deepseek.com/chat/completions',
+                  'model': 'deepseek-chat',
+                  'maxTokens': 2000,
+                  'temperature': 0.8
+              },
+          })
+          print('Secure config generated successfully')
+          "
+
       - name: Convert PNG to ICO
         run: |
           python -c "
@@ -40,6 +64,7 @@ jobs:
           REM 显式收集关键依赖
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
             --icon=app_icon.ico ^
+            --add-data=".secure_config;." ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
             --collect-all requests ^
@@ -77,6 +102,26 @@ jobs:
           pip install "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
           pip install pyinstaller
 
+      - name: Generate secure config
+        run: |
+          python -c "
+          from core.crypto import SecureConfig
+          secure = SecureConfig()
+          secure.set_multiple({
+              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
+              'MONGODB_DB_NAME': 'auto-form-db',
+              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
+              'DEEPSEEK_CONFIG': {
+                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
+                  'apiUrl': 'https://api.deepseek.com/chat/completions',
+                  'model': 'deepseek-chat',
+                  'maxTokens': 2000,
+                  'temperature': 0.8
+              },
+          })
+          print('Secure config generated successfully')
+          "
+
       - name: Create ICNS icon
         run: |
           mkdir -p app_icon.iconset
@@ -97,6 +142,7 @@ jobs:
         run: |
           pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
             --icon=app_icon.icns \
+            --add-data=".secure_config:." \
             --osx-bundle-identifier=com.autofill.app \
             main.py
 
@@ -123,6 +169,26 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Generate secure config
+        run: |
+          python -c "
+          from core.crypto import SecureConfig
+          secure = SecureConfig()
+          secure.set_multiple({
+              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
+              'MONGODB_DB_NAME': 'auto-form-db',
+              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
+              'DEEPSEEK_CONFIG': {
+                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
+                  'apiUrl': 'https://api.deepseek.com/chat/completions',
+                  'model': 'deepseek-chat',
+                  'maxTokens': 2000,
+                  'temperature': 0.8
+              },
+          })
+          print('Secure config generated successfully')
+          "
+
       - name: Create ICNS icon
         run: |
           mkdir -p app_icon.iconset
@@ -143,6 +209,7 @@ jobs:
         run: |
           pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
             --icon=app_icon.icns \
+            --add-data=".secure_config:." \
             --osx-bundle-identifier=com.autofill.app \
             main.py
 
