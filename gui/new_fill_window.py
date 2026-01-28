@@ -10510,14 +10510,31 @@ class NewFillWindow(QDialog):
         }}
         
         // 贪心算法：按分数优先级分配匹配
+        // ⚡️ 关键优化：同名字段允许共享同一个名片数据
+        // 解决问题：表单中可能有多个同名字段（如标题元素和输入元素分别被识别）
         console.log('\\n📊 全局最优分配（贪心算法）...');
         const usedFieldIndices = new Set();
-        const usedCardIndices = new Set();
+        const usedCardIndicesByTitle = new Map(); // title -> Set(cardIndex)，记录每个标题已使用的名片
         const finalMatches = new Map(); // fieldIndex -> matchInfo
         
         for (const match of matchMatrix) {{
-            // 跳过已使用的表单字段或名片字段
-            if (usedFieldIndices.has(match.fieldIndex) || usedCardIndices.has(match.cardIndex)) {{
+            // 跳过已使用的表单字段
+            if (usedFieldIndices.has(match.fieldIndex)) {{
+                continue;
+            }}
+            
+            const fieldTitle = match.fieldInfo.title;
+            
+            // 检查该名片数据是否已被其他不同标题的字段使用
+            let isCardUsedByOtherTitle = false;
+            for (const [otherTitle, usedCards] of usedCardIndicesByTitle) {{
+                if (otherTitle !== fieldTitle && usedCards.has(match.cardIndex)) {{
+                    isCardUsedByOtherTitle = true;
+                    break;
+                }}
+            }}
+            
+            if (isCardUsedByOtherTitle) {{
                 continue;
             }}
             
@@ -10525,7 +10542,13 @@ class NewFillWindow(QDialog):
             if (match.score >= 50) {{
                 finalMatches.set(match.fieldIndex, match);
                 usedFieldIndices.add(match.fieldIndex);
-                usedCardIndices.add(match.cardIndex);
+                
+                // 记录该标题使用了哪个名片数据
+                if (!usedCardIndicesByTitle.has(fieldTitle)) {{
+                    usedCardIndicesByTitle.set(fieldTitle, new Set());
+                }}
+                usedCardIndicesByTitle.get(fieldTitle).add(match.cardIndex);
+                
                 console.log(`   ✅ 分配: 表单#${{match.fieldIndex + 1}}"${{match.fieldInfo.title}}" ← 名片"${{match.cardItem.key.substring(0, 25)}}..." (分数:${{match.score.toFixed(1)}})`);
             }}
         }}
