@@ -17,7 +17,7 @@ try:
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
-    print("⚠️ cryptography 库未安装，使用基础加密")
+    print("[WARN] cryptography not installed, using basic encryption")
 
 
 class ConfigCrypto:
@@ -128,7 +128,7 @@ class ConfigCrypto:
             else:
                 return self._simple_decode(encrypted_data)
         except Exception as e:
-            print(f"⚠️ 解密失败: {e}")
+            print(f"[WARN] Decrypt failed: {e}")
             return encrypted_data
     
     def _simple_encode(self, data: str) -> str:
@@ -191,11 +191,34 @@ class SecureConfig:
         
         # PyInstaller 打包后的路径
         if getattr(sys, 'frozen', False):
-            # 打包环境：_MEIPASS 是 PyInstaller 解压资源的临时目录
+            # 可能的配置文件位置（按优先级）
+            possible_paths = []
+            
+            # 1. _MEIPASS 目录（onefile 模式）
             if hasattr(sys, '_MEIPASS'):
-                return Path(sys._MEIPASS)
-            # onefile 模式下，资源在可执行文件同目录
-            return Path(sys.executable).parent
+                possible_paths.append(Path(sys._MEIPASS))
+            
+            # 2. 可执行文件所在目录
+            exe_dir = Path(sys.executable).parent
+            possible_paths.append(exe_dir)
+            
+            # 3. _internal 目录（PyInstaller 6.x onedir 模式）
+            internal_dir = exe_dir / '_internal'
+            if internal_dir.exists():
+                possible_paths.append(internal_dir)
+            
+            # 4. 可执行文件的父目录（macOS .app bundle）
+            possible_paths.append(exe_dir.parent)
+            possible_paths.append(exe_dir.parent / 'Resources')
+            
+            # 查找配置文件
+            for path in possible_paths:
+                config_file = path / '.secure_config'
+                if config_file.exists():
+                    return path
+            
+            # 默认返回可执行文件目录
+            return exe_dir
         else:
             # 开发环境
             return Path(__file__).resolve().parent.parent
@@ -211,7 +234,7 @@ class SecureConfig:
                 if encrypted:
                     return self.crypto.decrypt_dict(encrypted)
         except Exception as e:
-            print(f"⚠️ 加载配置失败: {e}")
+            print(f"[WARN] Load config failed: {e}")
         
         return {}
     
@@ -224,7 +247,7 @@ class SecureConfig:
             self._config_cache = config
             return True
         except Exception as e:
-            print(f"⚠️ 保存配置失败: {e}")
+            print(f"[WARN] Save config failed: {e}")
             return False
     
     def get(self, key: str, default: Any = None) -> Any:
@@ -285,12 +308,12 @@ def generate_encrypted_config():
             'DEEPSEEK_CONFIG': DEEPSEEK_CONFIG,
         })
         
-        print("✅ 加密配置已生成到 .secure_config 文件")
-        print("⚠️ 请修改 config.py，移除明文敏感信息")
+        print("[OK] Secure config generated to .secure_config")
+        print("[INFO] Please remove plaintext secrets from config.py")
         return True
         
     except ImportError as e:
-        print(f"❌ 导入配置失败: {e}")
+        print(f"[ERROR] Import config failed: {e}")
         return False
 
 
