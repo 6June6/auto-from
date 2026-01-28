@@ -40,9 +40,3 @@ data/
 # Cursor
 .cursor/
 
-# 加密配置（敏感信息）
-.secure_config
-
-# 混淆输出
-dist_obfuscated/
-

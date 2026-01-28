@@ -24,10 +24,3 @@ python-dateutil==2.8.2
 # 开发工具
 watchdog==3.0.0  # 文件监控（开发模式自动重启）
 pycryptodome
-
-# 安全加密
-cryptography>=42.0.0  # 配置加密
-
-# 代码混淆（可选，仅打包时需要）
-# pyarmor>=8.0.0
-# nuitka>=2.0.0
