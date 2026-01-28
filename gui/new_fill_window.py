@@ -7609,13 +7609,33 @@ class NewFillWindow(QDialog):
         
         console.log('\\n🎯 开始匹配和填写...');
         
+        // ⚡️ 通用平台标识符列表
+        const genericPlatformTerms = ['小红书', '抖音', '微博', '快手', '微信', 'b站', 'bilibili', '知乎', '头条', '今日头条', '视频号', '公众号'];
+        const isGenericIdentifier = (text) => {{
+            if (!text) return true;
+            const cleaned = text.toLowerCase().replace(/[\\s\\n\\r\\t]+/g, '').trim();
+            return genericPlatformTerms.some(term => {{
+                const termLower = term.toLowerCase();
+                return cleaned === termLower || (cleaned.includes(termLower) && cleaned.length <= termLower.length + 3);
+            }});
+        }};
+        
         // 以输入框为主体遍历，为每个输入框找最佳匹配的名片字段
         allInputs.forEach((input, index) => {{
             const identifiers = getInputIdentifiers(input);
             let bestMatch = {{ item: null, score: 0, identifier: null }};
             
-            // 打印表单字段标题
-            const mainTitle = identifiers[0] || '(无标题)';
+            // ⚡️ 智能选择 mainTitle：跳过通用平台标识符
+            let mainTitle = '(无标题)';
+            for (const identifier of identifiers) {{
+                if (!isGenericIdentifier(identifier)) {{
+                    mainTitle = identifier;
+                    break;
+                }}
+            }}
+            if (mainTitle === '(无标题)' && identifiers.length > 0) {{
+                mainTitle = identifiers[0];
+            }}
             console.log(`\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
             console.log(`📋 表单字段 #${{index + 1}}: "${{mainTitle}}"`);
             if (identifiers.length > 1) {{
@@ -8477,13 +8497,33 @@ class NewFillWindow(QDialog):
         
         console.log('\\n🎯 开始匹配和填写...');
         
+        // ⚡️ 通用平台标识符列表
+        const genericPlatformTerms = ['小红书', '抖音', '微博', '快手', '微信', 'b站', 'bilibili', '知乎', '头条', '今日头条', '视频号', '公众号'];
+        const isGenericIdentifier = (text) => {{
+            if (!text) return true;
+            const cleaned = text.toLowerCase().replace(/[\\s\\n\\r\\t]+/g, '').trim();
+            return genericPlatformTerms.some(term => {{
+                const termLower = term.toLowerCase();
+                return cleaned === termLower || (cleaned.includes(termLower) && cleaned.length <= termLower.length + 3);
+            }});
+        }};
+        
         // 以输入框为主体遍历，为每个输入框找最佳匹配的名片字段
         allInputs.forEach((input, index) => {{
             const identifiers = getInputIdentifiers(input, index);
             let bestMatch = {{ item: null, score: 0, identifier: null, matchedKey: null }};
             
-            // 打印表单字段标题
-            const mainTitle = identifiers[0] || '(无标题)';
+            // ⚡️ 智能选择 mainTitle：跳过通用平台标识符
+            let mainTitle = '(无标题)';
+            for (const identifier of identifiers) {{
+                if (!isGenericIdentifier(identifier)) {{
+                    mainTitle = identifier;
+                    break;
+                }}
+            }}
+            if (mainTitle === '(无标题)' && identifiers.length > 0) {{
+                mainTitle = identifiers[0];
+            }}
             console.log(`\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
             console.log(`📋 表单字段 #${{index + 1}}: "${{mainTitle}}"`);
             if (identifiers.length > 1) {{
@@ -8813,6 +8853,15 @@ class NewFillWindow(QDialog):
         return cleaned.trim();
     }}
     
+    // ⚡️ 提取核心标识（去除括号内的示例内容）
+    // 如 "账号类型（母婴，好物，名字，数码，探店）" -> "账号类型"
+    function extractCoreIdentifier(text) {{
+        if (!text) return '';
+        // 去除中英文括号及其内容
+        let core = text.replace(/[（(][^）)]*[）)]/g, '');
+        return cleanTextNoPrefix(core);
+    }}
+    
     // 分割关键词为子关键词数组
     function splitKeywords(keyword) {{
         if (!keyword) return [];
@@ -8880,6 +8929,14 @@ class NewFillWindow(QDialog):
         return maxLen;
     }}
     
+    // ⚡️ 判断标识符是否为 placeholder（提示性文本）
+    function isPlaceholderIdentifier(identifier) {{
+        if (!identifier) return false;
+        const placeholderPatterns = ['请填写', '请输入', '请选择', '请填', '请写', '必填', 'placeholder', '例如', '比如'];
+        const lower = identifier.toLowerCase();
+        return placeholderPatterns.some(p => lower.includes(p));
+    }}
+    
     // 【核心】匹配关键词 - 引用石墨文档的动态覆盖率评分系统
     function matchKeyword(identifiers, keyword) {{
         if (!keyword) return {{ matched: false, identifier: null, score: 0 }};
@@ -8898,6 +8955,7 @@ class NewFillWindow(QDialog):
         let bestScore = 0;
         let bestIdentifier = null;
         let bestSubKey = null;
+        let bestIsFromPlaceholder = false;  // ⚡️ 记录最佳匹配是否来自 placeholder
         
         for (let i = 0; i < subKeywords.length; i++) {{
             const subKey = subKeywords[i];
@@ -8905,10 +8963,16 @@ class NewFillWindow(QDialog):
             
             const subKeyCoreWords = extractCoreWords(subKey);
             
-            for (const identifier of identifiers) {{
+            for (let idIdx = 0; idIdx < identifiers.length; idIdx++) {{
+                const identifier = identifiers[idIdx];
                 const cleanIdentifier = cleanText(identifier);
                 const cleanIdentifierNoPrefix = cleanTextNoPrefix(identifier);
+                // ⚡️ 提取核心标识（去除括号内示例内容）
+                const coreIdentifier = extractCoreIdentifier(identifier);
                 if (!cleanIdentifier) continue;
+                
+                // ⚡️ 检查是否为 placeholder 标识符
+                const isPlaceholder = isPlaceholderIdentifier(identifier);
                 
                 const identifierCoreWords = extractCoreWords(identifier);
                 
@@ -8922,52 +8986,77 @@ class NewFillWindow(QDialog):
                 else if (cleanIdentifierNoPrefix && cleanIdentifierNoPrefix === subKey) {{
                     currentScore = 99;
                 }}
+                // ⚡️ 1.6 核心标识完全匹配（去除括号内容后）
+                // 如 "账号类型（母婴，好物，名字，数码，探店）" 的核心标识 "账号类型" 匹配 "账号类型"
+                else if (coreIdentifier && coreIdentifier === subKey) {{
+                    currentScore = 98;
+                }}
                 // 2. 去前缀后完全匹配（双方都去前缀）
                 else if (subKeyNoPrefix && cleanIdentifierNoPrefix === subKeyNoPrefix) {{
-                    currentScore = 98;
+                    currentScore = 97;
+                }}
+                // ⚡️ 2.3 核心标识与名片字段去前缀后匹配
+                else if (coreIdentifier && subKeyNoPrefix && coreIdentifier === subKeyNoPrefix) {{
+                    currentScore = 96;
                 }}
                 // 2.5 名片字段去前缀后与表单标识符匹配
                 else if (subKeyNoPrefix && cleanIdentifier === subKeyNoPrefix) {{
-                    currentScore = 97;
+                    currentScore = 94;
                 }}
                 // 3. 包含匹配
                 else if (cleanIdentifier.includes(subKey) && subKey.length >= 2) {{
                     const coverage = subKey.length / cleanIdentifier.length;
                     if (coverage >= 0.8) {{
-                        currentScore = 95;
+                        currentScore = 93;
                     }} else if (coverage >= 0.5) {{
-                        currentScore = 50 + (coverage * 45);
+                        currentScore = 50 + (coverage * 43);
                     }} else {{
-                        currentScore = 50 + (coverage * 40);
+                        currentScore = 50 + (coverage * 38);
+                    }}
+                }}
+                // ⚡️ 3.3 核心标识包含名片字段（如 "账号类型" 包含 "类型"）
+                else if (coreIdentifier && coreIdentifier.includes(subKey) && subKey.length >= 2) {{
+                    const coverage = subKey.length / coreIdentifier.length;
+                    if (coverage >= 0.8) {{
+                        currentScore = 92;
+                    }} else if (coverage >= 0.5) {{
+                        currentScore = 50 + (coverage * 42);
+                    }} else {{
+                        currentScore = 50 + (coverage * 37);
                     }}
                 }}
                 // ⚡️ 3.5 表单去前缀后包含名片字段
                 else if (cleanIdentifierNoPrefix && cleanIdentifierNoPrefix.includes(subKey) && subKey.length >= 2) {{
                     const coverage = subKey.length / cleanIdentifierNoPrefix.length;
                     if (coverage >= 0.8) {{
-                        currentScore = 94;
+                        currentScore = 91;
                     }} else if (coverage >= 0.5) {{
-                        currentScore = 50 + (coverage * 44);
+                        currentScore = 50 + (coverage * 41);
                     }} else {{
-                        currentScore = 50 + (coverage * 39);
+                        currentScore = 50 + (coverage * 36);
                     }}
                 }}
                 // 4. 去前缀包含匹配
                 else if (subKeyNoPrefix && cleanIdentifier.includes(subKeyNoPrefix) && subKeyNoPrefix.length >= 2) {{
                     const coverage = subKeyNoPrefix.length / cleanIdentifier.length;
                     if (coverage >= 0.8) {{
-                        currentScore = 93;
+                        currentScore = 90;
                     }} else {{
-                        currentScore = 48 + (coverage * 40);
+                        currentScore = 48 + (coverage * 38);
                     }}
+                }}
+                // ⚡️ 4.5 名片字段包含核心标识
+                else if (subKey.includes(coreIdentifier) && coreIdentifier && coreIdentifier.length >= 2) {{
+                    const coverage = coreIdentifier.length / subKey.length;
+                    currentScore = 56 + (coverage * 34);
                 }}
                 // 5. 反向包含
                 else if (subKey.includes(cleanIdentifier) && cleanIdentifier.length >= 2) {{
                     if (subKeyNoPrefix === cleanIdentifier) {{
-                        currentScore = 96;
+                        currentScore = 89;
                     }} else {{
                         const coverage = cleanIdentifier.length / (subKeyNoPrefix.length || subKey.length);
-                        currentScore = 55 + (coverage * 35);
+                        currentScore = 55 + (coverage * 33);
                     }}
                 }}
                 // ⚡️ 5.5 名片字段包含表单去前缀后的标识符
@@ -9032,10 +9121,18 @@ class NewFillWindow(QDialog):
                     }}
                 }}
                 
-                if (currentScore > bestScore) {{
-                    bestScore = currentScore;
+                // ⚡️ 对 placeholder 来源的匹配进行惩罚（降低20%的分数）
+                // 这样可以避免 "请填写手机号" 这样的 placeholder 抢占真正的手机号字段
+                let adjustedScore = currentScore;
+                if (isPlaceholder && currentScore > 0) {{
+                    adjustedScore = Math.floor(currentScore * 0.8);
+                }}
+                
+                if (adjustedScore > bestScore) {{
+                    bestScore = adjustedScore;
                     bestIdentifier = identifier;
                     bestSubKey = subKey;
+                    bestIsFromPlaceholder = isPlaceholder;
                 }}
             }}
         }}
@@ -9044,7 +9141,8 @@ class NewFillWindow(QDialog):
             matched: bestScore >= 50, 
             identifier: bestIdentifier, 
             score: bestScore,
-            matchedKey: bestSubKey
+            matchedKey: bestSubKey,
+            isFromPlaceholder: bestIsFromPlaceholder
         }};
     }}
     
@@ -9131,9 +9229,37 @@ class NewFillWindow(QDialog):
         // ═══════════════════════════════════════════════════════════════
         console.log('\\n📊 第一阶段：预扫描表单字段...');
         
+        // ⚡️ 通用平台标识符列表 - 这些不适合作为字段的唯一标识
+        const genericPlatformTerms = ['小红书', '抖音', '微博', '快手', '微信', 'b站', 'bilibili', '知乎', '头条', '今日头条', '视频号', '公众号'];
+        
+        // 判断一个标识符是否只是通用平台名称
+        function isGenericIdentifier(text) {{
+            if (!text) return true;
+            const cleaned = text.toLowerCase().replace(/[\\s\\n\\r\\t]+/g, '').trim();
+            // 如果标识符长度很短且只包含平台名称，视为通用标识符
+            return genericPlatformTerms.some(term => {{
+                const termLower = term.toLowerCase();
+                // 完全等于平台名称，或者只比平台名称多几个字符（如"小红书："）
+                return cleaned === termLower || (cleaned.includes(termLower) && cleaned.length <= termLower.length + 3);
+            }});
+        }}
+        
         const inputInfos = allInputs.map((input, index) => {{
             const identifiers = getInputIdentifiers(input, index);
-            const mainTitle = identifiers[0] || '(无标题)';
+            
+            // ⚡️ 智能选择 mainTitle：跳过通用平台标识符，选择更具体的标识符
+            let mainTitle = '(无标题)';
+            for (const identifier of identifiers) {{
+                if (!isGenericIdentifier(identifier)) {{
+                    mainTitle = identifier;
+                    break;
+                }}
+            }}
+            // 如果所有标识符都是通用的，使用第一个（保底）
+            if (mainTitle === '(无标题)' && identifiers.length > 0) {{
+                mainTitle = identifiers[0];
+            }}
+            
             return {{
                 input,
                 identifiers,
@@ -11501,6 +11627,23 @@ class NewFillWindow(QDialog):
         return cleaned.trim();
     }}
     
+    // ⚡️ 提取核心标识（去除括号内的示例内容）
+    // 如 "账号类型（家居，母婴，美妆，探店，科技，数码，）" -> "账号类型"
+    function extractCoreIdentifier(text) {{
+        if (!text) return '';
+        // 去除中英文括号及其内容
+        let core = text.replace(/[（(][^）)]*[）)]/g, '');
+        return cleanTextNoPrefix(core);
+    }}
+    
+    // ⚡️ 判断标识符是否为 placeholder（提示性文本）
+    function isPlaceholderIdentifier(identifier) {{
+        if (!identifier) return false;
+        const placeholderPatterns = ['请填写', '请输入', '请选择', '请填', '请写', '必填', 'placeholder', '例如', '比如'];
+        const lower = identifier.toLowerCase();
+        return placeholderPatterns.some(p => lower.includes(p));
+    }}
+    
     // 分割关键词为子关键词数组
     function splitKeywords(keyword) {{
         if (!keyword) return [];
@@ -11794,6 +11937,8 @@ class NewFillWindow(QDialog):
                 // 注意：移除了字段类型互斥检测，依靠完全匹配的高分自然选择最佳匹配
                 
                 const identifierCoreWords = extractCoreWords(identifier);
+                // ⚡️ 提取核心标识（去除括号内容）
+                const coreIdentifier = extractCoreIdentifier(identifier);
                 let currentScore = 0;
                 
                 // 1. 完全匹配（100分）
@@ -11803,6 +11948,17 @@ class NewFillWindow(QDialog):
                 // 2. 去前缀后完全匹配（98分）
                 else if (subKeyNoPrefix && cleanIdentifier === subKeyNoPrefix) {{
                     currentScore = 98;
+                }}
+                // ⚡️ 2.5 核心标识完全匹配（99分）
+                // 如 "账号类型（家居，母婴...）" 的核心标识 "账号类型" 匹配名片的 "账号类型"
+                else if (coreIdentifier && coreIdentifier === subKey) {{
+                    currentScore = 99;
+                    console.log(`[WPS] ✅ 核心标识完全匹配: "${{coreIdentifier}}" === "${{subKey}}" → 分数99`);
+                }}
+                // ⚡️ 2.6 核心标识与去前缀的名片字段匹配（97分）
+                else if (coreIdentifier && subKeyNoPrefix && coreIdentifier === subKeyNoPrefix) {{
+                    currentScore = 97;
+                    console.log(`[WPS] ✅ 核心标识去前缀匹配: "${{coreIdentifier}}" === "${{subKeyNoPrefix}}" → 分数97`);
                 }}
                 // 3. 表单标签包含名片key（50-95分）
                 else if (cleanIdentifier.includes(subKey) && subKey.length >= 2) {{
@@ -11984,10 +12140,37 @@ class NewFillWindow(QDialog):
         const allInputs = getAllInputs();
         console.log(`找到 ${{allInputs.length}} 个输入框`);
         
+        // ⚡️ 通用平台标识符列表 - 这些不适合作为字段的唯一标识
+        const genericPlatformTerms = ['小红书', '抖音', '微博', '快手', '微信', 'b站', 'bilibili', '知乎', '头条', '今日头条', '视频号', '公众号'];
+        
+        // 判断一个标识符是否只是通用平台名称
+        function isGenericIdentifier(text) {{
+            if (!text) return true;
+            const cleaned = text.toLowerCase().replace(/[\\s\\n\\r\\t]+/g, '').trim();
+            return genericPlatformTerms.some(term => {{
+                const termLower = term.toLowerCase();
+                return cleaned === termLower || (cleaned.includes(termLower) && cleaned.length <= termLower.length + 3);
+            }});
+        }}
+        
         // 收集所有输入框的信息
         const inputInfos = allInputs.map((input, index) => {{
             const identifiers = getInputIdentifiers(input, index);
-            const mainTitle = identifiers[0] || '(无标题)';
+            
+            // ⚡️ 智能选择 mainTitle：跳过通用平台标识符和 placeholder
+            let mainTitle = '(无标题)';
+            for (const identifier of identifiers) {{
+                // 跳过通用平台标识符
+                if (isGenericIdentifier(identifier)) continue;
+                // ⚡️ 跳过 placeholder（如"请输入"、"请填写"）
+                if (isPlaceholderIdentifier(identifier)) continue;
+                mainTitle = identifier;
+                break;
+            }}
+            if (mainTitle === '(无标题)' && identifiers.length > 0) {{
+                mainTitle = identifiers[0];
+            }}
+            
             console.log(`   输入框 #${{index + 1}}: "${{mainTitle}}" [${{identifiers.slice(1, 3).join(', ')}}]`);
             return {{
                 input,

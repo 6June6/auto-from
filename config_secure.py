@@ -1,6 +1,6 @@
 """
-配置文件
-优先从加密配置读取敏感信息，如果没有则使用环境变量或默认值
+安全配置文件
+敏感信息从加密文件中读取
 """
 import os
 from pathlib import Path
@@ -8,9 +8,9 @@ from pathlib import Path
 # 项目根目录
 BASE_DIR = Path(__file__).resolve().parent
 
-
+# 尝试从加密配置中读取敏感信息
 def _load_secure_config():
-    """尝试加载加密配置"""
+    """加载加密配置"""
     try:
         from core.crypto import get_secure_config
         secure = get_secure_config()
@@ -22,24 +22,24 @@ def _load_secure_config():
                 'JWT_SECRET_KEY': secure.get('JWT_SECRET_KEY'),
                 'DEEPSEEK_CONFIG': secure.get('DEEPSEEK_CONFIG'),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ 加载加密配置失败: {e}")
+    
     return None
 
 
-# 尝试从加密配置读取
+# 加载配置
 _secure = _load_secure_config()
 
-if _secure and _secure.get('MONGODB_URI'):
-    # 使用加密配置（生产环境）
+if _secure:
+    # 从加密配置读取
     MONGODB_URI = _secure['MONGODB_URI']
     MONGODB_DB_NAME = _secure['MONGODB_DB_NAME']
     JWT_SECRET_KEY = _secure['JWT_SECRET_KEY']
     DEEPSEEK_CONFIG = _secure['DEEPSEEK_CONFIG']
-    DEBUG = False  # 生产环境关闭调试
 else:
-    # 未找到加密配置，从环境变量读取
-    # ⚠️ 生产环境请运行: python -m core.crypto 生成加密配置
+    # 配置未加密时的占位符（生产环境不应出现）
+    print("⚠️ 未找到加密配置，请运行 python -m core.crypto 生成")
     MONGODB_URI = os.environ.get('MONGODB_URI', '')
     MONGODB_DB_NAME = os.environ.get('MONGODB_DB_NAME', 'auto-form-db')
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', '')
@@ -50,11 +50,6 @@ else:
         "maxTokens": 2000,
         "temperature": 0.8
     }
-    DEBUG = True
-    
-    if not MONGODB_URI:
-        print("⚠️ 未找到加密配置或环境变量，请运行: python -m core.crypto 生成配置")
-
 
 # 应用配置（非敏感）
 APP_NAME = "自动表单填写工具"
@@ -63,10 +58,12 @@ WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
 # 自动填写配置
-AUTO_FILL_DELAY = 1000  # 毫秒
-MATCH_THRESHOLD = 0.6   # 字段匹配相似度阈值
+AUTO_FILL_DELAY = 1000
+MATCH_THRESHOLD = 0.6
 
 # JWT 配置（非敏感部分）
-JWT_EXPIRATION_DAYS = 30  # Token 过期时间（天）
-MAX_DEVICES_PER_USER = 2  # 每个用户最多绑定设备数
+JWT_EXPIRATION_DAYS = 30
+MAX_DEVICES_PER_USER = 2
 
+# 调试模式
+DEBUG = False  # 生产环境关闭调试
