@@ -30,24 +30,7 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: |
-          python -c "
-          from core.crypto import SecureConfig
-          secure = SecureConfig()
-          secure.set_multiple({
-              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
-              'MONGODB_DB_NAME': 'auto-form-db',
-              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
-              'DEEPSEEK_CONFIG': {
-                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
-                  'apiUrl': 'https://api.deepseek.com/chat/completions',
-                  'model': 'deepseek-chat',
-                  'maxTokens': 2000,
-                  'temperature': 0.8
-              },
-          })
-          print('Secure config generated successfully')
-          "
+        run: python scripts/generate_config.py
 
       - name: Convert PNG to ICO
         run: |
@@ -103,24 +86,11 @@ jobs:
           pip install pyinstaller
 
       - name: Generate secure config
-        run: |
-          python -c "
-          from core.crypto import SecureConfig
-          secure = SecureConfig()
-          secure.set_multiple({
-              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
-              'MONGODB_DB_NAME': 'auto-form-db',
-              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
-              'DEEPSEEK_CONFIG': {
-                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
-                  'apiUrl': 'https://api.deepseek.com/chat/completions',
-                  'model': 'deepseek-chat',
-                  'maxTokens': 2000,
-                  'temperature': 0.8
-              },
-          })
-          print('Secure config generated successfully')
-          "
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python scripts/generate_config.py
 
       - name: Create ICNS icon
         run: |
@@ -170,24 +140,11 @@ jobs:
           pip install pyinstaller
 
       - name: Generate secure config
-        run: |
-          python -c "
-          from core.crypto import SecureConfig
-          secure = SecureConfig()
-          secure.set_multiple({
-              'MONGODB_URI': '${{ secrets.MONGODB_URI }}',
-              'MONGODB_DB_NAME': 'auto-form-db',
-              'JWT_SECRET_KEY': '${{ secrets.JWT_SECRET_KEY }}',
-              'DEEPSEEK_CONFIG': {
-                  'apiKey': '${{ secrets.DEEPSEEK_API_KEY }}',
-                  'apiUrl': 'https://api.deepseek.com/chat/completions',
-                  'model': 'deepseek-chat',
-                  'maxTokens': 2000,
-                  'temperature': 0.8
-              },
-          })
-          print('Secure config generated successfully')
-          "
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python scripts/generate_config.py
 
       - name: Create ICNS icon
         run: |
