@@ -9092,7 +9092,12 @@ class NewFillWindow(QDialog):
         input.blur();
     }}
     
-    // 主执行函数 - 以输入框为主体，为每个输入框找最佳匹配的名片字段
+    // ═══════════════════════════════════════════════════════════════
+    // 主执行函数 - 两阶段匹配算法（参考番茄表单）
+    // 第一阶段：预扫描 - 计算所有表单字段与名片字段的匹配分数矩阵
+    // 第二阶段：全局最优分配 - 按分数从高到低排序（贪心算法）
+    // 第三阶段：执行填充 - 按预分配的结果执行填充
+    // ═══════════════════════════════════════════════════════════════
     async function executeAutoFill() {{
         const hasInputs = await waitForInputs();
         
@@ -9118,87 +9123,141 @@ class NewFillWindow(QDialog):
             console.log(`   ${{i + 1}}. "${{item.key}}" = "${{valuePreview}}"`);
         }});
         
-        console.log('\\n🎯 开始匹配和填写...');
+        console.log('\\n🎯 开始两阶段智能匹配...');
+        console.log('═══════════════════════════════════════════════════════════════');
         
-        // 以输入框为主体遍历，为每个输入框找最佳匹配的名片字段
-        allInputs.forEach((input, index) => {{
+        // ═══════════════════════════════════════════════════════════════
+        // 第一阶段：预扫描 - 构建输入框信息
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第一阶段：预扫描表单字段...');
+        
+        const inputInfos = allInputs.map((input, index) => {{
             const identifiers = getInputIdentifiers(input, index);
-            let bestMatch = {{ item: null, score: 0, identifier: null, matchedKey: null }};
-            
-            // 打印表单字段标题
             const mainTitle = identifiers[0] || '(无标题)';
-            console.log(`\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`📋 表单字段 #${{index + 1}}: "${{mainTitle}}"`);
-            if (identifiers.length > 1) {{
-                console.log(`   其他标识: [${{identifiers.slice(1, 4).map(i => '"' + i + '"').join(', ')}}${{identifiers.length > 4 ? '...' : ''}}]`);
-            }}
-            console.log(`   🔍 匹配过程:`);
-            
-            // 收集所有匹配结果用于排序显示
-            const allMatches = [];
-            
-            // 在所有名片字段中找最佳匹配
-            fillData.forEach(item => {{
-                const matchResult = matchKeyword(identifiers, item.key);
-                allMatches.push({{
-                    key: item.key,
-                    value: item.value,
-                    score: matchResult.score,
-                    matched: matchResult.matched,
-                    identifier: matchResult.identifier,
-                    matchedKey: matchResult.matchedKey
-                }});
-                
-                if (matchResult.matched && matchResult.score > bestMatch.score) {{
-                    bestMatch = {{ 
-                        item: item, 
+            return {{
+                input,
+                identifiers,
+                mainTitle,
+                index
+            }};
+        }});
+        
+        // ═══════════════════════════════════════════════════════════════
+        // 第二阶段：计算匹配分数矩阵并全局最优分配
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第二阶段：计算匹配分数矩阵...');
+        
+        // 计算所有输入框与名片字段的匹配分数矩阵
+        const matchMatrix = [];
+        inputInfos.forEach((inputInfo, inputIndex) => {{
+            fillData.forEach((item, cardIndex) => {{
+                const matchResult = matchKeyword(inputInfo.identifiers, item.key);
+                if (matchResult.score > 0) {{
+                    matchMatrix.push({{
+                        inputIndex,
+                        cardIndex,
+                        inputInfo,
+                        cardItem: item,
                         score: matchResult.score,
+                        matched: matchResult.matched,
                         identifier: matchResult.identifier,
                         matchedKey: matchResult.matchedKey
-                    }};
+                    }});
                 }}
             }});
-            
-            // 按分数排序，只打印分数>0的匹配
-            allMatches.sort((a, b) => b.score - a.score);
-            const validMatches = allMatches.filter(m => m.score > 0);
-            if (validMatches.length > 0) {{
-                validMatches.slice(0, 5).forEach((m, i) => {{
-                    const scoreBar = '█'.repeat(Math.floor(m.score / 10)) + '░'.repeat(10 - Math.floor(m.score / 10));
-                    const status = m.score >= 50 ? (i === 0 ? '🏆' : '✓') : '✗';
-                    const valuePreview = String(m.value).substring(0, 15) + (String(m.value).length > 15 ? '...' : '');
-                    console.log(`      ${{status}} "${{m.key}}" → ${{m.score.toFixed(1)}}分 [${{scoreBar}}] ${{m.identifier ? '(标识:"' + m.identifier + '")' : ''}} 值="${{valuePreview}}"`);
-                }});
-                if (validMatches.length > 5) {{
-                    console.log(`      ... 还有 ${{validMatches.length - 5}} 个候选 ...`);
-                }}
-            }} else {{
-                console.log(`      (无匹配候选)`);
+        }});
+        
+        // 按分数降序排序（高分优先）
+        matchMatrix.sort((a, b) => b.score - a.score);
+        
+        console.log(`   找到 ${{matchMatrix.length}} 个潜在匹配`);
+        if (matchMatrix.length > 0) {{
+            console.log(`   最高分: ${{matchMatrix[0].score.toFixed(1)}} (表单:"${{matchMatrix[0].inputInfo.mainTitle}}" ↔ 名片:"${{matchMatrix[0].cardItem.key.substring(0, 30)}}...")`);
+        }}
+        
+        // 贪心算法：按分数优先级分配匹配
+        // ⚡️ 关键优化：同名字段允许共享同一个名片数据
+        console.log('\\n📊 全局最优分配（贪心算法）...');
+        const usedInputIndices = new Set();
+        const usedCardIndicesByTitle = new Map(); // title -> Set(cardIndex)，记录每个标题已使用的名片
+        const finalMatches = new Map(); // inputIndex -> matchInfo
+        
+        for (const match of matchMatrix) {{
+            // 跳过已使用的输入框
+            if (usedInputIndices.has(match.inputIndex)) {{
+                continue;
             }}
             
-            // 如果找到匹配且分数足够高，填写（阈值 50）
-            if (bestMatch.item && bestMatch.score >= 50) {{
-                fillInput(input, bestMatch.item.value);
-                console.log(`   ✅ 选中: "${{bestMatch.item.key}}" = "${{bestMatch.item.value}}" (分数: ${{bestMatch.score.toFixed(1)}})`);
+            const inputTitle = match.inputInfo.mainTitle;
+            
+            // 检查该名片数据是否已被其他不同标题的字段使用
+            let isCardUsedByOtherTitle = false;
+            for (const [otherTitle, usedCards] of usedCardIndicesByTitle) {{
+                if (otherTitle !== inputTitle && usedCards.has(match.cardIndex)) {{
+                    isCardUsedByOtherTitle = true;
+                    break;
+                }}
+            }}
+            
+            if (isCardUsedByOtherTitle) {{
+                continue;
+            }}
+            
+            // 只接受分数>=50的匹配
+            if (match.score >= 50) {{
+                finalMatches.set(match.inputIndex, match);
+                usedInputIndices.add(match.inputIndex);
+                
+                // 记录该标题使用了哪个名片数据
+                if (!usedCardIndicesByTitle.has(inputTitle)) {{
+                    usedCardIndicesByTitle.set(inputTitle, new Set());
+                }}
+                usedCardIndicesByTitle.get(inputTitle).add(match.cardIndex);
+                
+                console.log(`   ✅ 分配: 表单#${{match.inputIndex + 1}}"${{match.inputInfo.mainTitle}}" ← 名片"${{match.cardItem.key.substring(0, 25)}}..." (分数:${{match.score.toFixed(1)}})`);
+            }}
+        }}
+        
+        console.log(`\\n   共分配 ${{finalMatches.size}} 个匹配`);
+        
+        // ═══════════════════════════════════════════════════════════════
+        // 第三阶段：按输入框顺序执行填充
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n📊 第三阶段：执行填充...');
+        
+        const usedCardKeys = new Set();
+        
+        for (const inputInfo of inputInfos) {{
+            const {{ input, identifiers, mainTitle, index }} = inputInfo;
+            
+            console.log(`\\n📋 字段 #${{index + 1}}: "${{mainTitle}}"`);
+            
+            // 检查是否有预分配的匹配
+            const preMatch = finalMatches.get(index);
+            
+            if (preMatch) {{
+                const cardItem = preMatch.cardItem;
+                fillInput(input, cardItem.value);
+                usedCardKeys.add(cardItem.key);
+                console.log(`   ✅ 填入: "${{cardItem.value.substring(0, 30)}}${{cardItem.value.length > 30 ? '...' : ''}}" (匹配: ${{cardItem.key.substring(0, 40)}}${{cardItem.key.length > 40 ? '...' : ''}}, 分数: ${{preMatch.score.toFixed(1)}})`);
                 fillCount++;
                 results.push({{
-                    key: bestMatch.item.key,
-                    value: bestMatch.item.value,
-                    matched: bestMatch.identifier,
-                    matchedKey: bestMatch.matchedKey,
-                    score: bestMatch.score,
+                    key: cardItem.key,
+                    value: cardItem.value,
+                    matched: preMatch.identifier,
+                    matchedKey: preMatch.matchedKey,
+                    score: preMatch.score,
                     success: true
                 }});
             }} else {{
-                console.log(`   ❌ 未匹配 (最高分: ${{bestMatch.score ? bestMatch.score.toFixed(1) : '0'}}, 需要>=50)`);
+                console.log(`   ❌ 未找到匹配 (无预分配)`);
             }}
-        }});
+        }}
         
         // 记录未匹配的名片字段
         console.log('\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.log('📊 匹配汇总:');
-        const filledKeys = new Set(results.filter(r => r.success).map(r => r.key));
-        const unusedFields = fillData.filter(item => !filledKeys.has(item.key));
+        const unusedFields = fillData.filter(item => !usedCardKeys.has(item.key));
         if (unusedFields.length > 0) {{
             console.log(`⚠️ 未使用的名片字段 (${{unusedFields.length}}个):`);
             unusedFields.forEach(item => {{
@@ -9884,34 +9943,35 @@ class NewFillWindow(QDialog):
         
         // 定义互斥字段组：[表单字段关键词组, 名片字段关键词组]
         // 如果表单字段包含组1的词，而名片key或value包含组2的词，则不兼容
+        // ⚠️ 注意：移除了"可以"、"是否"等常见词，因为它们可能出现在名片别名中（如"非报备视频可以"）
         const incompatiblePairs = [
             // 电话/手机/固话 不应匹配到地址、姓名、其他非电话数据
             [['电话', '手机', '联系电话', '电话号码', '手机号', '固话'], 
-             ['地址', '收货地址', '街道', '省市区', '详细地址', '所在地', '收货', '河南', '河北', '山东', '江苏', '浙江', '广东', '姓名', '名字', '昵称', '可以', '是否', '配合', '授权', '备注']],
+             ['地址', '收货地址', '街道', '省市区', '详细地址', '所在地', '收货', '河南', '河北', '山东', '江苏', '浙江', '广东', '姓名', '名字', '昵称', '配合', '授权', '备注']],
             // 地址 vs 电话/手机
             [['地址', '收货地址', '街道', '省市区', '详细地址', '所在地'], 
              ['电话', '手机', '联系电话', '电话号码', '手机号', '固话']],
             // 姓名 vs 地址/电话
             [['姓名', '名字', '收货人', '联系人'], 
              ['地址', '街道', '省市区', '电话', '手机', '固话', '河南', '河北']],
-            // 微信 vs 地址（但如果表单标题同时包含电话关键词，跳过此规则）
+            // 微信 vs 地址
             [['微信', '微信号', 'wx', 'vx'], 
-             ['地址', '街道', '省市区', '收货', '可以', '是否']],  // 移除对电话/手机的互斥，由优先判断逻辑处理
+             ['地址', '街道', '省市区', '收货']],
             // ID vs 地址/电话
             [['id', '账号', '抖音id', '小红书id'], 
-             ['地址', '街道', '省市区', '电话', '手机', '固话', '可以', '是否']],
+             ['地址', '街道', '省市区', '电话', '手机', '固话']],
             // 昵称 vs 地址/电话
             [['昵称', '用户名', '名称'], 
-             ['地址', '街道', '省市区', '电话', '手机', '固话', '可以', '是否']],
+             ['地址', '街道', '省市区', '电话', '手机', '固话']],
             // 链接 vs 地址/电话
             [['链接', '主页', '主页链接'], 
-             ['地址', '街道', '省市区', '电话', '手机', '固话', '收货', '可以', '是否']],
+             ['地址', '街道', '省市区', '电话', '手机', '固话', '收货']],
             // 粉丝数 vs 地址/电话
             [['粉丝', '粉丝数'], 
-             ['地址', '街道', '省市区', '电话', '手机', '固话', '可以', '是否']],
-            // 价格/报价 vs 地址/电话
+             ['地址', '街道', '省市区', '电话', '手机', '固话']],
+            // 价格/报价 vs 地址/电话（不包含"可以"、"是否"，因为它们可能出现在价格相关名片别名中）
             [['价格', '报价', '预算', '费用', '最低价'], 
-             ['地址', '街道', '省市区', '电话', '手机', '固话', '可以', '是否']]
+             ['地址', '街道', '省市区', '电话', '手机', '固话']]
         ];
         
         for (const [formKeywords, cardKeywords] of incompatiblePairs) {{
@@ -11480,29 +11540,88 @@ class NewFillWindow(QDialog):
         const clean1 = cleanText(text1);
         const clean2 = cleanText(text2);
         
-        // 定义反义词对
-        const negationPairs = [
-            ['非报备', '报备'],
-            ['非授权', '授权'],
-            ['非视频', '视频'],
-            ['非图文', '图文'],
-            ['不报备', '报备'],
-            ['无授权', '授权']
+        // 定义反义词对 - 包含行业行话
+        // 格式：[否定形式关键词列表, 肯定形式关键词]
+        const negationGroups = [
+            // 报备相关 - "水下"、"不走平台"、"裸价" 等都是"非报备"的行话
+            {{ negatives: ['非报备', '不报备', '水下', '不走平台', '不走蒲公英', '非蒲公英', '裸价'], positive: '报备' }},
+            // 授权相关
+            {{ negatives: ['非授权', '不授权', '无授权'], positive: '授权' }},
+            // 视频/图文相关（内容类型互斥）
+            {{ negatives: ['非视频'], positive: '视频' }},
+            {{ negatives: ['非图文'], positive: '图文' }},
         ];
         
-        for (const [negative, positive] of negationPairs) {{
-            // 检测：一方包含"非X"，另一方包含"X"但不包含"非X"
-            const has1Negative = clean1.includes(negative);
-            const has2Negative = clean2.includes(negative);
-            const has1Positive = clean1.includes(positive) && !has1Negative;
-            const has2Positive = clean2.includes(positive) && !has2Negative;
+        for (const group of negationGroups) {{
+            // 检测 text1 是否包含否定形式
+            const has1Negative = group.negatives.some(neg => clean1.includes(neg));
+            // 检测 text2 是否包含否定形式
+            const has2Negative = group.negatives.some(neg => clean2.includes(neg));
+            // 检测 text1 是否包含肯定形式（且不包含否定形式）
+            const has1Positive = clean1.includes(group.positive) && !has1Negative;
+            // 检测 text2 是否包含肯定形式（且不包含否定形式）
+            const has2Positive = clean2.includes(group.positive) && !has2Negative;
             
             // 如果一方是否定形式，另一方是肯定形式，则存在冲突
             if ((has1Negative && has2Positive) || (has2Negative && has1Positive)) {{
-                console.log(`[WPS] ⚠️ 检测到反义词冲突: "${{text1}}" vs "${{text2}}" (对: ${{negative}}/${{positive}})`);
+                const matchedNeg = group.negatives.find(neg => clean1.includes(neg) || clean2.includes(neg));
+                console.log(`[WPS] ⚠️ 检测到反义词冲突: "${{text1}}" vs "${{text2}}" (否定词: ${{matchedNeg}}, 肯定词: ${{group.positive}})`);
                 return true;
             }}
         }}
+        return false;
+    }}
+    
+    // 【新增】检测整个名片key是否与表单字段存在语义冲突
+    // 这个函数检查的是整个key字符串（包含所有别名），而不是单个别名
+    function hasKeyConflictWithForm(cardKey, formIdentifier) {{
+        const cleanKey = cleanText(cardKey);
+        const cleanForm = cleanText(formIdentifier);
+        
+        // 【核心逻辑】如果表单明确要求"报备"，而名片key中包含任何"非报备"相关的关键词，则冲突
+        // 这些关键词表示"非报备"的含义 - 增加更多行业术语
+        const nonBaobeiKeywords = ['非报备', '不报备', '水下', '不走平台', '不走蒲公英', '非蒲公英', '裸价', '图文非报备', '视频非报备', '图文不报备', '视频不报备'];
+        
+        // 检查表单是否明确要求"报备"（包含"报备"且不包含否定形式）
+        const formWantsBaobei = cleanForm.includes('报备') && !nonBaobeiKeywords.some(k => cleanForm.includes(k));
+        
+        if (formWantsBaobei) {{
+            // 检查名片key是否包含任何"非报备"关键词
+            const keyHasNonBaobei = nonBaobeiKeywords.some(k => cleanKey.includes(k));
+            if (keyHasNonBaobei) {{
+                const matchedKeyword = nonBaobeiKeywords.find(k => cleanKey.includes(k));
+                console.log(`[WPS] ⚠️ 名片整体冲突: 表单要求"报备"，但名片包含"${{matchedKeyword}}" → 跳过此名片`);
+                return true;
+            }}
+            
+            // 【新增】额外检查：检查名片是否主要是"非报备"类型
+            // 通过检查名片key的第一个别名（通常是主要类型）
+            const firstAlias = cardKey.split(/[|,;，；、]/).map(k => k.trim()).filter(k => k)[0] || '';
+            const cleanFirstAlias = cleanText(firstAlias);
+            // 如果第一个别名包含"非"、"不"、"水下"等否定词，则认为是非报备类型
+            if (cleanFirstAlias.includes('非') || cleanFirstAlias.includes('不') || cleanFirstAlias.includes('水下') || cleanFirstAlias.includes('裸价')) {{
+                console.log(`[WPS] ⚠️ 名片整体冲突(别名检测): 表单要求"报备"，但名片首别名"${{firstAlias}}"是非报备类型 → 跳过此名片`);
+                return true;
+            }}
+        }}
+        
+        // 反向检查：如果表单要求"非报备"，而名片是"报备"类型
+        const formWantsNonBaobei = nonBaobeiKeywords.some(k => cleanForm.includes(k));
+        if (formWantsNonBaobei) {{
+            // 如果名片key包含"报备"但不包含任何否定形式
+            const keyIsBaobei = cleanKey.includes('报备') && !nonBaobeiKeywords.some(k => cleanKey.includes(k));
+            if (keyIsBaobei) {{
+                // 【新增】额外检查：确保名片是纯报备类型（不是混合类型）
+                const firstAlias = cardKey.split(/[|,;，；、]/).map(k => k.trim()).filter(k => k)[0] || '';
+                const cleanFirstAlias = cleanText(firstAlias);
+                // 如果第一个别名不包含否定词，则认为是报备类型
+                if (!cleanFirstAlias.includes('非') && !cleanFirstAlias.includes('不') && !cleanFirstAlias.includes('水下') && !cleanFirstAlias.includes('裸价')) {{
+                    console.log(`[WPS] ⚠️ 名片整体冲突: 表单要求"非报备"，但名片是纯"报备"类型 → 跳过此名片`);
+                    return true;
+                }}
+            }}
+        }}
+        
         return false;
     }}
     
@@ -11598,6 +11717,53 @@ class NewFillWindow(QDialog):
         
         const cleanKeyword = cleanText(keyword);
         if (!cleanKeyword) return {{ matched: false, identifier: null, score: 0 }};
+        
+        // 【新增】先检查整个名片key是否与表单主标识符存在语义冲突（报备/非报备）
+        // 这个检查是针对整个key，而不是单个别名
+        const mainIdentifier = identifiers[0] || '';
+        
+        // 【增强】额外的报备/非报备冲突检测 - 在 hasKeyConflictWithForm 之前
+        // 检查表单是否明确要求"报备"
+        const cleanMainId = cleanText(mainIdentifier);
+        const nonBaobeiIndicators = ['非报备', '不报备', '水下', '不走平台', '不走蒲公英', '非蒲公英', '裸价', '图文非', '视频非', '图文不', '视频不'];
+        const formIsBaobei = cleanMainId.includes('报备') && !nonBaobeiIndicators.some(k => cleanMainId.includes(k));
+        
+        if (formIsBaobei) {{
+            // 检查名片key的第一个别名是否是"非报备"类型
+            const firstAlias = keyword.split(/[|,;，；、]/).map(k => k.trim()).filter(k => k)[0] || '';
+            const cleanFirstAlias = cleanText(firstAlias);
+            // 如果第一个别名明显是"非报备"类型，直接跳过
+            if (cleanFirstAlias.includes('非报备') || cleanFirstAlias.includes('不报备') || 
+                cleanFirstAlias.includes('水下') || cleanFirstAlias.includes('裸价') ||
+                (cleanFirstAlias.includes('非') && cleanFirstAlias.includes('图文')) ||
+                (cleanFirstAlias.includes('非') && cleanFirstAlias.includes('视频')) ||
+                (cleanFirstAlias.includes('不') && cleanFirstAlias.includes('图文')) ||
+                (cleanFirstAlias.includes('不') && cleanFirstAlias.includes('视频')) ||
+                cleanFirstAlias.includes('不走平台') || cleanFirstAlias.includes('不走蒲公英') || 
+                cleanFirstAlias.includes('非蒲公英')) {{
+                console.log(`[WPS] ⚠️ 报备冲突前置检测: 表单要求"报备"，但名片首别名"${{firstAlias}}"是非报备类型 → 跳过`);
+                return {{ matched: false, identifier: null, score: 0, skippedReason: 'baobei_conflict' }};
+            }}
+        }}
+        
+        // 【反向检查】如果表单明确要求"非报备"，跳过纯"报备"类型的名片
+        const formIsNonBaobei = nonBaobeiIndicators.some(k => cleanMainId.includes(k));
+        if (formIsNonBaobei) {{
+            const firstAlias = keyword.split(/[|,;，；、]/).map(k => k.trim()).filter(k => k)[0] || '';
+            const cleanFirstAlias = cleanText(firstAlias);
+            // 如果名片包含"报备"但不包含任何否定形式，则是纯报备类型
+            if (cleanFirstAlias.includes('报备') && 
+                !cleanFirstAlias.includes('非报备') && !cleanFirstAlias.includes('不报备') &&
+                !cleanFirstAlias.includes('非') && !cleanFirstAlias.includes('不') &&
+                !cleanFirstAlias.includes('水下') && !cleanFirstAlias.includes('裸价')) {{
+                console.log(`[WPS] ⚠️ 非报备冲突前置检测: 表单要求"非报备"，但名片首别名"${{firstAlias}}"是报备类型 → 跳过`);
+                return {{ matched: false, identifier: null, score: 0, skippedReason: 'non_baobei_conflict' }};
+            }}
+        }}
+        
+        if (mainIdentifier && hasKeyConflictWithForm(keyword, mainIdentifier)) {{
+            return {{ matched: false, identifier: null, score: 0, skippedReason: 'key_conflict' }};
+        }}
         
         const cleanKeywordNoPrefix = cleanTextNoPrefix(keyword);
         const subKeywords = splitKeywords(keyword).map(k => cleanText(k)).filter(k => k);
@@ -11793,7 +11959,12 @@ class NewFillWindow(QDialog):
         }} catch (e) {{}}
     }}
     
-    // 主执行函数
+    // ═══════════════════════════════════════════════════════════════
+    // 主执行函数 - 两阶段匹配算法（参考番茄表单）
+    // 第一阶段：预扫描 - 计算所有表单字段与名片字段的匹配分数矩阵
+    // 第二阶段：全局最优分配 - 按分数从高到低排序（贪心算法）
+    // 第三阶段：执行填充 - 按预分配的结果执行填充
+    // ═══════════════════════════════════════════════════════════════
     async function executeAutoFill() {{
         const hasInputs = await waitForInputs();
         
@@ -11807,14 +11978,23 @@ class NewFillWindow(QDialog):
             return;
         }}
         
-        console.log('\\n📋 扫描页面输入框...');
+        console.log('\\n═══════════════════════════════════════════════════════════════');
+        console.log('📋 第一阶段：扫描页面输入框...');
+        console.log('═══════════════════════════════════════════════════════════════');
         const allInputs = getAllInputs();
         console.log(`找到 ${{allInputs.length}} 个输入框`);
         
-        // 打印所有输入框的标识信息
-        allInputs.forEach((input, index) => {{
+        // 收集所有输入框的信息
+        const inputInfos = allInputs.map((input, index) => {{
             const identifiers = getInputIdentifiers(input, index);
-            console.log(`\\n输入框 ${{index + 1}}: ${{identifiers.slice(0, 5).join(' | ')}}`);
+            const mainTitle = identifiers[0] || '(无标题)';
+            console.log(`   输入框 #${{index + 1}}: "${{mainTitle}}" [${{identifiers.slice(1, 3).join(', ')}}]`);
+            return {{
+                input,
+                index,
+                identifiers,
+                mainTitle
+            }};
         }});
         
         // 打印名片字段列表
@@ -11824,84 +12004,131 @@ class NewFillWindow(QDialog):
             console.log(`   ${{i + 1}}. "${{item.key}}" = "${{valuePreview}}"`);
         }});
         
-        console.log('\\n🎯 开始匹配和填写...');
+        // ═══════════════════════════════════════════════════════════════
+        // 第二阶段：计算匹配分数矩阵并全局最优分配
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n═══════════════════════════════════════════════════════════════');
+        console.log('📊 第二阶段：计算匹配分数矩阵...');
+        console.log('═══════════════════════════════════════════════════════════════');
         
-        // 以输入框为主体遍历
-        allInputs.forEach((input, index) => {{
-            const identifiers = getInputIdentifiers(input, index);
-            let bestMatch = {{ item: null, score: 0, identifier: null, matchedKey: null }};
-            
-            const mainTitle = identifiers[0] || '(无标题)';
-            console.log(`\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`📋 表单字段 #${{index + 1}}: "${{mainTitle}}"`);
-            if (identifiers.length > 1) {{
-                console.log(`   其他标识: [${{identifiers.slice(1, 4).map(i => '"' + i + '"').join(', ')}}${{identifiers.length > 4 ? '...' : ''}}]`);
-            }}
-            console.log(`   🔍 匹配过程:`);
-            
-            const allMatches = [];
-            
-            fillData.forEach(item => {{
-                const matchResult = matchKeyword(identifiers, item.key);
-                allMatches.push({{
-                    key: item.key,
-                    value: item.value,
-                    score: matchResult.score,
-                    matched: matchResult.matched,
-                    identifier: matchResult.identifier,
-                    matchedKey: matchResult.matchedKey
-                }});
-                
-                if (matchResult.matched && matchResult.score > bestMatch.score) {{
-                    bestMatch = {{ 
-                        item: item, 
+        // 计算所有表单字段与名片字段的匹配分数矩阵
+        const matchMatrix = [];
+        inputInfos.forEach((inputInfo, inputIndex) => {{
+            fillData.forEach((item, cardIndex) => {{
+                const matchResult = matchKeyword(inputInfo.identifiers, item.key);
+                if (matchResult.score > 0) {{
+                    matchMatrix.push({{
+                        inputIndex,
+                        cardIndex,
+                        inputInfo,
+                        cardItem: item,
                         score: matchResult.score,
+                        matched: matchResult.matched,
                         identifier: matchResult.identifier,
                         matchedKey: matchResult.matchedKey
-                    }};
+                    }});
                 }}
             }});
-            
-            allMatches.sort((a, b) => b.score - a.score);
-            const validMatches = allMatches.filter(m => m.score > 0);
-            if (validMatches.length > 0) {{
-                validMatches.slice(0, 5).forEach((m, i) => {{
-                    const scoreBar = '█'.repeat(Math.floor(m.score / 10)) + '░'.repeat(10 - Math.floor(m.score / 10));
-                    const status = m.score >= 50 ? (i === 0 ? '🏆' : '✓') : '✗';
-                    const valuePreview = String(m.value).substring(0, 15) + (String(m.value).length > 15 ? '...' : '');
-                    console.log(`      ${{status}} "${{m.key}}" → ${{m.score.toFixed(1)}}分 [${{scoreBar}}] ${{m.identifier ? '(标识:"' + m.identifier + '")' : ''}} 值="${{valuePreview}}"`);
-                }});
-                if (validMatches.length > 5) {{
-                    console.log(`      ... 还有 ${{validMatches.length - 5}} 个候选 ...`);
-                }}
-            }} else {{
-                console.log(`      (无匹配候选)`);
+        }});
+        
+        // 按分数降序排序（高分优先）
+        matchMatrix.sort((a, b) => b.score - a.score);
+        
+        console.log(`   找到 ${{matchMatrix.length}} 个潜在匹配`);
+        if (matchMatrix.length > 0) {{
+            console.log(`   最高分: ${{matchMatrix[0].score.toFixed(1)}} (表单:"${{matchMatrix[0].inputInfo.mainTitle}}" ↔ 名片:"${{matchMatrix[0].cardItem.key.substring(0, 30)}}...")`);
+        }}
+        
+        // 贪心算法：按分数优先级分配匹配
+        // ⚡️ 关键优化：同名字段允许共享同一个名片数据
+        // 解决问题：表单中可能有多个同名字段（如标题元素和输入元素分别被识别）
+        console.log('\\n📊 全局最优分配（贪心算法）...');
+        const usedInputIndices = new Set();
+        const usedCardIndicesByTitle = new Map(); // title -> Set(cardIndex)，记录每个标题已使用的名片
+        const finalMatches = new Map(); // inputIndex -> matchInfo
+        
+        for (const match of matchMatrix) {{
+            // 跳过已使用的表单字段
+            if (usedInputIndices.has(match.inputIndex)) {{
+                continue;
             }}
             
-            if (bestMatch.item && bestMatch.score >= 50) {{
-                fillInput(input, bestMatch.item.value);
-                console.log(`   ✅ 选中: "${{bestMatch.item.key}}" = "${{bestMatch.item.value}}" (分数: ${{bestMatch.score.toFixed(1)}})`);
+            const inputTitle = match.inputInfo.mainTitle;
+            
+            // 检查该名片数据是否已被其他不同标题的字段使用
+            let isCardUsedByOtherTitle = false;
+            for (const [otherTitle, usedCards] of usedCardIndicesByTitle) {{
+                if (otherTitle !== inputTitle && usedCards.has(match.cardIndex)) {{
+                    isCardUsedByOtherTitle = true;
+                    break;
+                }}
+            }}
+            
+            if (isCardUsedByOtherTitle) {{
+                continue;
+            }}
+            
+            // 只接受分数>=50的匹配
+            if (match.score >= 50) {{
+                finalMatches.set(match.inputIndex, match);
+                usedInputIndices.add(match.inputIndex);
+                
+                // 记录该标题使用了哪个名片数据
+                if (!usedCardIndicesByTitle.has(inputTitle)) {{
+                    usedCardIndicesByTitle.set(inputTitle, new Set());
+                }}
+                usedCardIndicesByTitle.get(inputTitle).add(match.cardIndex);
+                
+                console.log(`   ✅ 分配: 表单#${{match.inputIndex + 1}}"${{inputTitle}}" ← 名片"${{match.cardItem.key.substring(0, 25)}}..." (分数:${{match.score.toFixed(1)}})`);
+            }}
+        }}
+        
+        console.log(`\\n   共分配 ${{finalMatches.size}} 个匹配`);
+        
+        // ═══════════════════════════════════════════════════════════════
+        // 第三阶段：按表单顺序执行填充
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\\n═══════════════════════════════════════════════════════════════');
+        console.log('📝 第三阶段：执行填充...');
+        console.log('═══════════════════════════════════════════════════════════════');
+        
+        const usedCardKeys = new Set();
+        
+        for (const inputInfo of inputInfos) {{
+            const {{ input, index, mainTitle }} = inputInfo;
+            
+            console.log(`\\n📋 字段 #${{index + 1}}: "${{mainTitle}}"`);
+            
+            // 检查是否有预分配的匹配
+            const preMatch = finalMatches.get(index);
+            
+            if (preMatch) {{
+                const cardItem = preMatch.cardItem;
+                fillInput(input, cardItem.value);
+                usedCardKeys.add(cardItem.key);
                 fillCount++;
+                console.log(`   ✅ 填入: "${{cardItem.value}}" (匹配: ${{cardItem.key}}, 分数: ${{preMatch.score.toFixed(1)}})`);
                 results.push({{
-                    key: bestMatch.item.key,
-                    value: bestMatch.item.value,
-                    matched: bestMatch.identifier,
-                    matchedKey: bestMatch.matchedKey,
-                    score: bestMatch.score,
+                    key: cardItem.key,
+                    value: cardItem.value,
+                    matched: mainTitle,
+                    matchedKey: preMatch.matchedKey,
+                    score: preMatch.score,
                     success: true
                 }});
             }} else {{
-                console.log(`   ❌ 未匹配 (最高分: ${{bestMatch.score ? bestMatch.score.toFixed(1) : '0'}}, 需要>=50)`);
+                console.log(`   ❌ 未找到匹配 (无预分配)`);
             }}
-        }});
+        }}
         
-        // 记录未匹配的名片字段
-        console.log('\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📊 匹配汇总:');
-        const filledKeys = new Set(results.filter(r => r.success).map(r => r.key));
-        const unusedFields = fillData.filter(item => !filledKeys.has(item.key));
+        // 汇总结果
+        console.log('\\n═══════════════════════════════════════════════════════════════');
+        console.log('📊 填写汇总:');
+        console.log(`   成功填写: ${{fillCount}} 个字段`);
+        
+        const unusedFields = fillData.filter(item => !usedCardKeys.has(item.key));
         if (unusedFields.length > 0) {{
-            console.log(`⚠️ 未使用的名片字段 (${{unusedFields.length}}个):`);
+            console.log(`\\n⚠️ 未使用的名片字段 (${{unusedFields.length}}个):`);
             unusedFields.forEach(item => {{
                 console.warn(`   - "${{item.key}}" = "${{String(item.value).substring(0, 20)}}..."`);
                 results.push({{
@@ -11924,6 +12151,7 @@ class NewFillWindow(QDialog):
         }};
         
         console.log(`\\n✅ WPS表单填写完成: ${{fillCount}}/${{allInputs.length}} 个输入框`);
+        console.log('═══════════════════════════════════════════════════════════════\\n');
     }}
     
     executeAutoFill();
