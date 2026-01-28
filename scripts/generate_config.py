@@ -19,11 +19,11 @@ def main():
     deepseek_api_key = os.environ.get('DEEPSEEK_API_KEY', '')
     
     if not mongodb_uri:
-        print("❌ 错误: MONGODB_URI 环境变量未设置")
+        print("[ERROR] MONGODB_URI environment variable not set")
         sys.exit(1)
     
     if not jwt_secret_key:
-        print("❌ 错误: JWT_SECRET_KEY 环境变量未设置")
+        print("[ERROR] JWT_SECRET_KEY environment variable not set")
         sys.exit(1)
     
     # 生成加密配置
@@ -41,7 +41,7 @@ def main():
         },
     })
     
-    print("✅ Secure config generated successfully")
+    print("[OK] Secure config generated successfully")
 
 
 if __name__ == '__main__':
