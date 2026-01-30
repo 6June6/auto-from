@@ -118,9 +118,169 @@ class TencentDocsFiller:
     }
 """
     
+    @staticmethod
+    def get_shared_execution_logic() -> str:
+        """
+        获取共享的执行逻辑 JavaScript 代码
+        这个函数可以被多个表单平台复用（腾讯文档、WPS 等）
+        
+        核心逻辑：逐个遍历输入框 + 独立匹配（名片数据可以被多次使用）
+        
+        Returns:
+            JavaScript 函数代码字符串：createSharedExecutor(config)
+            
+        使用方法：
+            const executor = createSharedExecutor({
+                fillData: [...],              // 名片数据数组
+                allInputs: [...],             // 所有输入框数组
+                getIdentifiers: (input, i) => [...],  // 获取输入框标识符的函数
+                fillInput: (input, value) => {},      // 填充函数
+                onProgress: (msg) => {}       // 进度回调（可选）
+            });
+            await executor.execute();
+        """
+        return """
+    /**
+     * 创建共享的表单填充执行器（腾讯文档算法）
+     * @param {Object} config - 配置对象
+     * @returns {Object} - 执行器对象，包含 execute() 方法
+     */
+    function createSharedExecutor(config) {
+        const {
+            fillData,           // 名片数据数组 [{ key: '...', value: '...' }, ...]
+            allInputs,          // 所有输入框数组
+            getIdentifiers,     // 函数：(input, index) => [标识符数组]
+            fillInput,          // 函数：(input, value) => {} 执行填充
+            onProgress          // 可选回调：(message) => {} 进度信息
+        } = config;
+        
+        const log = onProgress || console.log;
+        
+        return {
+            async execute() {
+                log('\\n═══════════════════════════════════════════════════════════════');
+                log('📋 扫描页面输入框...');
+                log('═══════════════════════════════════════════════════════════════');
+                log(`找到 ${allInputs.length} 个输入框`);
+                
+                // 打印名片字段列表
+                log('\\n📇 名片字段列表:');
+                fillData.forEach((item, i) => {
+                    const valuePreview = String(item.value).substring(0, 20) + 
+                                        (String(item.value).length > 20 ? '...' : '');
+                    log(`   ${i + 1}. "${item.key}" = "${valuePreview}"`);
+                });
+                
+                log('\\n═══════════════════════════════════════════════════════════════');
+                log('📝 开始逐个匹配并填充（腾讯文档算法）...');
+                log('═══════════════════════════════════════════════════════════════');
+                
+                let fillCount = 0;
+                const results = [];
+                const usedCardKeys = new Set();
+                
+                // 遍历每个输入框（类似腾讯文档的 fillQuestion）
+                for (let i = 0; i < allInputs.length; i++) {
+                    const input = allInputs[i];
+                    const identifiers = getIdentifiers(input, i);
+                    const mainTitle = identifiers.length > 0 ? identifiers[0] : '(无标题)';
+                    
+                    log(`\\n--- 输入框 ${i + 1}/${allInputs.length} ---`);
+                    log(`  📝 标题: "${mainTitle}"`);
+                    if (identifiers.length > 1) {
+                        log(`  🏷️  备选标识: [${identifiers.slice(1, 3).join(', ')}]`);
+                    }
+                    
+                    // 对当前输入框，查找最高分的名片数据（独立匹配）
+                    let matchedKey = null;
+                    let matchedValue = null;
+                    let maxScore = 0;
+                    let matchedCardItem = null;
+                    
+                    for (const cardItem of fillData) {
+                        const result = matchKeyword(identifiers, cardItem.key);
+                        if (result.matched && result.score > maxScore) {
+                            maxScore = result.score;
+                            matchedKey = cardItem.key;
+                            matchedValue = cardItem.value;
+                            matchedCardItem = cardItem;
+                        }
+                    }
+                    
+                    // 只接受分数>=50的匹配
+                    if (!matchedKey || maxScore < 50) {
+                        log(`  ⚠️  未找到匹配 (最高分: ${maxScore.toFixed(1)})`);
+                        continue;
+                    }
+                    
+                    log(`  ✅ 匹配成功: "${mainTitle}" ← "${matchedKey}" (分数: ${maxScore.toFixed(1)})`);
+                    
+                    // 执行填充
+                    try {
+                        fillInput(input, matchedValue);
+                        usedCardKeys.add(matchedKey);
+                        fillCount++;
+                        const valuePreview = String(matchedValue).substring(0, 30) + 
+                                            (String(matchedValue).length > 30 ? '...' : '');
+                        log(`  ✅ 填写成功: "${mainTitle}" = "${valuePreview}"`);
+                        
+                        results.push({
+                            key: matchedKey,
+                            value: matchedValue,
+                            matched: mainTitle,
+                            score: maxScore,
+                            success: true
+                        });
+                    } catch (error) {
+                        log(`  ❌ 填写失败: ${error.message}`);
+                        results.push({
+                            key: matchedKey,
+                            value: matchedValue,
+                            matched: mainTitle,
+                            score: maxScore,
+                            success: false,
+                            error: error.message
+                        });
+                    }
+                    
+                    // 延迟，避免操作过快
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                
+                // 汇总结果
+                log('\\n═══════════════════════════════════════════════════════════════');
+                log('📊 填写汇总:');
+                log(`   成功填写: ${fillCount} 个字段`);
+                
+                const unusedFields = fillData.filter(item => !usedCardKeys.has(item.key));
+                if (unusedFields.length > 0) {
+                    log(`\\n⚠️  未使用的名片字段 (${unusedFields.length}个):`);
+                    unusedFields.forEach(item => {
+                        const valuePreview = String(item.value).substring(0, 20) + 
+                                            (String(item.value).length > 20 ? '...' : '');
+                        log(`   - "${item.key}" = "${valuePreview}..."`);
+                    });
+                } else {
+                    log(`✅ 所有名片字段都已使用`);
+                }
+                
+                log(`\\n✅ 表单填写完成: ${fillCount}/${allInputs.length} 个输入框`);
+                log('═══════════════════════════════════════════════════════════════\\n');
+                
+                return {
+                    fillCount,
+                    totalCount: allInputs.length,
+                    status: 'completed',
+                    results
+                };
+            }
+        };
+    }
+"""
+    
     def generate_fill_script(self, field_data: Dict[str, str]) -> str:
         """
-        生成填写腾讯文档表单的 JavaScript 脚本
+        生成填写腾讯文档表单的 JavaScript 脚本（使用共享匹配算法和执行逻辑）
         
         Args:
             field_data: 字段数据，格式 {字段名: 值}
@@ -128,12 +288,13 @@ class TencentDocsFiller:
         Returns:
             JavaScript 代码字符串
         """
-        # 获取共享的匹配算法
+        # 获取共享的匹配算法和执行逻辑
         shared_algorithm = self.get_shared_match_algorithm()
+        shared_executor = self.get_shared_execution_logic()
         
         js_code = f"""
 (async function() {{
-    console.log('====== 🚀 开始填写腾讯文档表单 ======');
+    console.log('====== 🚀 开始填写腾讯文档表单（共享算法）======');
     
     // 存储结果
     window.__autoFillResult__ = {{
@@ -146,6 +307,8 @@ class TencentDocsFiller:
     const fieldData = {self._dict_to_js_object(field_data)};
     
 {shared_algorithm}
+    
+{shared_executor}
     
     /**
      * 等待页面加载完成

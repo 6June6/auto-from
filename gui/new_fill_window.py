@@ -11352,14 +11352,15 @@ class NewFillWindow(QDialog):
         return js_code
     
     def generate_kdocs_fill_script(self, fill_data: list) -> str:
-        """生成WPS表单(kdocs.cn/wps.cn)专用的填充脚本 - 使用腾讯文档的共享匹配算法"""
+        """生成WPS表单(kdocs.cn/wps.cn)专用的填充脚本 - 使用腾讯文档的共享匹配算法和执行逻辑"""
         import json
         from core.tencent_docs_filler import TencentDocsFiller
         
         fill_data_json = json.dumps(fill_data, ensure_ascii=False)
         
-        # 获取共享的匹配算法
+        # 获取共享的匹配算法和执行逻辑
         shared_algorithm = TencentDocsFiller.get_shared_match_algorithm()
+        shared_executor = TencentDocsFiller.get_shared_execution_logic()
         
         js_code = f"""
 (function() {{
@@ -11409,6 +11410,11 @@ class NewFillWindow(QDialog):
     // ═══════════════════════════════════════════════════════════════
 {shared_algorithm}
     
+    // ═══════════════════════════════════════════════════════════════
+    // 共享执行逻辑（来自 TencentDocsFiller.get_shared_execution_logic()）
+    // ═══════════════════════════════════════════════════════════════
+{shared_executor}
+    
     // 等待输入框加载完成
     function waitForInputs(maxAttempts = 15, interval = 400) {{
         return new Promise((resolve) => {{
@@ -11426,15 +11432,57 @@ class NewFillWindow(QDialog):
         }});
     }}
     
-    // 获取所有可见的输入框
+    // 获取所有可见的输入框（优化：radio/checkbox 组去重）
     function getAllInputs() {{
         const inputs = [];
+        const radioGroups = new Map(); // 记录已处理的 radio/checkbox 组
+        
         document.querySelectorAll('input, textarea').forEach(input => {{
             const style = window.getComputedStyle(input);
-            if (style.display !== 'none' && style.visibility !== 'hidden') {{
-                inputs.push(input);
+            if (style.display === 'none' || style.visibility === 'hidden') {{
+                return; // 跳过隐藏元素
             }}
+            
+            // 【优化】radio button 和 checkbox 去重
+            // 使用多种方式识别同一组：name、容器、问题ID
+            if (input.type === 'radio' || input.type === 'checkbox') {{
+                // 方式1：使用 name 属性
+                let groupKey = input.name;
+                
+                // 方式2：如果没有 name，使用最近的问题容器 ID
+                if (!groupKey) {{
+                    const container = input.closest('.ksapc-questions-write-container, [class*="question"]');
+                    if (container) {{
+                        groupKey = container.id || container.className;
+                    }}
+                }}
+                
+                // 方式3：兜底 - 使用问题标题
+                if (!groupKey) {{
+                    const titleEl = input.closest('.ksapc-questions-write-container')?.querySelector('.ksapc-question-title-title');
+                    if (titleEl) {{
+                        groupKey = 'title:' + (titleEl.textContent || '').trim();
+                    }}
+                }}
+                
+                if (groupKey) {{
+                    if (radioGroups.has(groupKey)) {{
+                        // 已经有这个组的代表了，跳过
+                        console.log(`[WPS] 跳过重复的 ${{input.type}} 组成员: key="${{groupKey.substring(0, 30)}}..."`);
+                        return;
+                    }}
+                    // 记录这个组，并使用第一个作为代表
+                    radioGroups.set(groupKey, input);
+                    console.log(`[WPS] 保留 ${{input.type}} 组代表: key="${{groupKey.substring(0, 30)}}..."`);
+                }} else {{
+                    console.warn(`[WPS] ⚠️ 无法确定 ${{input.type}} 的组标识，保留此元素`);
+                }}
+            }}
+            
+            inputs.push(input);
         }});
+        
+        console.log(`[WPS] ✅ 去重后共 ${{inputs.length}} 个输入框（原始查询: ${{document.querySelectorAll('input, textarea').length}} 个）`);
         return inputs;
     }}
     
@@ -11449,6 +11497,12 @@ class NewFillWindow(QDialog):
     function getInputIdentifiers(input, inputIndex) {{
         const identifiers = [];
         const MAX_LABEL_LENGTH = 150;
+        
+        // 【优化】检测输入框类型：radio/checkbox 只提取问题标题，不提取选项文本
+        const isRadioOrCheckbox = input.type === 'radio' || input.type === 'checkbox';
+        if (isRadioOrCheckbox) {{
+            console.log(`[WPS] 检测到 ${{input.type}} 类型，只提取问题标题`);
+        }}
         
         // 辅助函数：添加标识符（带去重和优先级）
         function addIdentifier(text, priority = 0) {{
@@ -11564,42 +11618,89 @@ class NewFillWindow(QDialog):
             }}
         }}
         
-        // 【方法3】aria-labelledby 属性
-        const ariaLabelledBy = input.getAttribute('aria-labelledby');
-        if (ariaLabelledBy) {{
-            ariaLabelledBy.split(' ').forEach(id => {{
-                const el = document.getElementById(id);
-                if (el) {{
-                    addIdentifier(el.innerText || el.textContent, 85);
-                }}
-            }});
+        // 【方法3】aria-labelledby 属性（radio/checkbox 跳过）
+        if (!isRadioOrCheckbox) {{
+            const ariaLabelledBy = input.getAttribute('aria-labelledby');
+            if (ariaLabelledBy) {{
+                ariaLabelledBy.split(' ').forEach(id => {{
+                    const el = document.getElementById(id);
+                    if (el) {{
+                        addIdentifier(el.innerText || el.textContent, 85);
+                    }}
+                }});
+            }}
         }}
         
-        // 【方法4】Label 标签关联
-        if (input.labels && input.labels.length > 0) {{
+        // 【方法4】Label 标签关联（radio/checkbox 跳过，避免提取选项文本）
+        if (!isRadioOrCheckbox && input.labels && input.labels.length > 0) {{
             input.labels.forEach(label => {{
                 addIdentifier(label.innerText || label.textContent, 85);
             }});
         }}
         
-        // 【方法5】placeholder、title、aria-label 基础属性
-        if (input.placeholder) addIdentifier(input.placeholder, 70);
-        if (input.title) addIdentifier(input.title, 70);
-        if (input.getAttribute('aria-label')) addIdentifier(input.getAttribute('aria-label'), 70);
-        
-        // 【方法6】前置兄弟元素（作为兜底）
-        let sibling = input.previousElementSibling;
-        for (let i = 0; i < 3 && sibling; i++) {{
-            if (sibling.tagName === 'H2' || sibling.tagName === 'H3' || 
-                sibling.tagName === 'LABEL' || sibling.className.includes('title') || 
-                sibling.className.includes('label')) {{
-                const text = (sibling.innerText || sibling.textContent || '').trim();
-                if (text && text.length <= MAX_LABEL_LENGTH) {{
-                    addIdentifier(text, 60);
-                    break;
+        // 【方法5】placeholder、title、aria-label 基础属性（radio/checkbox 跳过）
+        if (!isRadioOrCheckbox) {{
+            // 【优化】过滤通用的、太短的 placeholder，避免干扰匹配
+            if (input.placeholder) {{
+                const ph = input.placeholder.trim();
+                const genericPlaceholders = ['请输入', '请填写', '请选择', '输入', '填写', '选择', 
+                                             '图文', '视频', '文本', '数字', '日期', '时间'];
+                const isGeneric = genericPlaceholders.some(g => ph === g || ph.includes('请') && ph.length <= 4);
+                
+                if (!isGeneric && ph.length > 2) {{
+                    addIdentifier(ph, 50);  // 降低优先级从70到50
+                    console.log(`[WPS] 添加placeholder标识: "${{ph}}" (优先级:50)`);
+                }} else {{
+                    console.log(`[WPS] 跳过通用placeholder: "${{ph}}"`);
                 }}
             }}
-            sibling = sibling.previousElementSibling;
+            if (input.title) addIdentifier(input.title, 70);
+            if (input.getAttribute('aria-label')) addIdentifier(input.getAttribute('aria-label'), 70);
+        }}
+        
+        // 【方法6】前置兄弟元素（作为兜底，radio/checkbox 跳过）
+        if (!isRadioOrCheckbox) {{
+            let sibling = input.previousElementSibling;
+            for (let i = 0; i < 3 && sibling; i++) {{
+                if (sibling.tagName === 'H2' || sibling.tagName === 'H3' || 
+                    sibling.tagName === 'LABEL' || sibling.className.includes('title') || 
+                    sibling.className.includes('label')) {{
+                    const text = (sibling.innerText || sibling.textContent || '').trim();
+                    if (text && text.length <= MAX_LABEL_LENGTH) {{
+                        addIdentifier(text, 60);
+                        break;
+                    }}
+                }}
+                sibling = sibling.previousElementSibling;
+            }}
+        }}
+        
+        // 【最终过滤】如果是 radio/checkbox，移除可能的选项文本
+        if (isRadioOrCheckbox) {{
+            const optionTexts = ['图文', '视频', '是', '否', '确认', '取消', '同意', '不同意', '已知晓'];
+            const filtered = identifiers.filter(item => {{
+                const text = item.text.trim();
+                // 保留较长的标识符（问题标题）
+                if (text.length > 6) return true;
+                // 移除短的通用选项文本
+                if (optionTexts.includes(text)) {{
+                    console.log(`[WPS] 过滤选项文本: "${{text}}"`);
+                    return false;
+                }}
+                // 移除纯数字或百分比（如 "50%", "55%"）
+                if (/^\\d+%?$/.test(text)) {{
+                    console.log(`[WPS] 过滤数字选项: "${{text}}"`);
+                    return false;
+                }}
+                return true;
+            }});
+            
+            // 如果过滤后还有标识符，使用过滤后的
+            if (filtered.length > 0) {{
+                identifiers.length = 0;
+                identifiers.push(...filtered);
+                console.log(`[WPS] ✅ 过滤后保留 ${{filtered.length}} 个标识符（移除选项文本）`);
+            }}
         }}
         
         // 按优先级排序
@@ -11678,10 +11779,7 @@ class NewFillWindow(QDialog):
     }}
     
     // ═══════════════════════════════════════════════════════════════
-    // 主执行函数 - 两阶段匹配算法（参考番茄表单）
-    // 第一阶段：预扫描 - 计算所有表单字段与名片字段的匹配分数矩阵
-    // 第二阶段：全局最优分配 - 按分数从高到低排序（贪心算法）
-    // 第三阶段：执行填充 - 按预分配的结果执行填充
+    // 主执行函数 - 调用共享执行器（来自 TencentDocsFiller）
     // ═══════════════════════════════════════════════════════════════
     async function executeAutoFill() {{
         const hasInputs = await waitForInputs();
@@ -11696,183 +11794,19 @@ class NewFillWindow(QDialog):
             return;
         }}
         
-        console.log('\\n═══════════════════════════════════════════════════════════════');
-        console.log('📋 第一阶段：扫描页面输入框...');
-        console.log('═══════════════════════════════════════════════════════════════');
         const allInputs = getAllInputs();
-        console.log(`找到 ${{allInputs.length}} 个输入框`);
         
-        // 收集所有输入框的信息
-        const inputInfos = allInputs.map((input, index) => {{
-            const identifiers = getInputIdentifiers(input, index);
-            
-            // 简单选择第一个标识符作为主标题
-            let mainTitle = identifiers.length > 0 ? identifiers[0] : '(无标题)';
-            
-            console.log(`   输入框 #${{index + 1}}: "${{mainTitle}}" [${{identifiers.slice(1, 3).join(', ')}}]`);
-            return {{
-                input,
-                index,
-                identifiers,
-                mainTitle
-            }};
+        // 使用共享执行器
+        const executor = createSharedExecutor({{
+            fillData: fillData,
+            allInputs: allInputs,
+            getIdentifiers: getInputIdentifiers,
+            fillInput: fillInput,
+            onProgress: (msg) => console.log(msg)
         }});
         
-        // 打印名片字段列表
-        console.log('\\n📇 名片字段列表:');
-        fillData.forEach((item, i) => {{
-            const valuePreview = String(item.value).substring(0, 20) + (String(item.value).length > 20 ? '...' : '');
-            console.log(`   ${{i + 1}}. "${{item.key}}" = "${{valuePreview}}"`);
-        }});
-        
-        // ═══════════════════════════════════════════════════════════════
-        // 第二阶段：计算匹配分数矩阵并全局最优分配
-        // ═══════════════════════════════════════════════════════════════
-        console.log('\\n═══════════════════════════════════════════════════════════════');
-        console.log('📊 第二阶段：计算匹配分数矩阵...');
-        console.log('═══════════════════════════════════════════════════════════════');
-        
-        // 计算所有表单字段与名片字段的匹配分数矩阵
-        const matchMatrix = [];
-        inputInfos.forEach((inputInfo, inputIndex) => {{
-            fillData.forEach((item, cardIndex) => {{
-                const matchResult = matchKeyword(inputInfo.identifiers, item.key);
-                if (matchResult.score > 0) {{
-                    matchMatrix.push({{
-                        inputIndex,
-                        cardIndex,
-                        inputInfo,
-                        cardItem: item,
-                        score: matchResult.score,
-                        matched: matchResult.matched,
-                        identifier: matchResult.identifier,
-                        matchedKey: matchResult.matchedKey
-                    }});
-                }}
-            }});
-        }});
-        
-        // 按分数降序排序（高分优先）
-        matchMatrix.sort((a, b) => b.score - a.score);
-        
-        console.log(`   找到 ${{matchMatrix.length}} 个潜在匹配`);
-        if (matchMatrix.length > 0) {{
-            console.log(`   最高分: ${{matchMatrix[0].score.toFixed(1)}} (表单:"${{matchMatrix[0].inputInfo.mainTitle}}" ↔ 名片:"${{matchMatrix[0].cardItem.key.substring(0, 30)}}...")`);
-        }}
-        
-        // 贪心算法：按分数优先级分配匹配
-        // ⚡️ 关键优化：同名字段允许共享同一个名片数据
-        // 解决问题：表单中可能有多个同名字段（如标题元素和输入元素分别被识别）
-        console.log('\\n📊 全局最优分配（贪心算法）...');
-        const usedInputIndices = new Set();
-        const usedCardIndicesByTitle = new Map(); // title -> Set(cardIndex)，记录每个标题已使用的名片
-        const finalMatches = new Map(); // inputIndex -> matchInfo
-        
-        for (const match of matchMatrix) {{
-            // 跳过已使用的表单字段
-            if (usedInputIndices.has(match.inputIndex)) {{
-                continue;
-            }}
-            
-            const inputTitle = match.inputInfo.mainTitle;
-            
-            // 检查该名片数据是否已被其他不同标题的字段使用
-            let isCardUsedByOtherTitle = false;
-            for (const [otherTitle, usedCards] of usedCardIndicesByTitle) {{
-                if (otherTitle !== inputTitle && usedCards.has(match.cardIndex)) {{
-                    isCardUsedByOtherTitle = true;
-                    break;
-                }}
-            }}
-            
-            if (isCardUsedByOtherTitle) {{
-                continue;
-            }}
-            
-            // 只接受分数>=50的匹配
-            if (match.score >= 50) {{
-                finalMatches.set(match.inputIndex, match);
-                usedInputIndices.add(match.inputIndex);
-                
-                // 记录该标题使用了哪个名片数据
-                if (!usedCardIndicesByTitle.has(inputTitle)) {{
-                    usedCardIndicesByTitle.set(inputTitle, new Set());
-                }}
-                usedCardIndicesByTitle.get(inputTitle).add(match.cardIndex);
-                
-                console.log(`   ✅ 分配: 表单#${{match.inputIndex + 1}}"${{inputTitle}}" ← 名片"${{match.cardItem.key.substring(0, 25)}}..." (分数:${{match.score.toFixed(1)}})`);
-            }}
-        }}
-        
-        console.log(`\\n   共分配 ${{finalMatches.size}} 个匹配`);
-        
-        // ═══════════════════════════════════════════════════════════════
-        // 第三阶段：按表单顺序执行填充
-        // ═══════════════════════════════════════════════════════════════
-        console.log('\\n═══════════════════════════════════════════════════════════════');
-        console.log('📝 第三阶段：执行填充...');
-        console.log('═══════════════════════════════════════════════════════════════');
-        
-        const usedCardKeys = new Set();
-        
-        for (const inputInfo of inputInfos) {{
-            const {{ input, index, mainTitle }} = inputInfo;
-            
-            console.log(`\\n📋 字段 #${{index + 1}}: "${{mainTitle}}"`);
-            
-            // 检查是否有预分配的匹配
-            const preMatch = finalMatches.get(index);
-            
-            if (preMatch) {{
-                const cardItem = preMatch.cardItem;
-                fillInput(input, cardItem.value);
-                usedCardKeys.add(cardItem.key);
-                fillCount++;
-                console.log(`   ✅ 填入: "${{cardItem.value}}" (匹配: ${{cardItem.key}}, 分数: ${{preMatch.score.toFixed(1)}})`);
-                results.push({{
-                    key: cardItem.key,
-                    value: cardItem.value,
-                    matched: mainTitle,
-                    matchedKey: preMatch.matchedKey,
-                    score: preMatch.score,
-                    success: true
-                }});
-            }} else {{
-                console.log(`   ❌ 未找到匹配 (无预分配)`);
-            }}
-        }}
-        
-        // 汇总结果
-        console.log('\\n═══════════════════════════════════════════════════════════════');
-        console.log('📊 填写汇总:');
-        console.log(`   成功填写: ${{fillCount}} 个字段`);
-        
-        const unusedFields = fillData.filter(item => !usedCardKeys.has(item.key));
-        if (unusedFields.length > 0) {{
-            console.log(`\\n⚠️ 未使用的名片字段 (${{unusedFields.length}}个):`);
-            unusedFields.forEach(item => {{
-                console.warn(`   - "${{item.key}}" = "${{String(item.value).substring(0, 20)}}..."`);
-                results.push({{
-                    key: item.key,
-                    value: item.value,
-                    matched: null,
-                    score: 0,
-                    success: false
-                }});
-            }});
-        }} else {{
-            console.log(`✅ 所有名片字段都已使用`);
-        }}
-        
-        window.__autoFillResult__ = {{
-            fillCount: fillCount,
-            totalCount: allInputs.length,
-            status: 'completed',
-            results: results
-        }};
-        
-        console.log(`\\n✅ WPS表单填写完成: ${{fillCount}}/${{allInputs.length}} 个输入框`);
-        console.log('═══════════════════════════════════════════════════════════════\\n');
+        const result = await executor.execute();
+        window.__autoFillResult__ = result;
     }}
     
     executeAutoFill();
