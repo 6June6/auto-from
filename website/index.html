@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN" class="scroll-smooth">
   <head>
     <meta charset="UTF-8" />
@@ -311,7 +311,7 @@
         <div class="flex justify-between h-20 items-center">
           <div
             class="flex-shrink-0 flex items-center gap-3 cursor-pointer group"
-            onclick="window.scrollTo(0,0)"
+            onclick="window.scrollTo(0, 0)"
           >
             <div class="relative w-10 h-10 flex items-center justify-center">
               <div
@@ -391,7 +391,7 @@
             </span>
             <span
               class="text-sm font-medium text-gray-300 group-hover:text-white transition-colors"
-              >v2.0 全新发布 · 完美支持腾讯文档</span
+              >v2.0 全新发布 · 完美支持主流平台</span
             >
             <i
               class="fa-solid fa-arrow-right text-xs text-gray-500 group-hover:translate-x-1 transition-transform"
@@ -406,11 +406,10 @@
           data-aos-duration="1000"
           data-aos-delay="100"
         >
-          释放你的<br />
           <span
             class="text-gradient-primary animate-gradient-text relative inline-block"
           >
-            生产力潜能
+            一键直达终点
             <!-- Underline decoration -->
             <svg
               class="absolute w-full h-3 -bottom-1 left-0 text-purple-500 opacity-50"
@@ -425,6 +424,8 @@
               />
             </svg>
           </span>
+          <br />
+          告别填表马拉松
         </h1>
 
         <p
@@ -434,7 +435,7 @@
           data-aos-delay="200"
         >
           不再被繁琐的表单束缚。利用
-          <span class="text-indigo-400 font-medium">AI 视觉识别</span> 与
+          <span class="text-indigo-400 font-medium">本地自研算法</span> 与
           <span class="text-indigo-400 font-medium">自动化引擎</span
           >，一键秒填各类复杂表单。支持 Mac & Windows。
         </p>
@@ -498,7 +499,10 @@
             >
               <img
                 src="https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_c72eb653-60f4-444b-b53d-b63406c8c07b.png"
-                onerror="this.src='https://placehold.co/1920x1080/1e1e1e/6366f1?text=Auto+Form+Filler+UI'"
+                onerror="
+                  this.src =
+                    'https://placehold.co/1920x1080/1e1e1e/6366f1?text=Auto+Form+Filler+UI'
+                "
                 alt="App Screenshot"
                 class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
               />
@@ -619,11 +623,10 @@
                 <i class="fa-solid fa-wand-magic-sparkles text-2xl"></i>
               </div>
               <h3 class="text-2xl font-bold mb-4 text-white">
-                DeepSeek 智能解析
+                通告广场·资源直达
               </h3>
               <p class="text-gray-400 text-lg leading-relaxed max-w-md">
-                内置 DeepSeek AI
-                引擎。只需粘贴聊天记录或混合文本，即可自动提取所有表单链接，智能识别标题并自动归类，批量导入从未如此简单。
+                聚合全网优质表单资源，无需四处搜寻，一键获取所需表单，告别找表的繁琐与等待。
               </p>
             </div>
             <!-- Decorative UI Element -->
@@ -652,7 +655,7 @@
             </div>
             <h3 class="text-2xl font-bold mb-4 text-white">海量字段库</h3>
             <p class="text-gray-400 leading-relaxed">
-              内置覆盖小红书、抖音、微博、快手等平台的专业字段库。基本信息、报价数据、平台资料一应俱全，开箱即用。
+              基于万份真实表单沉淀的通用字段体系，覆盖全平台场景。只需一次录入账号信息，所有表单即可自动适配，无需手动收集字段，开箱即用，告别传统收集的繁琐。
             </p>
           </div>
 
@@ -694,11 +697,9 @@
                 >
                   <i class="fa-solid fa-layer-group text-2xl"></i>
                 </div>
-                <h3 class="text-2xl font-bold mb-4 text-white">
-                  多身份一键切换
-                </h3>
+                <h3 class="text-2xl font-bold mb-4 text-white">账号名片分类</h3>
                 <p class="text-gray-400 text-lg leading-relaxed">
-                  无论你是需要帮团队填报，还是管理多个马甲账号。卡片式管理让你可以保存无限套身份信息，一键切换。
+                  支持自定义品类分组，填报时点击对应分类即可全选该类账号，告别繁琐勾选，批量填报一步到位。
                 </p>
               </div>
               <!-- Decorative UI Element -->
@@ -1129,7 +1130,10 @@
               </div>
               <img
                 src="assets/screenshot-main.png"
-                onerror="this.src='https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_e7776594-50d5-4a6f-9636-a54ae420f430.png'"
+                onerror="
+                  this.src =
+                    'https://mp-367d9efc-9e90-4c72-a8ed-ba86f665dd56.cdn.bspapp.com/企业微信截图_e7776594-50d5-4a6f-9636-a54ae420f430.png'
+                "
                 alt="Action"
                 class="w-full"
               />
@@ -1474,7 +1478,7 @@
             }
           });
         },
-        { threshold: 0.5 }
+        { threshold: 0.5 },
       );
 
       counters.forEach((counter) => observer.observe(counter));

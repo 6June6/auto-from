@@ -14,6 +14,110 @@ class TencentDocsFiller:
     def __init__(self):
         self.logger = logger
     
+    @staticmethod
+    def get_shared_match_algorithm() -> str:
+        """
+        获取共享的匹配算法 JavaScript 代码
+        这个算法可以被多个表单平台复用（腾讯文档、WPS 等）
+        
+        Returns:
+            JavaScript 函数代码字符串，包含：
+            - cleanText(): 清理文本
+            - splitKeywords(): 分割关键词
+            - matchKeyword(): 匹配关键词（评分系统）
+        """
+        return """
+    /**
+     * 清理文本用于匹配
+     */
+    function cleanText(text) {
+        if (!text) return '';
+        return String(text).toLowerCase().replace(/[：:*？?！!。.、，,\\s\\-_\\(\\)（）【】\\[\\]]/g, '').trim();
+    }
+    
+    /**
+     * 分割关键词为子关键词数组
+     */
+    function splitKeywords(keyword) {
+        if (!keyword) return [];
+        return keyword
+            .split(/[|,;，；、\\n\\r\\t/／\\\\｜\\u2795+]+/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+    }
+    
+    /**
+     * 匹配关键词 - 评分系统（支持多关键词）
+     * @param {string|Array<string>} titleOrIdentifiers - 标题字符串或标识符数组
+     * @param {string} keyword - 关键词（支持 |,;，；、 分隔的多个关键词）
+     * @returns {Object} { matched: boolean, score: number, identifier: string, matchedKey: string }
+     */
+    function matchKeyword(titleOrIdentifiers, keyword) {
+        if (!keyword) return { matched: false, identifier: null, score: 0 };
+        
+        // 支持传入标题字符串或标识符数组
+        const identifiers = Array.isArray(titleOrIdentifiers) ? titleOrIdentifiers : [titleOrIdentifiers];
+        
+        const cleanKeyword = cleanText(keyword);
+        if (!cleanKeyword) return { matched: false, identifier: null, score: 0 };
+        
+        // 支持顿号、逗号、竖线分隔的多个关键词
+        const subKeywords = splitKeywords(keyword).map(k => cleanText(k)).filter(k => k);
+        if (subKeywords.length === 0) subKeywords.push(cleanKeyword);
+        
+        let bestScore = 0;
+        let bestIdentifier = null;
+        let bestSubKey = null;
+        
+        for (const subKey of subKeywords) {
+            for (const identifier of identifiers) {
+                const cleanIdentifier = cleanText(identifier);
+                if (!cleanIdentifier) continue;
+                
+                let currentScore = 0;
+                
+                // 1. 完全匹配（100分）
+                if (cleanIdentifier === subKey) {
+                    currentScore = 100;
+                }
+                // 2. 包含匹配（80-90分）
+                else if (cleanIdentifier.includes(subKey)) {
+                    const ratio = subKey.length / cleanIdentifier.length;
+                    currentScore = 80 + (ratio * 10);
+                }
+                else if (subKey.includes(cleanIdentifier)) {
+                    currentScore = 70;
+                }
+                // 3. 字符相似度匹配（30-60分）
+                else {
+                    let common = 0;
+                    for (const c of subKey) {
+                        if (cleanIdentifier.includes(c)) common++;
+                    }
+                    const similarity = common / subKey.length;
+                    if (similarity >= 0.5) {
+                        currentScore = Math.floor(similarity * 60);
+                    }
+                }
+                
+                if (currentScore > bestScore) {
+                    bestScore = currentScore;
+                    bestIdentifier = identifier;
+                    bestSubKey = subKey;
+                }
+            }
+        }
+        
+        const threshold = 50;
+        return { 
+            matched: bestScore >= threshold, 
+            identifier: bestIdentifier, 
+            score: bestScore,
+            matchedKey: bestSubKey
+        };
+    }
+"""
+    
     def generate_fill_script(self, field_data: Dict[str, str]) -> str:
         """
         生成填写腾讯文档表单的 JavaScript 脚本
@@ -24,6 +128,9 @@ class TencentDocsFiller:
         Returns:
             JavaScript 代码字符串
         """
+        # 获取共享的匹配算法
+        shared_algorithm = self.get_shared_match_algorithm()
+        
         js_code = f"""
 (async function() {{
     console.log('====== 🚀 开始填写腾讯文档表单 ======');
@@ -37,6 +144,8 @@ class TencentDocsFiller:
     }};
     
     const fieldData = {self._dict_to_js_object(field_data)};
+    
+{shared_algorithm}
     
     /**
      * 等待页面加载完成
@@ -85,64 +194,6 @@ class TencentDocsFiller:
         
         console.log('  ❌ 未找到输入框');
         return null;
-    }}
-    
-    /**
-     * 清理文本
-     */
-    function cleanText(text) {{
-        if (!text) return '';
-        return String(text).toLowerCase().replace(/[：:*？?！!。.、，,\\s\\-_\\(\\)（）【】\\[\\]]/g, '').trim();
-    }}
-    
-    /**
-     * 匹配关键词 - 评分系统 (支持多关键词)
-     */
-    function matchKeyword(title, keyword) {{
-        const cleanTitle = cleanText(title);
-        const cleanKeyword = cleanText(keyword);
-        
-        if (!cleanKeyword || !cleanTitle) return {{ matched: false, score: 0 }};
-        
-        // 支持顿号、逗号、竖线分隔的多个关键词
-        const subKeywords = keyword.split(/[|,;，；、]/).map(k => cleanText(k)).filter(k => k);
-        if (subKeywords.length === 0) subKeywords.push(cleanKeyword);
-        
-        let bestScore = 0;
-        
-        for (const subKey of subKeywords) {{
-            let currentScore = 0;
-            
-            // 1. 完全匹配
-            if (cleanTitle === subKey) {{
-                currentScore = 100;
-            }}
-            // 2. 包含匹配
-            else if (cleanTitle.includes(subKey)) {{
-                const ratio = subKey.length / cleanTitle.length;
-                currentScore = 80 + (ratio * 10); 
-            }}
-            else if (subKey.includes(cleanTitle)) {{
-                currentScore = 70;
-            }}
-            // 3. 字符相似度匹配
-            else {{
-                let common = 0;
-                for (const c of subKey) {{
-                    if (cleanTitle.includes(c)) common++;
-                }}
-                const similarity = common / subKey.length;
-                if (similarity >= 0.5) {{
-                    currentScore = Math.floor(similarity * 60);
-                }}
-            }}
-            
-            if (currentScore > bestScore) {{
-                bestScore = currentScore;
-            }}
-        }}
-        
-        return {{ matched: bestScore >= 50, score: bestScore }};
     }}
     
     /**
