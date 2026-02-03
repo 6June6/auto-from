@@ -60,10 +60,11 @@ class NoticeCardWidget(QFrame):
     
     join_clicked = pyqtSignal(object)  # 链接信号，传递卡片自身
     
-    def __init__(self, notice, parent=None):
+    def __init__(self, notice, parent=None, is_added=False):
         super().__init__(parent)
         self.notice = notice
         self.is_loading = False
+        self.is_added = is_added  # 是否已添加到链接库
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.init_ui()
         
@@ -138,41 +139,62 @@ class NoticeCardWidget(QFrame):
         
         layout.addLayout(header_layout)
         
-        # 2. 通告内容 - 更清晰的文字
+        # 2. 通告内容 - 使用 QLabel 替代 QTextEdit，解决字体显示问题
         content = self._get_full_content()
         
-        self.content_edit = QTextEdit()
-        self.content_edit.setPlainText(content)
-        self.content_edit.setReadOnly(True)
-        self.content_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.content_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 内容滚动区域
+        content_scroll = QScrollArea()
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content_scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                width: 4px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                background: #D1D5DB;
+                border-radius: 2px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
         
-        self.content_edit.setStyleSheet(f"""
-            QTextEdit {{
+        self.content_label = QLabel(content)
+        self.content_label.setWordWrap(True)
+        self.content_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.content_label.setStyleSheet(f"""
+            QLabel {{
                 background-color: transparent;
                 font-size: 13px;
                 color: {COLORS['text_primary']};
-                line-height: 1.4;
-                border: none;
-            }}
-            QScrollBar:vertical {{
-                width: 4px;
-                background: transparent;
-            }}
-            QScrollBar::handle:vertical {{
-                background: #D1D5DB;
-                border-radius: 2px;
+                line-height: 1.5;
+                padding: 0;
             }}
         """)
-        layout.addWidget(self.content_edit, 1)
         
-        # 3. 底部按钮 - 更紧凑
-        self.join_btn = QPushButton("加入链接")
+        content_scroll.setWidget(self.content_label)
+        layout.addWidget(content_scroll, 1)
+        
+        # 3. 底部按钮 - 根据是否已添加显示不同状态
+        self.join_btn = QPushButton()
         self.join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.join_btn.setFixedHeight(34)
-        self._update_btn_style()
-        self.join_btn.clicked.connect(lambda: self.join_clicked.emit(self))
+        
+        if self.is_added:
+            self._set_added_style()
+        else:
+            self.join_btn.setText("加入链接")
+            self._update_btn_style()
+            self.join_btn.clicked.connect(lambda: self.join_clicked.emit(self))
+        
         layout.addWidget(self.join_btn)
     
     def _update_btn_style(self, loading=False):
@@ -205,6 +227,22 @@ class NoticeCardWidget(QFrame):
                     background: {COLORS['primary_dark']};
                 }}
             """)
+    
+    def _set_added_style(self):
+        """设置已添加状态样式"""
+        self.is_added = True
+        self.join_btn.setText("已添加 ✓")
+        self.join_btn.setEnabled(False)
+        self.join_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #10B981;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 13px;
+            }}
+        """)
     
     def set_loading(self, loading: bool):
         """设置 loading 状态"""
@@ -530,6 +568,8 @@ class NoticePlazaWindow(QMainWindow):
         
     def refresh_notices(self):
         """刷新通告列表"""
+        import re
+        
         # 清空现有的
         while self.cards_grid.count():
             item = self.cards_grid.takeAt(0)
@@ -559,10 +599,30 @@ class NoticePlazaWindow(QMainWindow):
         end = start + self.page_size
         current_notices = notices[start:end]
         
+        # 获取当前用户已添加的链接URL集合（用于判断是否已添加）
+        user = self.parent().current_user if self.parent() else None
+        user_link_urls = set()
+        if user:
+            try:
+                user_links = self.db_manager.get_all_links(user=user)
+                user_link_urls = {link.url for link in user_links}
+            except Exception:
+                pass
+        
         # 渲染卡片
-        cols = 4 # 固定4列
+        cols = 4  # 固定4列
+        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+        
         for i, notice in enumerate(current_notices):
-            card = NoticeCardWidget(notice)
+            # 检查该通告的链接是否已添加
+            is_added = False
+            if user_link_urls:
+                content = notice.content if notice.content else ""
+                links = re.findall(url_pattern, content)
+                if links and links[0] in user_link_urls:
+                    is_added = True
+            
+            card = NoticeCardWidget(notice, is_added=is_added)
             card.join_clicked.connect(self.add_to_my_links)
             row = i // cols
             col = i % cols
@@ -646,17 +706,7 @@ class NoticePlazaWindow(QMainWindow):
                 self.parent().refresh_links_list()
             
             # 成功后显示"已添加"
-            card.join_btn.setText("已添加 ✓")
-            card.join_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: #10B981;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-weight: 600;
-                    font-size: 13px;
-                }}
-            """)
+            card._set_added_style()
             
         except Exception as e:
             QMessageBox.warning(self, "失败", f"添加链接失败：{str(e)}")

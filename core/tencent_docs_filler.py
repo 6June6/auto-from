@@ -2,10 +2,108 @@
 腾讯文档表单填写引擎
 专门针对腾讯文档（docs.qq.com）表单的自动填写
 """
+import re
 import logging
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+class SharedMatchAlgorithm:
+    """
+    共享的匹配算法（Python 版本）
+    可被多个平台复用：报名工具等需要 Python 端匹配的平台
+    """
+    
+    @staticmethod
+    def clean_text(text: str) -> str:
+        """清理文本用于匹配"""
+        if not text:
+            return ''
+        text = str(text).lower()
+        # 去除特殊字符
+        text = re.sub(r'[：:*？?！!。.、，,\s\-_\(\)（）【】\[\]]+', '', text)
+        return text.strip()
+    
+    @staticmethod
+    def split_keywords(keyword: str) -> List[str]:
+        """分割关键词为子关键词数组"""
+        if not keyword:
+            return []
+        parts = re.split(r'[|,;，；、\n\r\t/／\\｜\u2795+]+', keyword)
+        return [SharedMatchAlgorithm.clean_text(p) for p in parts if p.strip()]
+    
+    @staticmethod
+    def match_keyword(identifiers, keyword: str) -> Dict:
+        """
+        匹配关键词 - 评分系统（与 JavaScript 版本保持一致）
+        
+        Args:
+            identifiers: 标识符列表或单个标题字符串
+            keyword: 关键词（支持 |,;，；、 分隔的多个关键词）
+            
+        Returns:
+            Dict: { matched: bool, score: int, identifier: str, matchedKey: str }
+        """
+        if not keyword:
+            return {'matched': False, 'identifier': None, 'score': 0, 'matchedKey': None}
+        
+        # 支持传入标题字符串或标识符数组
+        if isinstance(identifiers, str):
+            identifiers = [identifiers]
+        
+        clean_keyword = SharedMatchAlgorithm.clean_text(keyword)
+        if not clean_keyword:
+            return {'matched': False, 'identifier': None, 'score': 0, 'matchedKey': None}
+        
+        # 分割子关键词
+        sub_keywords = SharedMatchAlgorithm.split_keywords(keyword)
+        if not sub_keywords:
+            sub_keywords = [clean_keyword]
+        
+        best_score = 0
+        best_identifier = None
+        best_sub_key = None
+        
+        for sub_key in sub_keywords:
+            if not sub_key:
+                continue
+                
+            for identifier in identifiers:
+                clean_identifier = SharedMatchAlgorithm.clean_text(identifier)
+                if not clean_identifier:
+                    continue
+                
+                current_score = 0
+                
+                # 1. 完全匹配（100分）
+                if clean_identifier == sub_key:
+                    current_score = 100
+                # 2. 包含匹配（80-90分）
+                elif sub_key in clean_identifier:
+                    ratio = len(sub_key) / len(clean_identifier)
+                    current_score = 80 + (ratio * 10)
+                elif clean_identifier in sub_key:
+                    current_score = 70
+                # 3. 字符相似度匹配（30-60分）
+                else:
+                    common = sum(1 for c in sub_key if c in clean_identifier)
+                    similarity = common / len(sub_key) if sub_key else 0
+                    if similarity >= 0.5:
+                        current_score = int(similarity * 60)
+                
+                if current_score > best_score:
+                    best_score = current_score
+                    best_identifier = identifier
+                    best_sub_key = sub_key
+        
+        threshold = 50
+        return {
+            'matched': best_score >= threshold,
+            'identifier': best_identifier,
+            'score': best_score,
+            'matchedKey': best_sub_key
+        }
 
 
 class TencentDocsFiller:

@@ -651,7 +651,7 @@ class BaomingToolFiller:
     
     def match_and_fill(self, card_config: List[Dict]) -> List[Dict]:
         """
-        匹配名片配置并填充表单（优化版 - 复用石墨文档/见数算法）
+        匹配名片配置并填充表单（使用共享匹配算法）
         
         Args:
             card_config: 名片配置项列表，每项包含 name(字段名) 和 value(值)
@@ -659,9 +659,11 @@ class BaomingToolFiller:
         Returns:
             List[Dict]: 填充后的表单数据
         """
+        from core.tencent_docs_filler import SharedMatchAlgorithm
+        
         result = []
         
-        print(f"  🎯 [报名工具] 开始智能匹配，共有 {len(self.form_fields)} 个字段，{len(card_config)} 个名片项")
+        print(f"  🎯 [报名工具] 开始智能匹配（使用共享算法），共有 {len(self.form_fields)} 个字段，{len(card_config)} 个名片项")
         
         for index, field in enumerate(self.form_fields):
             field_name = field.get('field_name', '')
@@ -678,15 +680,11 @@ class BaomingToolFiller:
             
             # 遍历所有名片配置找最佳匹配
             for config in card_config:
-                config_name = config.get('name', '') # 名片上的key
+                config_name = config.get('name', '')  # 名片上的key
                 config_value = config.get('value', '')
                 
-                # 计算匹配分数
-                score_result = self._calculate_match_score(field_name, config_name)
-                
-                # 记录详细日志（调试用）
-                # if score_result['score'] > 0:
-                #    print(f"     - 候选: \"{config_name}\" -> {score_result['score']}分")
+                # 使用共享匹配算法
+                score_result = SharedMatchAlgorithm.match_keyword(field_name, config_name)
 
                 if score_result['matched'] and score_result['score'] > best_match['score']:
                     best_match = {
@@ -696,7 +694,7 @@ class BaomingToolFiller:
                     }
             
             matched_value = ''
-            if best_match['score'] >= 50: # 阈值50
+            if best_match['score'] >= 50:  # 阈值50
                 matched_value = best_match['value']
                 val_preview = str(matched_value)[:20] + "..." if len(str(matched_value)) > 20 else str(matched_value)
                 print(f"     ✅ 选中: \"{best_match['matched_key']}\" = \"{val_preview}\" (分数: {best_match['score']})")
@@ -711,310 +709,11 @@ class BaomingToolFiller:
             })
         
         return result
-    
-    def _clean_text(self, text: str) -> str:
-        """清理文本"""
-        if not text:
-            return ''
-        text = str(text).lower()
-        
-        # 1. 先去除括号及其内容（通常是提示信息，如"(必填)", "(不要填错)"）
-        # 支持中文括号（）和英文括号()
-        text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)
-        
-        # 2. 去除特殊字符
-        text = re.sub(r'[：:*？?！!。.、，,\s\-_()（）【】\[\]\n\r\t/／\\|｜;；\'\"\u2795+《》<>""'']+', '', text)
-        return text.strip()
-
-    def _clean_text_no_prefix(self, text: str) -> str:
-        """去除数字前缀"""
-        if not text:
-            return ''
-        cleaned = self._clean_text(text)
-        # 去除开头的数字和点号
-        cleaned = re.sub(r'^\d+\.?\*?', '', cleaned)
-        return cleaned.strip()
-
-    def _split_keywords(self, keyword: str) -> List[str]:
-        """分割关键词"""
-        if not keyword:
-            return []
-        # 支持多种分隔符
-        parts = re.split(r'[|,;，；、\n\r\t/／\\｜\u2795+]+', keyword)
-        return [self._clean_text(p) for p in parts if p.strip()]
-        
-    def _split_keywords_no_prefix(self, keyword: str) -> List[str]:
-        """分割关键词并去前缀"""
-        if not keyword:
-            return []
-        parts = re.split(r'[|,;，；、\n\r\t/／\\｜\u2795+]+', keyword)
-        return [self._clean_text_no_prefix(p) for p in parts if p.strip()]
-
-    def _extract_core_words(self, text: str) -> List[str]:
-        """提取核心词"""
-        cleaned = self._clean_text(text)
-        # 核心词库（与前端 JS 保持一致）
-        core_patterns = [
-            '小红书', '蒲公英', '微信', '微博', '抖音', '快手', 'b站', '哔哩哔哩',
-            'id', '账号', '昵称', '主页', '名字', '名称',
-            '粉丝', '点赞', '赞藏', '互动', '阅读', '播放', '曝光', '收藏',
-            '中位数', '均赞', 'cpm', 'cpe',
-            '价格', '报价', '报备', '返点', '裸价', '预算', '后台',
-            '视频', '图文', '链接', '作品', '笔记',
-            '手机', '电话', '地址',
-            '姓名', '年龄', '性别', '城市', '地区', 'ip',
-            '档期', '类别', '类型', '领域', '备注', '授权', '分发', '排竞',
-            '平台', '健康', '等级', '保价', '配合', '时间', '探店',
-            '收货', '寄送', '快递',
-            '出镜', '人物', '保底'
-        ]
-        found = []
-        for pattern in core_patterns:
-            if pattern in cleaned:
-                found.append(pattern)
-        return found
-        
-    def _longest_common_substring(self, s1: str, s2: str) -> int:
-        """最长公共子串长度"""
-        m, n = len(s1), len(s2)
-        if m == 0 or n == 0:
-            return 0
-        dp = [[0] * (n + 1) for _ in range(m + 1)]
-        max_len = 0
-        for i in range(1, m + 1):
-            for j in range(1, n + 1):
-                if s1[i-1] == s2[j-1]:
-                    dp[i][j] = dp[i-1][j-1] + 1
-                    max_len = max(max_len, dp[i][j])
-                else:
-                    dp[i][j] = 0
-        return max_len
-
-    def _calculate_match_score(self, field_name: str, config_name: str) -> Dict:
-        """
-        计算匹配分数（简化版 - 直接找最高匹配度）
-        
-        Args:
-            field_name: 表单字段名
-            config_name: 名片配置项名
-        """
-        if not config_name:
-            return {'matched': False, 'score': 0}
-            
-        clean_identifier = self._clean_text(field_name)
-        if not clean_identifier:
-            return {'matched': False, 'score': 0}
-            
-        clean_identifier_no_prefix = self._clean_text_no_prefix(field_name)
-        identifier_core_words = self._extract_core_words(field_name)
-        
-        # 分割名片关键词
-        sub_keywords = self._split_keywords(config_name)
-        if not sub_keywords:
-            sub_keywords = [self._clean_text(config_name)]
-            
-        sub_keywords_no_prefix = self._split_keywords_no_prefix(config_name)
-        if not sub_keywords_no_prefix:
-            sub_keywords_no_prefix = [self._clean_text_no_prefix(config_name)]
-        
-        # ⚡️ 平台关键词识别与互斥检测（新增）
-        # 定义平台关键词映射
-        platform_keywords_map = {
-            'wechat': ['微信', 'wx', 'vx', '微信号', '微信名', '微信昵称', '微信id'],
-            'xiaohongshu': ['小红书', '红书', '小红薯', '红薯', 'xhs', '蒲公英', '平台昵称', '账号昵称', '账号名', '主页'],
-            'douyin': ['抖音', 'dy', '抖音号'],
-            'weibo': ['微博', 'wb', '微博号'],
-            'bilibili': ['b站', 'bilibili', '哔哩哔哩', 'up主']
-        }
-        
-        def detect_platform(text: str) -> str:
-            """检测文本所属平台"""
-            if not text:
-                return 'unknown'
-            text_lower = text.lower()
-            for platform, keywords in platform_keywords_map.items():
-                for keyword in keywords:
-                    if keyword in text_lower:
-                        return platform
-            return 'unknown'
-        
-        # 检测表单字段和名片字段的平台归属
-        field_platform = detect_platform(clean_identifier)
-        config_platform = detect_platform(config_name.lower())
-        
-        # 如果两者平台不一致且都不是unknown，则大幅降低分数
-        platform_penalty_factor = 1.0
-        if field_platform != 'unknown' and config_platform != 'unknown':
-            if field_platform != config_platform:
-                # 不同平台，给予严厉惩罚
-                platform_penalty_factor = 0.05
-                print(f"     [平台互斥] 表单\"{field_name}\"({field_platform}) vs 名片\"{config_name[:30]}...\"({config_platform}) - 惩罚0.05")
-            else:
-                # 同一平台，给予加分
-                platform_penalty_factor = 1.2
-                print(f"     [平台匹配] 表单\"{field_name}\"({field_platform}) vs 名片\"{config_name[:30]}...\"({config_platform}) - 加分1.2")
-        
-        # ⚡️ 全局否定词检测：在计算分数前，先判断整体字段性质是否不匹配
-        negation_patterns = ['非', '不', '无', '否', '未']
-        # 用于否定词检测的核心业务关键词（如"非报备"、"不报备"等）
-        core_business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发']
-        # 用于判断表单字段是否涉及业务场景的扩展关键词
-        extended_business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发', 
-                                       '视频', '图文', '价格', '蒲公英', '后台', '平台']
-        
-        def has_negated_business_keyword(text):
-            """检测是否包含否定词+业务关键词组合"""
-            for neg in negation_patterns:
-                for bk in core_business_keywords:
-                    if f"{neg}{bk}" in text:
-                        return True
-            return False
-        
-        # 检测表单字段是否包含否定词
-        field_has_negation = has_negated_business_keyword(clean_identifier)
-        
-        # 检测表单字段是否涉及业务关键词（使用扩展列表）
-        field_has_business = any(bk in clean_identifier for bk in extended_business_keywords)
-        
-        # 计算名片字段中包含否定词的子关键词占比
-        negated_sub_count = sum(1 for sk in sub_keywords if has_negated_business_keyword(sk))
-        total_sub_count = len(sub_keywords)
-        
-        # 如果名片字段超过50%的子关键词包含否定词，则认为是"非报备"类别
-        is_negation_category = total_sub_count > 0 and (negated_sub_count / total_sub_count) > 0.5
-        
-        # 全局否定词不一致惩罚因子（用于降低优先级而非完全排除）
-        global_penalty_factor = 1.0
-        
-        if field_has_business:
-            # 表单字段涉及业务关键词，需要检查否定词一致性
-            if not field_has_negation and is_negation_category:
-                # 表单不含否定词，但名片是非报备类别 -> 大幅降低优先级
-                global_penalty_factor = 0.1
-            elif field_has_negation and not is_negation_category:
-                # 表单含否定词，但名片不是非报备类别 -> 大幅降低优先级
-                global_penalty_factor = 0.1
-            
-        best_score = 0
-        
-        for i, sub_key in enumerate(sub_keywords):
-            if not sub_key: continue
-            
-            sub_key_no_prefix = sub_keywords_no_prefix[i] if i < len(sub_keywords_no_prefix) else sub_key
-            sub_key_core_words = self._extract_core_words(sub_key)
-            
-            current_score = 0
-            
-            # 1. 完全匹配 (100分)
-            if clean_identifier == sub_key:
-                current_score = 100
-                
-            # 2. 去前缀后完全匹配 (98分)
-            elif sub_key_no_prefix and clean_identifier == sub_key_no_prefix:
-                current_score = 98
-                
-            # 3. 表单标签包含名片key (包含匹配)
-            elif sub_key in clean_identifier and len(sub_key) >= 2:
-                coverage = len(sub_key) / len(clean_identifier)
-                if coverage >= 0.8:
-                    current_score = 95
-                elif coverage >= 0.5:
-                    current_score = 50 + (coverage * 45)
-                else:
-                    current_score = 30 + (coverage * 40)
-                    
-            # 4. 去前缀后的包含匹配
-            elif sub_key_no_prefix and sub_key_no_prefix in clean_identifier and len(sub_key_no_prefix) >= 2:
-                coverage = len(sub_key_no_prefix) / len(clean_identifier)
-                if coverage >= 0.8:
-                    current_score = 93
-                else:
-                    current_score = 28 + (coverage * 40)
-                    
-            # 5. 名片key包含表单标签 (反向包含)
-            elif clean_identifier in sub_key and len(clean_identifier) >= 2:
-                if sub_key_no_prefix == clean_identifier:
-                    current_score = 96
-                else:
-                    base_len = len(sub_key_no_prefix) if sub_key_no_prefix else len(sub_key)
-                    coverage = len(clean_identifier) / base_len
-                    current_score = 30 + (coverage * 60)
-                    
-            # 6. 去前缀版本的反向包含
-            elif sub_key_no_prefix and clean_identifier_no_prefix in sub_key_no_prefix and len(clean_identifier_no_prefix) >= 2:
-                 coverage = len(clean_identifier_no_prefix) / len(sub_key_no_prefix)
-                 current_score = 28 + (coverage * 60)
-
-            # 7. 核心词匹配
-            elif len(sub_key_core_words) > 0 and len(identifier_core_words) > 0:
-                common_core_words = [w for w in sub_key_core_words if w in identifier_core_words]
-                if common_core_words:
-                    max_core_len = max(len(sub_key_core_words), len(identifier_core_words))
-                    core_match_ratio = len(common_core_words) / max_core_len
-                    
-                    if len(common_core_words) == len(sub_key_core_words) and len(common_core_words) == len(identifier_core_words):
-                        current_score = 88
-                    elif len(sub_key_core_words) == 1 and len(identifier_core_words) == 1:
-                        current_score = 60
-                    else:
-                        current_score = 25 + int(core_match_ratio * 65)
-            
-            # 8. 最长公共子串匹配 (兜底)
-            elif len(sub_key) >= 2 and len(clean_identifier) >= 2:
-                lcs = self._longest_common_substring(sub_key, clean_identifier)
-                max_len = max(len(sub_key), len(clean_identifier))
-                min_len = min(len(sub_key), len(clean_identifier))
-                
-                if lcs >= 2:
-                    coverage = lcs / max_len
-                    match_rate = lcs / min_len
-                    
-                    if match_rate >= 0.6 and lcs >= 3:
-                        current_score = 30 + (coverage * 20) + (match_rate * 15)
-                    elif match_rate >= 0.5 and lcs >= 2:
-                        current_score = 25 + (coverage * 15) + (match_rate * 10)
-            
-            # ⚡️ 否定词惩罚：报备 vs 非报备 场景
-            # 更精确的检测：检测否定词是否直接修饰业务关键词
-            if current_score > 0:
-                negation_patterns = ['非', '不', '无', '否', '未']
-                business_keywords = ['报备', '报价', '返点', '授权', '挂车', '置顶', '分发']
-                
-                # 检测否定词+业务关键词的组合（如"非报备"、"不报备"）
-                def has_negated_business_keyword(text):
-                    for neg in negation_patterns:
-                        for bk in business_keywords:
-                            if f"{neg}{bk}" in text:
-                                return True
-                    return False
-                
-                id_has_negation = has_negated_business_keyword(clean_identifier)
-                key_has_negation = has_negated_business_keyword(sub_key)
-                
-                # 检测是否涉及业务关键词
-                has_business_keyword = any(bk in clean_identifier or bk in sub_key for bk in business_keywords)
-                
-                # 如果涉及业务关键词且否定状态不一致，大幅降低分数
-                if has_business_keyword and id_has_negation != key_has_negation:
-                    # print(f"     [否定词惩罚] \"{clean_identifier}\" vs \"{sub_key}\": 否定状态不一致，分数从{current_score}降为0")
-                    current_score = 0
-            
-            if current_score > best_score:
-                best_score = current_score
-        
-        # 应用全局否定词惩罚因子
-        if global_penalty_factor < 1.0:
-            best_score = int(best_score * global_penalty_factor)
-        
-        # 应用平台惩罚/加分因子（新增）
-        if platform_penalty_factor != 1.0:
-            best_score = int(best_score * platform_penalty_factor)
-                
-        return {'matched': best_score >= 50, 'score': best_score}
 
     def _match_field_name(self, form_field: str, config_name: str) -> bool:
-        """保留旧方法接口，但在内部调用新逻辑（为了兼容性）"""
-        result = self._calculate_match_score(form_field, config_name)
+        """保留旧方法接口，使用共享算法（为了兼容性）"""
+        from core.tencent_docs_filler import SharedMatchAlgorithm
+        result = SharedMatchAlgorithm.match_keyword(form_field, config_name)
         return result['matched']
     
     def submit(self, form_data: List[Dict]) -> Tuple[bool, str]:

@@ -1322,38 +1322,49 @@ class SmartAddLinkDialog(QDialog):
             show_warning(self, "提示", "没有可保存的有效链接")
             return
             
-        # 执行保存
+        # 执行保存（批量优化版）
         success_count = 0
         updated_count = 0
         error_count = 0
+        
+        # 分离需要新建和需要更新的链接
+        links_to_create = []
+        links_to_update = []
         
         for data, existing in valid_links:
             name = data['name'] or "未命名链接"
             url = data['url']
             category = data['category']
             
+            if existing:
+                links_to_update.append((existing, name, category))
+            else:
+                links_to_create.append({
+                    'name': name,
+                    'url': url,
+                    'category': category,
+                    'description': f"批量导入 - {name}"
+                })
+        
+        # 批量创建新链接
+        if links_to_create:
+            result = self.db_manager.batch_create_links(links_to_create, self.current_user)
+            success_count = result['success_count']
+            error_count = result['error_count']
+        
+        # 更新已存在的链接（逐个更新，因为更新逻辑可能不同）
+        for existing, name, category in links_to_update:
             try:
-                if existing:
-                    self.db_manager.update_link(
-                        existing.id,
-                        name=name,
-                        category=category,
-                        status='active',
-                        description=f"批量导入更新 - {name}"
-                    )
-                    updated_count += 1
-                else:
-                    self.db_manager.create_link(
-                        name=name,
-                        url=url,
-                        user=self.current_user,
-                        status='active',
-                        category=category,
-                        description=f"批量导入 - {name}"
-                    )
-                    success_count += 1
+                self.db_manager.update_link(
+                    existing.id,
+                    name=name,
+                    category=category,
+                    status='active',
+                    description=f"批量导入更新 - {name}"
+                )
+                updated_count += 1
             except Exception as e:
-                print(f"保存链接失败: {e}")
+                print(f"更新链接失败: {e}")
                 error_count += 1
         
         # 显示结果

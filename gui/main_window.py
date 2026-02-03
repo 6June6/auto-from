@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGraphicsDropShadowEffect, QScrollArea, QCheckBox, 
                              QListWidget, QListWidgetItem, QGridLayout, QDialog, QLineEdit,
                              QTabWidget, QComboBox, QInputDialog, QMenu)
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject
 from PyQt6.QtGui import QFont, QColor, QAction
 import qtawesome as qta
 from database import DatabaseManager
@@ -180,6 +180,87 @@ class HomeRecordRowWidget(QFrame):
         layout.addWidget(status_container, 0)
 
 
+class HomeRecordRowWidgetFromData(QFrame):
+    """首页记录行组件 - 使用已序列化的数据"""
+    
+    def __init__(self, data, parent=None):
+        super().__init__(parent)
+        self.data = data
+        self.setFixedHeight(48)
+        self.setStyleSheet("""
+            HomeRecordRowWidgetFromData {
+                background: white;
+                border: none;
+                border-bottom: 1px solid #FAFAFA;
+            }
+            HomeRecordRowWidgetFromData:hover {
+                background: #F9FAFB;
+            }
+        """)
+        self._setup_content()
+        
+    def _setup_content(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(12)
+        
+        # 1. 时间
+        time_label = QLabel(self.data['time'])
+        time_label.setFixedWidth(HOME_RECORD_COLUMNS['time'])
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_label.setStyleSheet("color: #86868B; font-size: 13px;")
+        layout.addWidget(time_label, 0)
+        
+        # 2. 名片
+        card_label = QLabel(self.data['card_name'])
+        card_label.setMinimumWidth(120)
+        card_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_label.setStyleSheet("color: #1D1D1F; font-size: 13px; font-weight: 500;")
+        card_label.setToolTip(self.data['card_name'])
+        layout.addWidget(card_label, 1)
+        
+        # 3. 链接
+        link_label = QLabel(self.data.get('link_url', self.data.get('link_name', '')))
+        link_label.setMinimumWidth(120)
+        link_label.setStyleSheet("color: #007AFF; font-size: 12px;")
+        link_label.setToolTip(f"{self.data.get('link_name', '')}\n{self.data.get('link_url', '')}")
+        layout.addWidget(link_label, 1)
+        
+        # 4. 填写字段
+        total_label = QLabel(str(self.data['total_count']))
+        total_label.setFixedWidth(HOME_RECORD_COLUMNS['total'])
+        total_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        total_label.setStyleSheet("color: #1D1D1F; font-size: 13px;")
+        layout.addWidget(total_label, 0)
+        
+        # 5. 成功数
+        success_label = QLabel(str(self.data['fill_count']))
+        success_label.setFixedWidth(HOME_RECORD_COLUMNS['success'])
+        success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        success_label.setStyleSheet("color: #1D1D1F; font-size: 13px;")
+        layout.addWidget(success_label, 0)
+        
+        # 6. 状态
+        status_container = QWidget()
+        status_container.setFixedWidth(HOME_RECORD_COLUMNS['status'])
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        status_label = QLabel()
+        status_label.setText("✅ 成功")
+        status_label.setStyleSheet("""
+            color: #059669; 
+            background: #ecfdf5; 
+            padding: 4px 10px; 
+            border-radius: 12px; 
+            font-size: 12px; 
+            font-weight: 600;
+        """)
+        status_layout.addWidget(status_label)
+        layout.addWidget(status_container, 0)
+
+
 class HomeRecordListWidget(QWidget):
     """首页记录列表组件"""
     
@@ -256,7 +337,7 @@ class HomeRecordListWidget(QWidget):
         self.rows_layout.addWidget(self.empty_label)
         
     def set_records(self, records):
-        """设置记录列表"""
+        """设置记录列表 - 支持原始记录对象"""
         self.clear_rows()
         
         if not records:
@@ -269,6 +350,33 @@ class HomeRecordListWidget(QWidget):
         
         # 添加弹性空间
         self.rows_layout.addStretch()
+    
+    def set_records_data(self, records_data):
+        """设置记录列表 - 使用已序列化的数据，避免 N+1 查询"""
+        self.clear_rows()
+        
+        if not records_data:
+            self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            return
+            
+        for data in records_data:
+            row = HomeRecordRowWidgetFromData(data)
+            self.rows_layout.addWidget(row)
+        
+        # 添加弹性空间
+        self.rows_layout.addStretch()
+    
+    def show_loading(self):
+        """显示加载状态"""
+        self.clear_rows()
+        loading_label = QLabel("⏳ 加载中...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("""
+            color: #86868B;
+            font-size: 14px;
+            padding: 60px;
+        """)
+        self.rows_layout.addWidget(loading_label)
 
 
 class MultiCardFillWindow(QMainWindow):
@@ -686,262 +794,335 @@ class AddCardDialog(QDialog):
             self.setWindowTitle("编辑名片")
         else:
             self.setWindowTitle("添加名片")
-        self.setFixedSize(820, 680)
+        self.setFixedSize(1000, 750)  # 稍微加宽加高
         self.setModal(True)
         
         # 主布局
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(35, 35, 35, 35)
-        main_layout.setSpacing(24)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         self.setLayout(main_layout)
         
-        # 名片名称行
-        name_layout = QHBoxLayout()
-        name_layout.setSpacing(15)
+        # 1. 顶部区域：基本信息
+        top_container = QWidget()
+        top_container.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #F3F4F6;")
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(40, 32, 40, 32)
+        top_layout.setSpacing(24)
         
+        # 标题栏
+        header_layout = QHBoxLayout()
+        title = QLabel("基本信息")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
+        header_layout.addWidget(title)
+        
+        # 如果是编辑模式，在右上角显示ID或其他信息
+        if self.card:
+            id_label = QLabel(f"ID: {str(self.card.id)[-6:]}")
+            id_label.setStyleSheet("color: #9CA3AF; font-size: 12px; font-family: monospace;")
+            header_layout.addStretch()
+            header_layout.addWidget(id_label)
+        else:
+            header_layout.addStretch()
+            
+        top_layout.addLayout(header_layout)
+        
+        # 表单行
+        form_layout = QHBoxLayout()
+        form_layout.setSpacing(32)
+        
+        # 名片名称
+        name_group = QVBoxLayout()
+        name_group.setSpacing(8)
         name_label = QLabel("名片名称")
-        name_label.setFixedWidth(85)
-        name_label.setStyleSheet("""
-            font-size: 14px; 
-            font-weight: 600; 
-            color: #1D1D1F;
-            padding-top: 4px;
-        """)
-        
+        name_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #374151;")
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("请输入")
-        self.name_input.setMinimumHeight(42)
-        self.name_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
+        self.name_input.setPlaceholderText("例如：个人小红书账号")
+        self.name_input.setFixedHeight(44)
+        self.name_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.name_input.setStyleSheet("""
             QLineEdit {
-                padding: 10px 15px;
-                border: 1.5px solid #E5E5EA;
-                border-radius: 8px;
+                padding: 0 16px;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
                 font-size: 14px;
-                background: #FAFAFA;
+                background: #F9FAFB;
+                color: #111827;
             }
             QLineEdit:focus {
-                border: 1.5px solid #007AFF;
-                background: white;
+                border: 1px solid #3B82F6;
+                background: #FFFFFF;
             }
             QLineEdit:hover {
-                border-color: #C7C7CC;
-                background: white;
+                background: #F3F4F6;
             }
         """)
+        name_group.addWidget(name_label)
+        name_group.addWidget(self.name_input)
+        form_layout.addLayout(name_group, 6) # 60%
         
-        name_layout.addWidget(name_label)
-        name_layout.addWidget(self.name_input)
-        main_layout.addLayout(name_layout)
-        
-        # 选择分类行
-        category_layout = QHBoxLayout()
-        category_layout.setSpacing(15)
-        
-        category_label = QLabel("选择分类")
-        category_label.setFixedWidth(85)
-        category_label.setStyleSheet("""
-            font-size: 14px; 
-            font-weight: 600; 
-            color: #1D1D1F;
-            padding-top: 4px;
-        """)
+        # 分类
+        cat_group = QVBoxLayout()
+        cat_group.setSpacing(8)
+        cat_label = QLabel("全部分类")
+        cat_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #374151;")
         
         from PyQt6.QtWidgets import QComboBox
         self.category_combo = QComboBox()
-        self.category_combo.setMinimumHeight(42)
+        self.category_combo.setFixedHeight(44)
         self.category_combo.setStyleSheet("""
             QComboBox {
-                padding: 10px 15px;
-                border: 1.5px solid #E5E5EA;
-                border-radius: 8px;
+                padding: 0 16px;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
                 font-size: 14px;
-                background: #FAFAFA;
+                background: #F9FAFB;
+                color: #111827;
             }
             QComboBox:hover {
-                border-color: #C7C7CC;
-                background: white;
+                background: #F3F4F6;
             }
             QComboBox:focus {
-                border: 1.5px solid #007AFF;
-                background: white;
+                border: 1px solid #3B82F6;
+                background: #FFFFFF;
             }
             QComboBox::drop-down {
                 border: none;
-                padding-right: 10px;
+                padding-right: 16px;
             }
             QComboBox::down-arrow {
                 image: none;
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-top: 6px solid #666;
+                border-top: 6px solid #6B7280;
                 width: 0;
                 height: 0;
             }
         """)
         self.load_categories()
         
-        # 右侧按钮
+        cat_group.addWidget(cat_label)
+        cat_group.addWidget(self.category_combo)
+        form_layout.addLayout(cat_group, 4) # 40%
+        
+        top_layout.addLayout(form_layout)
+        main_layout.addWidget(top_container)
+        
+        # 2. 中间区域：字段列表
+        fields_wrapper = QWidget()
+        fields_wrapper.setStyleSheet("background: #F9FAFB;")
+        fields_layout = QVBoxLayout(fields_wrapper)
+        fields_layout.setContentsMargins(40, 24, 40, 24)
+        fields_layout.setSpacing(16)
+        
+        # 列表头部
+        list_header = QHBoxLayout()
+        list_title = QLabel("字段配置")
+        list_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #111827;")
+        list_header.addWidget(list_title)
+        list_header.addStretch()
+        
+        # 顶部操作按钮
         new_field_btn = QPushButton("新增字段")
-        new_field_btn.setMinimumHeight(42)
-        new_field_btn.setStyleSheet(self.get_button_style())
+        new_field_btn.setFixedSize(100, 36)
+        new_field_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_field_btn.setIcon(Icons.plus_circle('#FFFFFF'))
+        new_field_btn.setStyleSheet("""
+            QPushButton {
+                background: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 18px;
+                font-size: 13px;
+                font-weight: 600;
+                padding-left: 8px;
+                padding-right: 12px;
+            }
+            QPushButton:hover {
+                background: #2563EB;
+            }
+            QPushButton:pressed {
+                background: #1D4ED8;
+            }
+        """)
         new_field_btn.clicked.connect(lambda: self.add_field_row())
+        list_header.addWidget(new_field_btn)
         
-        category_layout.addWidget(category_label)
-        category_layout.addWidget(self.category_combo, 1)
-        category_layout.addWidget(new_field_btn)
-        main_layout.addLayout(category_layout)
+        fields_layout.addLayout(list_header)
         
-        # 字段列表区域（带滚动）
+        # 滚动区域
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("""
             QScrollArea {
-                background: #F5F5F7;
-                border: none;
-                border-radius: 8px;
-            }
-            QWidget#fields_container {
                 background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                width: 6px;
+                background: transparent;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #D1D5DB;
+                min-height: 20px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #9CA3AF;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
         
         self.fields_container = QWidget()
         self.fields_container.setObjectName("fields_container")
+        self.fields_container.setStyleSheet("background: transparent;")
         # 使用手动布局，不设置 Layout
         self.fields_container.setMinimumHeight(100)
         
         scroll.setWidget(self.fields_container)
-        main_layout.addWidget(scroll, 1)
+        fields_layout.addWidget(scroll, 1)
         
-        # 不添加默认字段，让用户自己添加或从官方模版导入
+        main_layout.addWidget(fields_wrapper, 1)
         
-        # 底部按钮
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
+        # 3. 底部区域：操作按钮
+        bottom_container = QWidget()
+        bottom_container.setStyleSheet("background: #FFFFFF; border-top: 1px solid #F3F4F6;")
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(40, 20, 40, 20)
+        bottom_layout.setSpacing(16)
         
         # 如果是编辑模式，在左侧添加"复制为新名片"按钮
         if self.card:
             # 复制按钮
             copy_btn = QPushButton("复制为新名片")
-            copy_btn.setFixedSize(140, 44)
+            copy_btn.setFixedSize(130, 44)
             copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            # 采用 Outline 风格：白底绿字，悬停变实心
             copy_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: white;
-                    border: 1.5px solid #34C759;
-                    border-radius: 8px;
+                    background-color: #F0FDF4;
+                    border: 1px solid #BBF7D0;
+                    border-radius: 10px;
                     font-size: 14px;
                     font-weight: 600;
-                    color: #34C759;
+                    color: #16A34A;
                 }
                 QPushButton:hover {
-                    background-color: #34C759;
-                    color: white;
-                    border-color: #34C759;
+                    background-color: #DCFCE7;
+                    border-color: #86EFAC;
                 }
                 QPushButton:pressed {
-                    background-color: #248A3D;
-                    border-color: #248A3D;
-                    color: white;
+                    background-color: #BBF7D0;
                 }
             """)
             copy_btn.clicked.connect(self.copy_as_new_card)
-            button_layout.addWidget(copy_btn)
+            bottom_layout.addWidget(copy_btn)
             
             # 删除按钮
             delete_btn = QPushButton("删除名片")
-            delete_btn.setFixedSize(120, 44)
+            delete_btn.setFixedSize(110, 44)
             delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            # 红色 Outline 风格：白底红字，悬停变实心
             delete_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: white;
-                    border: 1.5px solid #FF3B30;
-                    border-radius: 8px;
+                    background-color: #FEF2F2;
+                    border: 1px solid #FECACA;
+                    border-radius: 10px;
                     font-size: 14px;
                     font-weight: 600;
-                    color: #FF3B30;
+                    color: #DC2626;
                 }
                 QPushButton:hover {
-                    background-color: #FF3B30;
-                    color: white;
-                    border-color: #FF3B30;
+                    background-color: #FEE2E2;
+                    border-color: #FCA5A5;
                 }
                 QPushButton:pressed {
-                    background-color: #D32F2F;
-                    border-color: #D32F2F;
-                    color: white;
+                    background-color: #FECACA;
                 }
             """)
             delete_btn.clicked.connect(self.delete_card)
-            button_layout.addWidget(delete_btn)
+            bottom_layout.addWidget(delete_btn)
         
-        button_layout.addStretch()
+        bottom_layout.addStretch()
         
+        # 取消按钮
         cancel_btn = QPushButton("取消")
-        cancel_btn.setFixedSize(130, 44)
+        cancel_btn.setFixedSize(100, 44)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #FFFFFF, stop:1 #F5F5F5);
-                border: 1.5px solid #E5E5EA;
-                border-radius: 8px;
+                background: #F3F4F6;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
                 font-size: 14px;
                 font-weight: 600;
-                color: #666;
+                color: #4B5563;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #F5F5F5, stop:1 #ECECEC);
-                border-color: #C7C7CC;
-                color: #333;
+                background: #E5E7EB;
+                border-color: #D1D5DB;
+                color: #374151;
             }
             QPushButton:pressed {
-                background: #E0E0E0;
+                background: #D1D5DB;
             }
         """)
         cancel_btn.clicked.connect(self.reject)
         
+        # 保存按钮
         save_btn = QPushButton("保存")
-        save_btn.setFixedSize(130, 44)
+        save_btn.setFixedSize(140, 44)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #007AFF, stop:1 #0062CC);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3B82F6, stop:1 #2563EB);
                 border: none;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-size: 14px;
                 font-weight: 600;
                 color: white;
+                padding-bottom: 2px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #0062CC, stop:1 #0051D5);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60A5FA, stop:1 #3B82F6);
             }
             QPushButton:pressed {
-                background: #0051A8;
+                background: #1D4ED8;
+                padding-top: 2px;
+                padding-bottom: 0;
             }
         """)
+        # 添加轻微阴影
+        shadow = QGraphicsDropShadowEffect(save_btn)
+        shadow.setBlurRadius(12)
+        shadow.setColor(QColor(37, 99, 235, 80))
+        shadow.setOffset(0, 4)
+        save_btn.setGraphicsEffect(shadow)
         save_btn.clicked.connect(self.save_card)
         
-        button_layout.addWidget(cancel_btn)
-        button_layout.addWidget(save_btn)
-        main_layout.addLayout(button_layout)
+        bottom_layout.addWidget(cancel_btn)
+        bottom_layout.addWidget(save_btn)
+        
+        main_layout.addWidget(bottom_container)
         
         # 设置对话框样式
         self.setStyleSheet("""
             QDialog {
                 background: #FFFFFF;
             }
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
         """)
     
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 窗口显示时，强制延迟更新一次字段位置，确保宽度正确占满一行
+        QTimer.singleShot(10, lambda: self._update_field_positions(animate=False))
+
     def get_button_style(self):
         """获取按钮样式"""
         return """
@@ -1086,7 +1267,8 @@ class AddCardDialog(QDialog):
         super().resizeEvent(event)
         # 窗口大小改变时，更新字段行宽度
         if hasattr(self, 'field_rows'):
-            self._update_field_positions(animate=False)
+            # 使用 timer 避免过于频繁的更新，同时也给布局系统一点缓冲时间
+            QTimer.singleShot(0, lambda: self._update_field_positions(animate=False))
 
     def add_field_alias(self, key_input):
         """添加字段别名"""
@@ -1354,7 +1536,7 @@ class AddCardDialog(QDialog):
         # 收集字段（按顺序）- 支持多个字段值
         import json
         configs = []
-        print(f"DEBUG: 准备复制名片，当前字段行数: {len(self.field_rows)}")
+        # print(f"DEBUG: 准备复制名片，当前字段行数: {len(self.field_rows)}")
         
         for i, row_data in enumerate(self.field_rows):
             try:
@@ -1378,7 +1560,7 @@ class AddCardDialog(QDialog):
                     # 多值：序列化为 JSON 数组字符串（数据库只接受字符串）
                     value = json.dumps(values, ensure_ascii=False)
                 
-                print(f"  - 行 {i}: key='{key}', value={value}, value_count={value_count}")
+                # print(f"  - 行 {i}: key='{key}', value={value}, value_count={value_count}")
                 
                 if key:  # 只添加有字段名的
                     config = {"key": key, "value": value}
@@ -1391,10 +1573,10 @@ class AddCardDialog(QDialog):
                         config['value_count'] = value_count
                     configs.append(config)
             except RuntimeError:
-                print(f"  - 行 {i}: 组件已被删除，跳过")
+                # print(f"  - 行 {i}: 组件已被删除，跳过")
                 continue
         
-        print(f"DEBUG: 收集到的有效配置数: {len(configs)}")
+        # print(f"DEBUG: 收集到的有效配置数: {len(configs)}")
         
         if not configs:
             QMessageBox.warning(self, "提示", "请至少添加一个字段")
@@ -1665,32 +1847,45 @@ class DraggableFieldRow(QWidget):
     def init_ui(self, key, value):
         """初始化UI - 优化版布局"""
         # 计算动态高度
-        # Padding(24) + Label(20) + Spacing(8) + Inputs
-        input_height = 38
-        spacing = 8
+        # Padding(32) + Label(20) + Spacing(8) + Inputs
+        input_height = 40
+        spacing = 10
         content_height = self.value_count * input_height + (self.value_count - 1) * spacing
-        total_height = 12 + 20 + 8 + content_height + 12
+        total_height = 16 + 20 + 8 + content_height + 16
         self.setFixedHeight(total_height)
         
         self.setStyleSheet("""
             DraggableFieldRow {
                 background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                border-radius: 12px;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }
+            DraggableFieldRow:hover {
+                border: 1px solid #D1D5DB;
+                background: #FFFFFF;
             }
             QLabel {
                 border: none;
                 background: transparent;
-                color: #666;
-                font-size: 13px;
-                font-weight: 500;
+                color: #6B7280;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
             }
         """)
         
+        # 添加阴影效果
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(0, 0, 0, 8))
+        shadow.setOffset(0, 4)
+        self.setGraphicsEffect(shadow)
+        
         # 主布局：水平排列 [字段名区] [字段值区] [操作区]
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(20, 16, 20, 16)
+        main_layout.setSpacing(20)
         
         # === 1. 左侧：字段名区域 (30%) ===
         left_container = QWidget()
@@ -1703,7 +1898,7 @@ class DraggableFieldRow(QWidget):
         
         # 字段名输入框（带别名按钮）
         key_input_container = QWidget()
-        key_input_container.setMinimumHeight(38)
+        key_input_container.setMinimumHeight(40)
         key_input_layout = QHBoxLayout(key_input_container)
         key_input_layout.setContentsMargins(0, 0, 0, 0)
         key_input_layout.setSpacing(0)
@@ -1711,26 +1906,31 @@ class DraggableFieldRow(QWidget):
         self.key_input = QLineEdit()
         self.key_input.setText(key)
         self.key_input.setPlaceholderText("请输入字段名")
-        self.key_input.setMinimumHeight(38)
+        self.key_input.setMinimumHeight(40)
         self.key_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 禁用右键菜单
         self.key_input.setStyleSheet("""
             QLineEdit {
-                padding: 8px 38px 8px 12px;
-                border: 1px solid #E5E5EA;
+                padding: 0 40px 0 12px;
+                border: 1px solid #E5E7EB;
                 border-radius: 8px;
-                font-size: 13px;
+                font-size: 14px;
                 background: #F9FAFB;
+                color: #111827;
             }
             QLineEdit:focus {
-                border: 1px solid #007AFF;
-                background: white;
+                border: 1px solid #3B82F6;
+                background: #FFFFFF;
+                color: #111827;
+            }
+            QLineEdit:hover {
+                background: #F3F4F6;
             }
         """)
         key_input_layout.addWidget(self.key_input)
         
         # 加号按钮
         add_btn = QPushButton()
-        add_btn.setIcon(Icons.plus_circle('primary'))
+        add_btn.setIcon(Icons.plus_circle('#3B82F6'))
         add_btn.setFixedSize(28, 28)
         add_btn.setToolTip("添加字段别名")
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1740,7 +1940,7 @@ class DraggableFieldRow(QWidget):
                 border: none;
                 border-radius: 14px;
             }
-            QPushButton:hover { background: #E8F4FD; }
+            QPushButton:hover { background: #EFF6FF; }
         """)
         add_btn.clicked.connect(lambda: self.parent_dialog.add_field_alias(self.key_input))
         
@@ -1748,15 +1948,15 @@ class DraggableFieldRow(QWidget):
         add_btn.setParent(key_input_container)
         add_btn.raise_()
         def update_add_btn_pos():
-            add_btn.move(key_input_container.width() - 32, (key_input_container.height() - 28) // 2)
+            add_btn.move(key_input_container.width() - 34, (key_input_container.height() - 28) // 2)
         key_input_container.resizeEvent = lambda e: update_add_btn_pos()
         
         left_layout.addWidget(key_input_container)
         left_layout.addStretch() # 顶对齐
         
-        main_layout.addWidget(left_container, 35) # 权重 35
+        main_layout.addWidget(left_container, 45) # 权重 45
         
-        # === 2. 中间：字段值区域 (65%) ===
+        # === 2. 中间：字段值区域 (55%) ===
         center_container = QWidget()
         center_container.setStyleSheet("border:none; background:transparent;")
         center_layout = QVBoxLayout(center_container)
@@ -1774,7 +1974,7 @@ class DraggableFieldRow(QWidget):
             center_layout.addWidget(inp)
             
         center_layout.addStretch() # 顶对齐
-        main_layout.addWidget(center_container, 65) # 权重 65
+        main_layout.addWidget(center_container, 55) # 权重 55
         
         # 为了兼容旧代码，保留 self.value_input 指向第一个输入框
         self.value_input = self.value_inputs[0] if self.value_inputs else QLineEdit()
@@ -1790,18 +1990,19 @@ class DraggableFieldRow(QWidget):
         
         # 删除按钮
         delete_btn = QPushButton()
-        delete_btn.setIcon(Icons.trash('danger'))
+        delete_btn.setIcon(Icons.trash('#EF4444'))
         delete_btn.setFixedSize(32, 32)
         delete_btn.setToolTip("删除此字段")
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.setStyleSheet("""
             QPushButton {
-                background: white;
-                border: 1px solid #E5E5EA;
+                background: #FEF2F2;
+                border: 1px solid #FECACA;
                 border-radius: 8px;
             }
             QPushButton:hover {
-                background: #FFF0F0;
-                border-color: #FF3B30;
+                background: #FEE2E2;
+                border-color: #EF4444;
             }
         """)
         delete_btn.clicked.connect(lambda: self.parent_dialog.remove_field_row(self))
@@ -1809,19 +2010,19 @@ class DraggableFieldRow(QWidget):
         
         # 拖动按钮
         self.drag_btn = QPushButton()
-        self.drag_btn.setIcon(Icons.drag('gray'))
+        self.drag_btn.setIcon(Icons.drag('#6B7280'))
         self.drag_btn.setFixedSize(32, 32)
         self.drag_btn.setToolTip("按住拖动排序")
         self.drag_btn.setCursor(Qt.CursorShape.SizeVerCursor)
         self.drag_btn.setStyleSheet("""
             QPushButton {
-                background: white;
-                border: 1px solid #E5E5EA;
+                background: #F3F4F6;
+                border: 1px solid #E5E7EB;
                 border-radius: 8px;
             }
             QPushButton:hover {
-                background: #F5F5F7;
-                border-color: #007AFF;
+                background: #E5E7EB;
+                border-color: #9CA3AF;
             }
         """)
         self.drag_btn.setMouseTracking(True)
@@ -1869,18 +2070,22 @@ class DraggableFieldRow(QWidget):
         else:
             value_input.setPlaceholderText(ph)
             
-        value_input.setMinimumHeight(38)
+        value_input.setMinimumHeight(40)
         value_input.setStyleSheet("""
             QLineEdit {
-                padding: 8px 12px;
-                border: 1px solid #E5E5EA;
+                padding: 0 12px;
+                border: 1px solid #E5E7EB;
                 border-radius: 8px;
-                font-size: 13px;
+                font-size: 14px;
                 background: #F9FAFB;
+                color: #111827;
             }
             QLineEdit:focus {
-                border: 1px solid #007AFF;
-                background: white;
+                border: 1px solid #3B82F6;
+                background: #FFFFFF;
+            }
+            QLineEdit:hover {
+                background: #F3F4F6;
             }
         """)
         return value_input
@@ -1903,12 +2108,15 @@ class DraggableFieldRow(QWidget):
                     self.raise_()  # 提到最上层
                     self.setStyleSheet("""
                         DraggableFieldRow {
-                            background: #E3F2FD;
-                            border: 2px solid #007AFF;
-                            border-radius: 10px;
-                            padding: 6px;
+                            background: #F0F9FF;
+                            border: 2px solid #3B82F6;
+                            border-radius: 16px;
                         }
                     """)
+                    # 拖拽时加深阴影
+                    self.graphicsEffect().setBlurRadius(25)
+                    self.graphicsEffect().setColor(QColor(59, 130, 246, 60))
+                    
                     return True
             
             elif event.type() == QEvent.Type.MouseMove:
@@ -1927,11 +2135,15 @@ class DraggableFieldRow(QWidget):
                     self.dragging = False
                     self.setStyleSheet("""
                         DraggableFieldRow {
-                            background: #FAFAFA;
-                            border-radius: 10px;
-                            padding: 6px;
+                            background: #FFFFFF;
+                            border: 1px solid #E5E7EB;
+                            border-radius: 16px;
                         }
                     """)
+                    # 恢复阴影
+                    self.graphicsEffect().setBlurRadius(15)
+                    self.graphicsEffect().setColor(QColor(0, 0, 0, 8))
+                    
                     # 归位
                     if self.parent_dialog:
                         self.parent_dialog._update_field_positions(animate=True)
@@ -2391,7 +2603,7 @@ class DraggableCardGrid(QWidget):
 
 
 class CardItemWidget(QWidget):
-    """名片项组件 - 横条样式，支持拖拽"""
+    """名片项组件 - 横条样式，支持拖拽，编辑按钮在边框外"""
     
     edit_clicked = pyqtSignal(object)
     selection_changed = pyqtSignal(object, bool)
@@ -2412,10 +2624,19 @@ class CardItemWidget(QWidget):
         self.setFixedHeight(36)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         
+        # 外层布局（透明，无边框）
         layout = QHBoxLayout()
-        layout.setContentsMargins(10, 4, 6, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         self.setLayout(layout)
+        
+        # 名片标签容器（有边框）
+        self.card_container = QWidget()
+        self.card_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        container_layout = QHBoxLayout()
+        container_layout.setContentsMargins(10, 4, 10, 4)
+        container_layout.setSpacing(0)
+        self.card_container.setLayout(container_layout)
         
         # 名片名称 - 支持省略
         self.name_label = QLabel(self.card.name)
@@ -2423,33 +2644,33 @@ class CardItemWidget(QWidget):
             font-size: 12px;
             font-weight: 500;
             color: #1D1D1F;
+            background: transparent;
+            border: none;
         """)
         # 设置文本省略模式
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(self.name_label, 1)  # stretch=1 让名称占据剩余空间
+        container_layout.addWidget(self.name_label)
         
-        # 操作按钮
-        def create_action_btn(icon, tooltip, cb):
-            btn = QPushButton()
-            btn.setFixedSize(20, 20)
-            btn.setIcon(icon)
-            btn.setIconSize(QSize(12, 12))
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip(tooltip)
-            btn.setStyleSheet("""
-                QPushButton { 
-                    border: none; 
-                    background: transparent; 
-                    border-radius: 3px;
-                } 
-                QPushButton:hover { 
-                    background: #E5E5EA; 
-                }
-            """)
-            btn.clicked.connect(cb)
-            return btn
-
-        edit_btn = create_action_btn(Icons.edit('#8E8E93'), "编辑", lambda: self.edit_clicked.emit(self.card))
+        layout.addWidget(self.card_container, 1)  # stretch=1 让名称容器占据剩余空间
+        
+        # 编辑按钮（在边框外）
+        edit_btn = QPushButton()
+        edit_btn.setFixedSize(20, 20)
+        edit_btn.setIcon(Icons.edit('#8E8E93'))
+        edit_btn.setIconSize(QSize(12, 12))
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_btn.setToolTip("编辑")
+        edit_btn.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background: transparent; 
+                border-radius: 3px;
+            } 
+            QPushButton:hover { 
+                background: #E5E5EA; 
+            }
+        """)
+        edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.card))
         
         layout.addWidget(edit_btn)
         
@@ -2462,9 +2683,9 @@ class CardItemWidget(QWidget):
     
     def _update_elided_text(self):
         """更新省略文本"""
-        if hasattr(self, 'name_label'):
-            # 计算可用宽度（减去按钮和边距，现在只有一个编辑按钮）
-            available_width = self.width() - 10 - 6 - 20 - 4 - 10  # 边距和按钮
+        if hasattr(self, 'name_label') and hasattr(self, 'card_container'):
+            # 计算可用宽度（减去编辑按钮和边距）
+            available_width = self.card_container.width() - 20  # 容器内边距
             if available_width > 20:
                 font_metrics = self.name_label.fontMetrics()
                 elided_text = font_metrics.elidedText(self.card.name, Qt.TextElideMode.ElideRight, available_width)
@@ -2481,22 +2702,31 @@ class CardItemWidget(QWidget):
         self.update_style()
         
     def update_style(self):
+        # 外层组件样式（透明）
+        self.setStyleSheet("""
+            CardItemWidget {
+                background: transparent;
+                border: none;
+            }
+        """)
+        
+        # 内层名片容器样式（有边框）
         if self.is_selected:
-            self.setStyleSheet("""
-                CardItemWidget {
+            self.card_container.setStyleSheet("""
+                QWidget {
                     background: #F2F8FD;
                     border: 2px solid #007AFF;
                     border-radius: 8px;
                 }
             """)
         else:
-            self.setStyleSheet("""
-                CardItemWidget {
+            self.card_container.setStyleSheet("""
+                QWidget {
                     background: white;
                     border: 1px solid #D1D1D6;
                     border-radius: 8px;
                 }
-                CardItemWidget:hover {
+                QWidget:hover {
                     border-color: #007AFF;
                     background: #FAFAFA;
                 }
@@ -3274,6 +3504,56 @@ class FieldLibraryImportDialog(QDialog):
         return self.selected_fields
 
 
+class RecordsLoaderWorker(QObject):
+    """后台加载填写记录的工作线程"""
+    finished = pyqtSignal(object)  # 返回记录列表（使用 object 类型以支持跨线程传递）
+    error = pyqtSignal(str)
+    
+    def __init__(self, db_manager, page_size, page, user):
+        super().__init__()
+        self.db_manager = db_manager
+        self.page_size = page_size
+        self.page = page
+        self.user = user
+        
+    def run(self):
+        """执行加载"""
+        try:
+            offset = (self.page - 1) * self.page_size
+            records = self.db_manager.get_fill_records(
+                limit=self.page_size, 
+                offset=offset, 
+                user=self.user
+            )
+            # 预先获取所有需要的数据，避免在主线程中触发数据库查询
+            # 使用列表存储序列化后的数据
+            records_data = []
+            for record in records:
+                try:
+                    card_name = record.card.name if record.card else "未知名片"
+                except:
+                    card_name = "名片已删除"
+                try:
+                    link_name = record.link.name if record.link else "未知链接"
+                    link_url = record.link.url if record.link else ""
+                except:
+                    link_name = "链接已删除"
+                    link_url = ""
+                    
+                records_data.append({
+                    'time': record.created_at.strftime("%Y-%m-%d %H:%M"),
+                    'card_name': card_name,
+                    'link_name': link_name,
+                    'link_url': link_url,
+                    'total_count': record.total_count,
+                    'fill_count': record.fill_count,
+                    'success': record.success
+                })
+            self.finished.emit(records_data)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class AllRecordsDialog(QDialog):
     """所有填写记录对话框"""
     
@@ -3457,56 +3737,69 @@ class AllRecordsDialog(QDialog):
         layout.addLayout(btn_layout)
     
     def load_records(self):
-        """加载记录"""
-        offset = (self.current_page - 1) * self.page_size
-        records = self.db_manager.get_fill_records(limit=self.page_size, offset=offset, user=self.current_user)
+        """加载记录（同步方式，数据库查询已通过 select_related 优化）"""
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("加载中...")
         
-        self.table.setRowCount(len(records))
-        
-        for i, record in enumerate(records):
-            # 时间
-            item_time = QTableWidgetItem(record.created_at.strftime("%Y-%m-%d %H:%M:%S"))
-            item_time.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 0, item_time)
+        try:
+            offset = (self.current_page - 1) * self.page_size
+            records = self.db_manager.get_fill_records(
+                limit=self.page_size, 
+                offset=offset, 
+                user=self.current_user
+            )
             
-            # 名片
-            card_name = "未知名片"
-            try:
-                if record.card:
-                    card_name = record.card.name
-            except:
-                card_name = "名片已删除"
-            item_card = QTableWidgetItem(card_name)
-            item_card.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 1, item_card)
+            self.table.setRowCount(len(records))
             
-            # 链接
-            link_name = "未知链接"
-            try:
-                if record.link:
-                    link_name = record.link.name
-            except:
-                link_name = "链接已删除"
-            item_link = QTableWidgetItem(link_name)
-            self.table.setItem(i, 2, item_link)
+            for i, record in enumerate(records):
+                # 时间
+                item_time = QTableWidgetItem(record.created_at.strftime("%Y-%m-%d %H:%M:%S"))
+                item_time.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(i, 0, item_time)
+                
+                # 名片
+                card_name = "未知名片"
+                try:
+                    if record.card:
+                        card_name = record.card.name
+                except:
+                    card_name = "名片已删除"
+                item_card = QTableWidgetItem(card_name)
+                item_card.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(i, 1, item_card)
+                
+                # 链接
+                link_name = "未知链接"
+                try:
+                    if record.link:
+                        link_name = record.link.name
+                except:
+                    link_name = "链接已删除"
+                item_link = QTableWidgetItem(link_name)
+                self.table.setItem(i, 2, item_link)
+                
+                # 填写字段
+                item_total = QTableWidgetItem(str(record.total_count))
+                item_total.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(i, 3, item_total)
+                
+                # 成功数
+                item_fill = QTableWidgetItem(str(record.fill_count))
+                item_fill.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(i, 4, item_fill)
+                
+                # 状态 - 固定显示成功
+                status_item = QTableWidgetItem("✅ 成功")
+                status_item.setForeground(Qt.GlobalColor.green)
+                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(i, 5, status_item)
             
-            # 填写字段
-            item_total = QTableWidgetItem(str(record.total_count))
-            item_total.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 3, item_total)
-            
-            # 成功数
-            item_fill = QTableWidgetItem(str(record.fill_count))
-            item_fill.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 4, item_fill)
-            
-            # 状态 - 固定显示成功
-            status_item = QTableWidgetItem("✅ 成功")
-            status_item.setForeground(Qt.GlobalColor.green)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 5, status_item)
-        
-        self.page_label.setText(f"第 {self.current_page} 页 · 共 {len(records)} 条")
+            self.page_label.setText(f"第 {self.current_page} 页 · 共 {len(records)} 条")
+        except Exception as e:
+            self.page_label.setText(f"加载失败: {str(e)}")
+        finally:
+            self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setText("刷新")
     
     def prev_page(self):
         """上一页"""
@@ -4528,21 +4821,7 @@ class MainWindow(QMainWindow):
         # 弹性空间，将后面的按钮推到右侧
         top_btns_layout.addStretch()
         
-        # 通告广场 + 开始填充 组合控件 - 精美胶囊设计
-        action_container = QWidget()
-        action_container.setStyleSheet("""
-            QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #FFFFFF, stop:1 #F8F9FA);
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-            }
-        """)
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(2, 2, 2, 2)
-        action_layout.setSpacing(0)
-        
-        # 通告广场按钮 - 橙色主题（默认选中样式）
+        # 通告广场按钮 - 橙色主题
         plaza_btn = QPushButton("通告广场")
         plaza_btn.setFixedHeight(30)
         plaza_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4566,15 +4845,9 @@ class MainWindow(QMainWindow):
             }
         """)
         plaza_btn.clicked.connect(self.open_notice_plaza)
-        action_layout.addWidget(plaza_btn)
+        top_btns_layout.addWidget(plaza_btn)
         
-        # 分隔线
-        action_sep = QFrame()
-        action_sep.setFixedSize(1, 20)
-        action_sep.setStyleSheet("background: #E0E0E0;")
-        action_layout.addWidget(action_sep)
-        
-        # 开始填充按钮 - 绿色主题（默认选中样式）
+        # 开始填充按钮 - 绿色主题
         start_fill_btn = QPushButton("开始填充")
         start_fill_btn.setFixedHeight(30)
         start_fill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4598,9 +4871,7 @@ class MainWindow(QMainWindow):
             }
         """)
         start_fill_btn.clicked.connect(self.start_auto_fill)
-        action_layout.addWidget(start_fill_btn)
-        
-        top_btns_layout.addWidget(action_container)
+        top_btns_layout.addWidget(start_fill_btn)
         
         layout.addLayout(top_btns_layout)
         
@@ -4638,20 +4909,7 @@ class MainWindow(QMainWindow):
         # 复制
         btn_copy = create_tool_btn(Icons.copy('#007AFF'), '#007AFF', "复制选中链接", self.copy_selected_links)
         
-        # 新增链接按钮 (右侧) - 精美胶囊设计
-        add_link_container = QWidget()
-        add_link_container.setStyleSheet("""
-            QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #FFFFFF, stop:1 #F8F9FA);
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-            }
-        """)
-        add_link_layout = QHBoxLayout(add_link_container)
-        add_link_layout.setContentsMargins(2, 2, 2, 2)
-        add_link_layout.setSpacing(0)
-        
+        # 新增链接按钮 (右侧)
         btn_add_link = QPushButton("新增链接")
         btn_add_link.setFixedHeight(30)
         btn_add_link.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4675,13 +4933,12 @@ class MainWindow(QMainWindow):
             }
         """)
         btn_add_link.clicked.connect(self.open_link_manager)
-        add_link_layout.addWidget(btn_add_link)
         
         action_bar.addWidget(btn_select)
         action_bar.addWidget(btn_delete)
         action_bar.addWidget(btn_copy)
         action_bar.addStretch()
-        action_bar.addWidget(add_link_container)
+        action_bar.addWidget(btn_add_link)
         
         layout.addLayout(action_bar)
         
@@ -5354,7 +5611,7 @@ class MainWindow(QMainWindow):
         # 刷新链接列表
         self.refresh_links_list()
         
-        # 刷新记录列表（使用自定义组件）
+        # 刷新记录列表（同步加载，数据库查询已通过 select_related 优化）
         records = self.db_manager.get_fill_records(limit=20, user=self.current_user)
         self.records_list.set_records(records)
     
@@ -6280,7 +6537,7 @@ class MainWindow(QMainWindow):
         return selected_links
     
     def delete_selected_links(self):
-        """删除选中的链接"""
+        """删除选中的链接（批量优化版）"""
         selected_links = self.get_selected_links()
         
         if not selected_links:
@@ -6298,16 +6555,12 @@ class MainWindow(QMainWindow):
         msg.exec()
         
         if msg.clickedButton() == yes_btn:
-            success_count = 0
-            fail_count = 0
+            # 收集所有链接ID，使用批量删除
+            link_ids = [str(link.id) for link in selected_links]
+            result = self.db_manager.batch_delete_links(link_ids)
             
-            for link in selected_links:
-                try:
-                    self.db_manager.delete_link(str(link.id))
-                    success_count += 1
-                except Exception as e:
-                    print(f"删除链接失败: {e}")
-                    fail_count += 1
+            success_count = result['success_count']
+            fail_count = result['error_count']
             
             # 刷新列表
             self.refresh_links_list()

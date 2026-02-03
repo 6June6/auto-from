@@ -179,12 +179,13 @@ class DatabaseManager:
     @staticmethod
     def _sync_fixed_template_fields(user, exclude_card_id: str, updates: Dict[str, Dict[str, str]]) -> int:
         """
-        同步固定模板字段到用户的其他名片
+        同步固定模板字段名到用户的其他名片（只同步字段名，不同步字段值）
         
         Args:
             user: 用户对象
             exclude_card_id: 排除的名片ID（当前正在编辑的名片）
             updates: 需要同步的更新 {fixed_template_id: {'key': key, 'value': value}}
+                     注意：value 仅用于记录，实际同步时只更新 key
         
         Returns:
             更新的名片数量
@@ -223,11 +224,10 @@ class DatabaseManager:
                     # 检查是否需要同步
                     if config.fixed_template_id and config.fixed_template_id in updates:
                         update_data = updates[config.fixed_template_id]
-                        # 更新字段名和值
-                        if config_dict['key'] != update_data['key'] or config_dict['value'] != update_data['value']:
-                            print(f"  📝 发现需要同步的字段: 名片「{other_card.name}」的 {config_dict['key']}={config_dict['value']} -> {update_data['key']}={update_data['value']}")
+                        # 只同步字段名，不同步字段值（保留每张名片原有的值）
+                        if config_dict['key'] != update_data['key']:
+                            print(f"  📝 发现需要同步的字段名: 名片「{other_card.name}」的 {config_dict['key']} -> {update_data['key']}（值保持不变）")
                             config_dict['key'] = update_data['key']
-                            config_dict['value'] = update_data['value']
                             card_updated = True
                     
                     new_configs.append(config_dict)
@@ -564,6 +564,99 @@ class DatabaseManager:
         except Exception as e:
             print(f"❌ 删除链接失败: {e}")
             return False
+    
+    @staticmethod
+    def batch_create_links(links_data: list, user) -> dict:
+        """
+        批量创建链接（性能优化版）
+        
+        Args:
+            links_data: 链接数据列表，每个元素是 dict: {name, url, category, description}
+            user: 所属用户
+        
+        Returns:
+            {success_count, error_count, errors}
+        """
+        result = {'success_count': 0, 'error_count': 0, 'errors': []}
+        
+        if not links_data:
+            return result
+        
+        try:
+            # 如果传入的是用户ID字符串，转换为User对象
+            if isinstance(user, str):
+                user = User.objects.get(id=user)
+            
+            # 批量创建链接对象
+            links_to_insert = []
+            for data in links_data:
+                try:
+                    link = Link(
+                        user=user,
+                        name=data.get('name', '未命名链接'),
+                        url=data['url'],
+                        status=data.get('status', 'active'),
+                        category=data.get('category'),
+                        description=data.get('description')
+                    )
+                    links_to_insert.append(link)
+                except Exception as e:
+                    result['error_count'] += 1
+                    result['errors'].append(f"{data.get('url', '未知')}: {str(e)}")
+            
+            # 批量插入（MongoEngine 的 insert 方法）
+            if links_to_insert:
+                Link.objects.insert(links_to_insert, load_bulk=False)
+                result['success_count'] = len(links_to_insert)
+                
+        except Exception as e:
+            print(f"❌ 批量创建链接失败: {e}")
+            result['error_count'] = len(links_data)
+            result['errors'].append(str(e))
+        
+        return result
+    
+    @staticmethod
+    def batch_delete_links(link_ids: list) -> dict:
+        """
+        批量删除链接（性能优化版）
+        
+        Args:
+            link_ids: 链接ID列表
+        
+        Returns:
+            {success_count, error_count}
+        """
+        result = {'success_count': 0, 'error_count': 0}
+        
+        if not link_ids:
+            return result
+        
+        try:
+            from bson import ObjectId
+            
+            # 将字符串ID转换为ObjectId
+            object_ids = []
+            for lid in link_ids:
+                try:
+                    object_ids.append(ObjectId(str(lid)))
+                except Exception:
+                    result['error_count'] += 1
+            
+            if object_ids:
+                # 先批量删除关联的填写记录
+                links = Link.objects(id__in=object_ids)
+                FillRecord.objects(link__in=links).delete()
+                
+                # 批量删除链接
+                deleted_count = Link.objects(id__in=object_ids).delete()
+                result['success_count'] = deleted_count
+                
+        except Exception as e:
+            print(f"❌ 批量删除链接失败: {e}")
+            result['error_count'] = len(link_ids)
+        
+        return result
     
     # ==================== 用户管理相关 ====================
     
@@ -1370,8 +1463,9 @@ class DatabaseManager:
                 if link:
                     query = query.filter(link=link)
             
-            # 排序、偏移和限制
-            return list(query.order_by('-created_at').skip(offset).limit(limit))
+            # 排序、偏移和限制，使用 select_related 预加载关联对象避免 N+1 查询
+            # 注意：select_related() 必须放在最后，因为它会立即执行查询
+            return list(query.order_by('-created_at').skip(offset).limit(limit).select_related())
             
         except Exception as e:
             print(f"❌ 获取填写记录失败: {e}")
