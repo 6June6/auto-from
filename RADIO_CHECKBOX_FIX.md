@@ -4,14 +4,14 @@
 
 在 WPS 表单填充时，单选按钮组（radio buttons）和复选框组（checkboxes）被错误地识别为**多个独立字段**，导致：
 
-### 问题1：字段重复识别 ❌
+### 问题 1：字段重复识别 ❌
 
 ```
 表单#7: "合作形式" [图文]  ← radio 选项1
 表单#8: "合作形式" [视频]  ← radio 选项2（重复！）
 ```
 
-### 问题2：选项文本干扰匹配 ❌
+### 问题 2：选项文本干扰匹配 ❌
 
 ```
 输入框#7 标识符: [合作形式 | 图文]   ← "图文"是选项，不是字段名
@@ -24,7 +24,7 @@
 
 ## 🔧 解决方案
 
-### 修改1：`getAllInputs()` - Radio/Checkbox 组去重
+### 修改 1：`getAllInputs()` - Radio/Checkbox 组去重
 
 ```javascript
 function getAllInputs() {
@@ -64,7 +64,7 @@ function getAllInputs() {
 
 ---
 
-### 修改2：`getInputIdentifiers()` - 过滤选项文本
+### 修改 2：`getInputIdentifiers()` - 过滤选项文本
 
 ```javascript
 function getInputIdentifiers(input, inputIndex) {
@@ -96,7 +96,7 @@ function getInputIdentifiers(input, inputIndex) {
 
 ---
 
-### 修改3：过滤通用 Placeholder
+### 修改 3：过滤通用 Placeholder
 
 ```javascript
 // 过滤通用的 placeholder
@@ -116,7 +116,7 @@ const genericPlaceholders = [
 ];
 
 const isGeneric = genericPlaceholders.some(
-  (g) => ph === g || (ph.includes("请") && ph.length <= 4),
+  (g) => ph === g || (ph.includes("请") && ph.length <= 4)
 );
 
 if (!isGeneric && ph.length > 2) {

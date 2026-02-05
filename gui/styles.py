@@ -283,6 +283,16 @@ QMessageBox {{
 QMessageBox QPushButton {{
     min-width: 80px;
 }}
+
+/* ToolTip 样式 */
+QToolTip {{
+    color: #FFFFFF;
+    background-color: #333333;
+    border: 1px solid {COLORS['border']};
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}}
 """
 
 # 特殊按钮样式

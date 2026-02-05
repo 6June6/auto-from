@@ -194,6 +194,21 @@ class CardManagerDialog(QDialog):
         # 加载数据
         self.load_data()
     
+    def showEvent(self, event):
+        super().showEvent(event)
+        
+        # 强制设置全局 ToolTip 样式（防止被覆盖）
+        self.setStyleSheet(self.styleSheet() + """
+            QToolTip {
+                color: #1D1D1F;
+                background-color: #FFFFFF;
+                border: 1px solid #E5E5EA;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+        """)
+
     def load_data(self):
         """加载数据 - 按分类分组显示"""
         # 清空现有内容

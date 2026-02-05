@@ -1120,6 +1120,18 @@ class AddCardDialog(QDialog):
     
     def showEvent(self, event):
         super().showEvent(event)
+        
+        # 强制设置全局 ToolTip 样式（防止被覆盖）
+        self.setStyleSheet(self.styleSheet() + """
+            QToolTip {
+                color: #1D1D1F;
+                background-color: #FFFFFF;
+                border: 1px solid #E5E5EA;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+        """)
         # 窗口显示时，强制延迟更新一次字段位置，确保宽度正确占满一行
         QTimer.singleShot(10, lambda: self._update_field_positions(animate=False))
 
@@ -2211,16 +2223,17 @@ class CollapsibleCategoryWidget(QWidget):
         
         # 分类标题栏 - 使用 QWidget 而不是 QPushButton
         header = QWidget()
+        header.setObjectName("categoryHeader")
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(8, 8, 8, 8)
         header_layout.setSpacing(8)
         header.setLayout(header_layout)
         header.setStyleSheet("""
-            QWidget {
+            #categoryHeader {
                 background: transparent;
                 border-radius: 6px;
             }
-            QWidget:hover {
+            #categoryHeader:hover {
                 background: #F2F2F7;
             }
         """)
@@ -2632,6 +2645,7 @@ class CardItemWidget(QWidget):
         
         # 名片标签容器（有边框）
         self.card_container = QWidget()
+        self.card_container.setObjectName("cardContainer")
         self.card_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         container_layout = QHBoxLayout()
         container_layout.setContentsMargins(10, 4, 10, 4)
@@ -2713,7 +2727,7 @@ class CardItemWidget(QWidget):
         # 内层名片容器样式（有边框）
         if self.is_selected:
             self.card_container.setStyleSheet("""
-                QWidget {
+                #cardContainer {
                     background: #F2F8FD;
                     border: 2px solid #007AFF;
                     border-radius: 8px;
@@ -2721,12 +2735,12 @@ class CardItemWidget(QWidget):
             """)
         else:
             self.card_container.setStyleSheet("""
-                QWidget {
+                #cardContainer {
                     background: white;
                     border: 1px solid #D1D1D6;
                     border-radius: 8px;
                 }
-                QWidget:hover {
+                #cardContainer:hover {
                     border-color: #007AFF;
                     background: #FAFAFA;
                 }
@@ -4440,6 +4454,14 @@ class MainWindow(QMainWindow):
         
         # 应用全局样式
         self.setStyleSheet(GLOBAL_STYLE + """
+            QToolTip {
+                background-color: #FFFFFF;
+                color: #333333;
+                border: 1px solid #E5E5EA;
+                border-radius: 4px;
+                padding: 4px;
+                font-size: 12px;
+            }
             QCheckBox {
                 spacing: 8px;
                 font-size: 13px;
@@ -4695,8 +4717,9 @@ class MainWindow(QMainWindow):
         
         # 单开/多开模式组合控件（含窗口设置下拉）- 精美设计
         mode_container = QWidget()
+        mode_container.setObjectName("modeContainer")
         mode_container.setStyleSheet("""
-            QWidget {
+            #modeContainer {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #FFFFFF, stop:1 #F8F9FA);
                 border: 1px solid #E0E0E0;

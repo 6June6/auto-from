@@ -1791,59 +1791,6 @@ class NewFillWindow(QDialog):
         
         return section
 
-    def show_card_info(self, card):
-        """显示名片信息"""
-        self.current_card = card
-        
-        # 更新标题
-        self.card_info_title.setText(card.name)
-        
-        print(f"\n🔍 显示名片信息: {card.name}")
-        
-        # 清空字段列表
-        while self.card_fields_layout.count():
-            child = self.card_fields_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-        
-        # 显示字段
-        if hasattr(card, 'configs') and card.configs:
-            field_count = 0
-            for config in card.configs:
-                key = ""
-                value = ""
-                
-                # 兼容字典和对象两种格式
-                if isinstance(config, dict):
-                    key = config.get('key', '')
-                    value = config.get('value', '')
-                elif hasattr(config, 'key'): # 对象格式
-                    key = config.key
-                    value = getattr(config, 'value', '')
-                
-                if key:
-                    field_widget = self.create_field_item(key, str(value) if value is not None else "")
-                    self.card_fields_layout.addWidget(field_widget)
-                    field_count += 1
-            
-            print(f"  - 总共添加了 {field_count} 个字段")
-            
-            if field_count == 0:
-                self.show_empty_hint("该名片暂无字段信息")
-        else:
-            print(f"  - ⚠️ 名片没有configs或configs为空")
-            self.show_empty_hint("该名片暂无配置数据")
-            
-    def show_empty_hint(self, text):
-        """显示空状态提示"""
-        hint_label = QLabel(text)
-        hint_label.setStyleSheet(f"""
-            font-size: 13px;
-            color: {COLORS['text_secondary']};
-            padding: 20px;
-        """)
-        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.card_fields_layout.addWidget(hint_label)
     
     def load_categories(self):
         """加载分类列表（仅包含已选名片的分类）"""
@@ -2109,11 +2056,22 @@ class NewFillWindow(QDialog):
         # 更新标题为名片名称
         self.card_info_title.setText(card.name)
         
-        # 重置批量选择下拉框
+        # ⚡️ 修复：保留用户之前选择的格式，不重置为数字形式
+        # 只在用户第一次查看该名片时才设置为默认值（数字形式）
         if hasattr(self, 'batch_index_combo'):
+            card_id = str(card.id)
+            # 检查是否有保存的格式选择（使用实例属性存储每个名片的格式选择）
+            if not hasattr(self, '_card_format_selections'):
+                self._card_format_selections = {}  # {card_id: format_index}
+            
+            # 如果该名片有保存的格式选择，恢复它；否则使用默认值（数字形式）
+            saved_format_index = self._card_format_selections.get(card_id, 0)
+            
             self.batch_index_combo.blockSignals(True)
-            self.batch_index_combo.setCurrentIndex(0)
+            self.batch_index_combo.setCurrentIndex(saved_format_index)
             self.batch_index_combo.blockSignals(False)
+            
+            print(f"  📋 恢复名片 '{card.name}' 的格式选择: {['数字形式', 'w形式', 'w为单位'][saved_format_index]}")
         
         # 清空字段列表
         while self.card_fields_layout.count():
@@ -2361,7 +2319,7 @@ class NewFillWindow(QDialog):
         clipboard.setText(text)
         # 可以添加一个简单的提示
         print(f"已复制: {text}")
-    
+
     def batch_select_by_index(self, combo_index: int):
         """批量选择格式 - 对所有名片生效
         
@@ -2378,8 +2336,14 @@ class NewFillWindow(QDialog):
         
         import json
         
+        # ⚡️ 修复：保存格式选择到实例变量
+        if not hasattr(self, '_card_format_selections'):
+            self._card_format_selections = {}
+        
         # 遍历所有选中的名片
         for card in self.selected_cards:
+            # 保存格式选择
+            self._card_format_selections[str(card.id)] = target_index
             card_id = str(card.id)
             
             # 确保该名片在 selected_values 中有记录
@@ -2585,6 +2549,11 @@ class NewFillWindow(QDialog):
         
     def save_card_edit(self):
         """保存编辑"""
+        # 1. 记录当前的格式选择（如：数字形式/w形式），避免保存后重置为默认
+        current_batch_index = 0
+        if hasattr(self, 'batch_index_combo'):
+            current_batch_index = self.batch_index_combo.currentIndex()
+
         name = self.edit_name_input.text().strip()
         if not name:
             QMessageBox.warning(self, "提示", "请输入名片名称")
@@ -2640,9 +2609,15 @@ class NewFillWindow(QDialog):
             finally:
                 self.category_combo.blockSignals(False)
                 
-            # 手动加载列表并选中当前名片
+            # 手动加载列表并选中当前名片（注意：这会触发 show_card_info，从而将格式重置为0）
             self.load_cards_list(target_card_id=self.current_card.id)
-            # self.show_card_info(self.current_card) # load_cards_list 会自动处理选中和显示
+            
+            # 2. 恢复之前的格式选择
+            if current_batch_index > 0 and hasattr(self, 'batch_index_combo'):
+                print(f"🔄 保存后恢复格式选择: Index {current_batch_index}")
+                self.batch_index_combo.setCurrentIndex(current_batch_index)
+                # 强制应用一次格式，确保数据根据新保存的配置进行更新
+                self.batch_select_by_index(current_batch_index)
             
             # 切回详情页
             self.right_panel_stack.setCurrentIndex(0)
@@ -3547,6 +3522,32 @@ class NewFillWindow(QDialog):
             web_view.show()
             # web_view.update()
     
+    def _safe_set_property(self, obj, prop_name, value):
+        """安全地设置属性，防止对象已删除导致的crash"""
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        try:
+            if not sip.isdeleted(obj):
+                obj.setProperty(prop_name, value)
+        except:
+            pass
+
+    def _safe_execute_auto_fill(self, web_view, card_data):
+        """安全地执行自动填充"""
+        try:
+            from PyQt6 import sip
+        except ImportError:
+            import sip
+        
+        try:
+            if not sip.isdeleted(web_view):
+                self.execute_auto_fill_for_webview(web_view, card_data)
+        except:
+            pass
+
     def on_batch_webview_loaded(self, web_view: QWebEngineView, success: bool):
         """批量加载时的回调"""
         # ⚡️ 安全检查：窗口或 WebView 是否已销毁
@@ -3599,7 +3600,7 @@ class NewFillWindow(QDialog):
         # 这样下次如果页面发生跳转（如登录后），就能自动填充了
         if web_view.property("is_auto_fill_active") is False:
             print(f"⚡️ 检测到自动填充被临时禁用，将在2秒后恢复能力（但不执行填充）")
-            QTimer.singleShot(2000, lambda: web_view.setProperty("is_auto_fill_active", True))
+            QTimer.singleShot(2000, lambda: self._safe_set_property(web_view, "is_auto_fill_active", True))
 
         # ⚡️ 智能重填逻辑：如果之前已经填充过（is_auto_fill_active=True），
         # 且页面重新加载了（可能是登录后跳转回来），则自动再次填充
@@ -3612,7 +3613,7 @@ class NewFillWindow(QDialog):
             
             print(f"⚡️ 检测到页面刷新且填充模式已激活，准备自动重填: {card_data.name}")
             # 延迟2秒执行，给予页面充分的初始化时间（特别是登录后的重定向）
-            QTimer.singleShot(2000, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
+            QTimer.singleShot(2000, lambda: self._safe_execute_auto_fill(web_view, card_data))
             return  # 不再继续执行后续的首次加载逻辑
         
         # ⚡️ 模式切换后自动填充：检查 info 中的 auto_fill_after_switch 标记
@@ -3622,7 +3623,7 @@ class NewFillWindow(QDialog):
             # 设置 is_auto_fill_active，这样后续刷新也能自动填充
             web_view.setProperty("is_auto_fill_active", True)
             # 延迟执行填充，确保页面完全就绪
-            QTimer.singleShot(1500, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
+            QTimer.singleShot(1500, lambda: self._safe_execute_auto_fill(web_view, card_data))
             # 注意：不 return，继续执行后续逻辑以便处理批次加载
         
         # 获取当前WebView所属的链接
@@ -3710,7 +3711,7 @@ class NewFillWindow(QDialog):
         # 这样下次如果页面发生跳转（如登录后），就能自动填充了
         if web_view.property("is_auto_fill_active") is False:
             print(f"⚡️ 检测到自动填充被临时禁用，将在2秒后恢复能力（但不执行填充）")
-            QTimer.singleShot(2000, lambda: web_view.setProperty("is_auto_fill_active", True))
+            QTimer.singleShot(2000, lambda: self._safe_set_property(web_view, "is_auto_fill_active", True))
 
         # ⚡️ 智能重填逻辑：如果之前点击了"填充"，且页面重新加载了（可能是登录跳转回来），则自动再次填充
         if web_view.property("is_auto_fill_active"):
@@ -3722,21 +3723,21 @@ class NewFillWindow(QDialog):
             
             print(f"⚡️ 检测到页面刷新且填充模式已激活，准备自动重填: {card_data.name}")
             # 延迟2秒执行，给予页面充分的初始化时间（特别是登录后的重定向）
-            QTimer.singleShot(2000, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
+            QTimer.singleShot(2000, lambda: self._safe_execute_auto_fill(web_view, card_data))
         
         # 检查是否是切换名片后的重新加载
         if web_view.property("auto_fill_on_switch"):
              print(f"⚡️ 切换名片后加载完成，准备自动填充: {card_data.name}")
              web_view.setProperty("auto_fill_on_switch", False) # 清除标记
              # 延迟执行填充，确保页面完全就绪
-             QTimer.singleShot(1000, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
+             QTimer.singleShot(1000, lambda: self._safe_execute_auto_fill(web_view, card_data))
         
         # 检查是否有自动填充标记（重新导入时使用）
         if web_view.property("auto_fill_after_load"):
             print(f"⚡️ 页面刷新完成，正在重新导入数据: {card_data.name}")
             web_view.setProperty("auto_fill_after_load", False)
             # 延迟执行填充，确保页面完全就绪
-            QTimer.singleShot(1500, lambda: self.execute_auto_fill_for_webview(web_view, card_data))
+            QTimer.singleShot(1500, lambda: self._safe_execute_auto_fill(web_view, card_data))
         
         # 检查当前标签页的所有WebView是否都加载完成
         current_index = self.tab_widget.currentIndex()
@@ -4803,9 +4804,13 @@ class NewFillWindow(QDialog):
         # 自动匹配填充
         filled_data = filler.match_and_fill(card_config)
         
-        # ⚡️ 合并字段类型信息（用于渲染不同组件）
+        # ⚡️ 合并字段类型信息（已在 filler.match_and_fill 中处理，此处仅作为检查）
         form_fields = filler.form_fields
-        print(f"  🔍 [调试] 合并字段类型信息：filled_data={len(filled_data)}个, form_fields={len(form_fields)}个")
+        print(f"  🔍 [调试] 字段数据检查：filled_data={len(filled_data)}个, form_fields={len(form_fields)}个")
+        
+        # ⚡️ 优化：直接使用 filled_data 中的 metadata，不再重新匹配（防止 duplicate key 导致匹配错误）
+        # 之前的逻辑存在风险：如果 field_key 为空或重复，会导致错误的字段类型覆盖
+        '''
         for item in filled_data:
             field_key = item.get('field_key')
             field_name = item.get('field_name', '')
@@ -4823,6 +4828,7 @@ class NewFillWindow(QDialog):
                     break
             if not matched:
                 print(f"     ⚠️ 字段 \"{field_name}\" (key={field_key}) 未找到匹配的类型定义")
+        '''
         
         # 生成表单HTML
         # ⚡️ 传递表单简要信息
@@ -4973,7 +4979,7 @@ class NewFillWindow(QDialog):
                     checked_attr = 'checked' if is_checked else ''
                     checkbox_html += f'''
                         <label class="checkbox-item">
-                            <input type="checkbox" name="field_{i}" value="{opt_key}" {checked_attr}>
+                            <input type="checkbox" name="field_{i}" value="{opt_key}" data-text="{opt_value}" {checked_attr}>
                             <span class="checkbox-label">{opt_value}</span>
                         </label>
                     '''
@@ -4998,7 +5004,7 @@ class NewFillWindow(QDialog):
                     checked_attr = 'checked' if is_checked else ''
                     radio_html += f'''
                         <label class="radio-item">
-                            <input type="radio" name="field_{i}" value="{opt_key}" {checked_attr}>
+                            <input type="radio" name="field_{i}" value="{opt_key}" data-text="{opt_value}" {checked_attr}>
                             <span class="radio-label">{opt_value}</span>
                         </label>
                     '''
@@ -5496,15 +5502,25 @@ class NewFillWindow(QDialog):
                     checkboxGroups.forEach(function(group) {{
                         var key = group.getAttribute('data-key');
                         if (/^\d+$/.test(key)) key = parseInt(key, 10);
-                        var checkedValues = [];
+                        
+                        var checkedValues = []; // 文本值
+                        var checkedKeys = [];   // Key值
+                        
                         group.querySelectorAll('input:checked').forEach(function(cb) {{
-                            checkedValues.push(cb.value);
+                            checkedKeys.push(cb.value);
+                            // 优先使用 data-text，降级使用 label
+                            var text = cb.getAttribute('data-text');
+                            if (!text && cb.nextElementSibling) {{
+                                text = cb.nextElementSibling.textContent;
+                            }}
+                            checkedValues.push(text || '');
                         }});
+                        
                         data.push({{
                             field_name: group.getAttribute('data-name'),
                             field_key: key,
-                            field_value: checkedValues,  // 报名工具需要数组
-                            new_field_value: [],  // 其他选项的值（数组）
+                            field_value: checkedValues,
+                            new_field_value: checkedKeys,
                             ignore: 0
                         }});
                     }});
@@ -5514,12 +5530,24 @@ class NewFillWindow(QDialog):
                     radioGroups.forEach(function(group) {{
                         var key = group.getAttribute('data-key');
                         if (/^\d+$/.test(key)) key = parseInt(key, 10);
+                        
                         var checkedRadio = group.querySelector('input:checked');
+                        var valText = '';
+                        var valKey = '';
+                        
+                        if (checkedRadio) {{
+                            valKey = checkedRadio.value;
+                            valText = checkedRadio.getAttribute('data-text');
+                            if (!valText && checkedRadio.nextElementSibling) {{
+                                valText = checkedRadio.nextElementSibling.textContent;
+                            }}
+                        }}
+                        
                         data.push({{
                             field_name: group.getAttribute('data-name'),
                             field_key: key,
-                            field_value: checkedRadio ? checkedRadio.value : '',
-                            new_field_value: '',  // 其他选项的值
+                            field_value: valText || '',
+                            new_field_value: valKey || '',
                             ignore: 0
                         }});
                     }});

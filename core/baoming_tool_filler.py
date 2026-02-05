@@ -353,14 +353,9 @@ class BaomingToolAPI:
             if data.get('sta') != 0:
                 error_msg = data.get('msg', '')
                 
-                # 如果返回限制提交次数的消息，直接返回给用户
-                if '只允许提交' in error_msg or '提交次数' in error_msg:
-                    print(f"  ⚠️ [报名工具] 提交受限: {error_msg}")
-                    return False, error_msg
-                
-                # 如果返回 "您已报名过" 等错误，说明之前报过名，直接走更新接口
-                if '已报名' in error_msg or '已经报名' in error_msg:
-                    print(f"  ⚡️ [报名工具] 已报名过，直接更新...")
+                # 如果返回 "您已报名过" 或 "只允许提交" 等错误，说明之前报过名，直接走更新接口
+                if '已报名' in error_msg or '已经报名' in error_msg or '只允许提交' in error_msg or '提交次数' in error_msg:
+                    print(f"  ⚡️ [报名工具] 已报名过或提交受限（{error_msg}），尝试直接更新...")
                     # 已报名过的情况下，需要先获取 info_id
                     if not self.info_id:
                         success, msg, info_id = self.get_enroll_detail()
@@ -701,12 +696,58 @@ class BaomingToolFiller:
             else:
                 print(f"     ❌ 未匹配 (最高分: {best_match['score']})")
 
-            result.append({
+            # ⚡️ 核心修复：处理选择题的 Key 映射
+            # 报名工具 API 对于选择题（单选/下拉），要求提交 new_field_value=key
+            new_field_value = None
+            options = field.get('new_options', [])
+            field_type = field.get('field_type', 0)
+            
+            if options and matched_value:
+                print(f"     🔄 [调试] 尝试匹配选项 Key，当前值: {matched_value}")
+                matched_option = None
+                
+                # 1. 精确匹配
+                for opt in options:
+                    if str(opt.get('value', '')).strip() == str(matched_value).strip():
+                        matched_option = opt
+                        break
+                
+                # 2. 如果没精确匹配，尝试模糊匹配
+                if not matched_option:
+                    for opt in options:
+                        opt_val = str(opt.get('value', '')).strip()
+                        # 选项值包含名片值，或名片值包含选项值
+                        if opt_val and (str(matched_value) in opt_val or opt_val in str(matched_value)):
+                            matched_option = opt
+                            print(f"     ⚠️ [调试] 模糊匹配成功: {matched_value} -> {opt_val}")
+                            break
+                            
+                if matched_option:
+                    new_field_value = matched_option.get('key')
+                    # 将 field_value 更新为标准选项文本，确保提交数据一致性
+                    # 注意：抓包数据显示 field_value 是文本，new_field_value 是 Key
+                    matched_value = matched_option.get('value', matched_value)
+                    print(f"     ✅ [调试] 匹配到选项 Key: {new_field_value} ({matched_value})")
+                else:
+                    print(f"     ❌ [调试] 未能在选项中找到匹配项")
+
+            item = {
                 'field_name': field_name,
                 'field_key': field_key,
                 'field_value': matched_value,
-                'ignore': ignore
-            })
+                'ignore': ignore,
+                # ⚡️ 传递元数据，防止 GUI 匹配失败导致字段类型丢失
+                'field_type': field_type,
+                'options': options,
+                'require': field.get('require', 0),
+                'field_desc': field.get('field_desc', '')
+            }
+            
+            # 只有匹配到 Key 才添加 new_field_value
+            if new_field_value:
+                item['new_field_value'] = new_field_value
+                
+            result.append(item)
         
         return result
 
