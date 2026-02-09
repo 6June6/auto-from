@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon
-import qtawesome as qta
+from .icons import safe_qta_icon as qta_icon
 from database import DatabaseManager, CardEditRequest, Notification
 import json
 

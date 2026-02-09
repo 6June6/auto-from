@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QComboBox, QInputDialog, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject
 from PyQt6.QtGui import QFont, QColor, QAction
-import qtawesome as qta
+from .icons import safe_qta_icon as qta_icon
 from database import DatabaseManager
 from .card_manager import CardManagerDialog
 from .card_edit_approval import MessageCenterDialog
@@ -2273,7 +2273,7 @@ class CollapsibleCategoryWidget(QWidget):
         
         # 编辑按钮
         edit_btn = QPushButton()
-        edit_btn.setIcon(qta.icon('fa5s.edit', color='#8E8E93'))
+        edit_btn.setIcon(qta_icon('fa5s.edit', color='#8E8E93'))
         edit_btn.setFixedSize(24, 24)
         edit_btn.setToolTip("重命名分类")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2292,7 +2292,7 @@ class CollapsibleCategoryWidget(QWidget):
         
         # 删除按钮
         delete_btn = QPushButton()
-        delete_btn.setIcon(qta.icon('fa5s.trash', color='#FF3B30'))
+        delete_btn.setIcon(qta_icon('fa5s.trash', color='#FF3B30'))
         delete_btn.setFixedSize(24, 24)
         delete_btn.setToolTip("删除分类")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4081,7 +4081,7 @@ class FieldPushReceivedDialog(QDialog):
             border-radius: 32px;
         """)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_pixmap = qta.icon('fa5s.magic', color='#10B981').pixmap(32, 32)
+        icon_pixmap = qta_icon('fa5s.magic', color='#10B981').pixmap(32, 32)
         icon_lbl.setPixmap(icon_pixmap)
         
         # 标题
@@ -4225,7 +4225,7 @@ class FieldPushReceivedDialog(QDialog):
                 # 图标
                 icon_lbl = QLabel()
                 icon_lbl.setFixedSize(16, 16)
-                icon_lbl.setPixmap(qta.icon('fa5s.address-card', color='#9CA3AF' if has_field else '#10B981').pixmap(16, 16))
+                icon_lbl.setPixmap(qta_icon('fa5s.address-card', color='#9CA3AF' if has_field else '#10B981').pixmap(16, 16))
                 
                 # 文本
                 text_layout = QVBoxLayout()
@@ -4771,7 +4771,7 @@ class MainWindow(QMainWindow):
         # 窗口设置下拉按钮（右边）- 带图标
         self.window_dropdown_btn = QPushButton()
         self.window_dropdown_btn.setFixedSize(36, 30)
-        self.window_dropdown_btn.setIcon(qta.icon('fa5s.chevron-down', color='#666'))
+        self.window_dropdown_btn.setIcon(qta_icon('fa5s.chevron-down', color='#666'))
         self.window_dropdown_btn.setIconSize(QSize(12, 12))
         self.window_dropdown_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.window_dropdown_btn.setStyleSheet("""
@@ -6413,9 +6413,9 @@ class MainWindow(QMainWindow):
             
             # 自定义按钮
             btn_yes = msg_box.addButton("确定删除", QMessageBox.ButtonRole.YesRole)
-            btn_yes.setIcon(qta.icon('fa5s.check', color='#FF3B30'))
+            btn_yes.setIcon(qta_icon('fa5s.check', color='#FF3B30'))
             btn_no = msg_box.addButton("取消", QMessageBox.ButtonRole.NoRole)
-            btn_no.setIcon(qta.icon('fa5s.times', color='#666'))
+            btn_no.setIcon(qta_icon('fa5s.times', color='#666'))
             
             msg_box.setDefaultButton(btn_no)
             

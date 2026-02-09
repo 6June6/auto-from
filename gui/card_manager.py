@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-import qtawesome as qta
+from .icons import safe_qta_icon as qta_icon
 from database import DatabaseManager, Card, Category, CardEditRequest
 from database.models import CardConfigItem
 
@@ -64,7 +64,7 @@ class CardManagerDialog(QDialog):
         
         # 新增按钮组
         btn_add_card = QPushButton(" 新增名片")
-        btn_add_card.setIcon(qta.icon('fa5s.plus', color='white'))
+        btn_add_card.setIcon(qta_icon('fa5s.plus', color='white'))
         btn_add_card.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']};
@@ -83,7 +83,7 @@ class CardManagerDialog(QDialog):
         header_layout.addWidget(btn_add_card)
         
         btn_add_category = QPushButton(" 新增分类")
-        btn_add_category.setIcon(qta.icon('fa5s.folder-plus', color='white'))
+        btn_add_category.setIcon(qta_icon('fa5s.folder-plus', color='white'))
         btn_add_category.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['info']};
@@ -102,7 +102,7 @@ class CardManagerDialog(QDialog):
         header_layout.addWidget(btn_add_category)
         
         btn_add_template = QPushButton(" 新增官方模版")
-        btn_add_template.setIcon(qta.icon('fa5s.clipboard-list', color='white'))
+        btn_add_template.setIcon(qta_icon('fa5s.clipboard-list', color='white'))
         btn_add_template.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['warning']};
@@ -122,7 +122,7 @@ class CardManagerDialog(QDialog):
         
         # 待审批按钮（如果有待审批请求）
         self.pending_btn = QPushButton()
-        self.pending_btn.setIcon(qta.icon('fa5s.bell', color='white'))
+        self.pending_btn.setIcon(qta_icon('fa5s.bell', color='white'))
         self.pending_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pending_btn.setStyleSheet(f"""
             QPushButton {{
@@ -298,7 +298,7 @@ class CardManagerDialog(QDialog):
         # 展开/折叠图标
         is_expanded = category_name in self.expanded_categories
         arrow_btn = QPushButton()
-        arrow_btn.setIcon(qta.icon('fa5s.chevron-down' if is_expanded else 'fa5s.chevron-right', color='#667eea'))
+        arrow_btn.setIcon(qta_icon('fa5s.chevron-down' if is_expanded else 'fa5s.chevron-right', color='#667eea'))
         arrow_btn.setFixedSize(24, 24)
         arrow_btn.setStyleSheet("""
             QPushButton {
@@ -313,10 +313,10 @@ class CardManagerDialog(QDialog):
         if category_obj and category_obj.icon:
             category_icon_btn = QPushButton()
             try:
-                category_icon_btn.setIcon(qta.icon(category_obj.icon, color=category_obj.color or '#667eea'))
+                category_icon_btn.setIcon(qta_icon(category_obj.icon, color=category_obj.color or '#667eea'))
             except:
                 # 如果图标名称无效，使用默认图标
-                category_icon_btn.setIcon(qta.icon('fa5s.folder', color=category_obj.color or '#667eea'))
+                category_icon_btn.setIcon(qta_icon('fa5s.folder', color=category_obj.color or '#667eea'))
             category_icon_btn.setFixedSize(28, 28)
             category_icon_btn.setStyleSheet("""
                 QPushButton {
@@ -344,7 +344,7 @@ class CardManagerDialog(QDialog):
         
         # 操作按钮
         btn_rename = QPushButton()
-        btn_rename.setIcon(qta.icon('fa5s.edit', color='white'))
+        btn_rename.setIcon(qta_icon('fa5s.edit', color='white'))
         btn_rename.setToolTip("重命名分类")
         btn_rename.setFixedSize(32, 32)
         btn_rename.setStyleSheet(f"""
@@ -363,7 +363,7 @@ class CardManagerDialog(QDialog):
         header_layout.addWidget(btn_rename)
         
         btn_delete_category = QPushButton()
-        btn_delete_category.setIcon(qta.icon('fa5s.trash', color='white'))
+        btn_delete_category.setIcon(qta_icon('fa5s.trash', color='white'))
         btn_delete_category.setToolTip("删除分类")
         btn_delete_category.setFixedSize(32, 32)
         btn_delete_category.setStyleSheet(f"""
@@ -450,7 +450,7 @@ class CardManagerDialog(QDialog):
             
             # 操作按钮
         btn_view = QPushButton()
-        btn_view.setIcon(qta.icon('fa5s.eye', color='white'))
+        btn_view.setIcon(qta_icon('fa5s.eye', color='white'))
         btn_view.setToolTip("查看")
         btn_view.setFixedSize(32, 32)
         btn_view.setStyleSheet("""
@@ -469,7 +469,7 @@ class CardManagerDialog(QDialog):
         card_layout.addWidget(btn_view)
         
         btn_edit = QPushButton()
-        btn_edit.setIcon(qta.icon('fa5s.edit', color='white'))
+        btn_edit.setIcon(qta_icon('fa5s.edit', color='white'))
         btn_edit.setToolTip("编辑")
         btn_edit.setFixedSize(32, 32)
         btn_edit.setStyleSheet(f"""
@@ -488,7 +488,7 @@ class CardManagerDialog(QDialog):
         card_layout.addWidget(btn_edit)
         
         btn_copy = QPushButton()
-        btn_copy.setIcon(qta.icon('fa5s.copy', color='white'))
+        btn_copy.setIcon(qta_icon('fa5s.copy', color='white'))
         btn_copy.setToolTip("复制")
         btn_copy.setFixedSize(32, 32)
         btn_copy.setStyleSheet(f"""
@@ -507,7 +507,7 @@ class CardManagerDialog(QDialog):
         card_layout.addWidget(btn_copy)
         
         btn_delete = QPushButton()
-        btn_delete.setIcon(qta.icon('fa5s.trash', color='white'))
+        btn_delete.setIcon(qta_icon('fa5s.trash', color='white'))
         btn_delete.setToolTip("删除")
         btn_delete.setFixedSize(32, 32)
         btn_delete.setStyleSheet(f"""
@@ -659,9 +659,9 @@ class CardManagerDialog(QDialog):
             
             # 自定义按钮
             btn_yes = msg_box.addButton("确定删除", QMessageBox.ButtonRole.YesRole)
-            btn_yes.setIcon(qta.icon('fa5s.check', color='#FF3B30'))
+            btn_yes.setIcon(qta_icon('fa5s.check', color='#FF3B30'))
             btn_no = msg_box.addButton("取消", QMessageBox.ButtonRole.NoRole)
-            btn_no.setIcon(qta.icon('fa5s.times', color='#666'))
+            btn_no.setIcon(qta_icon('fa5s.times', color='#666'))
             
             msg_box.setDefaultButton(btn_no)
             
@@ -770,9 +770,9 @@ class CardManagerDialog(QDialog):
         
         # 自定义按钮
         btn_yes = msg_box.addButton("删除", QMessageBox.ButtonRole.YesRole)
-        btn_yes.setIcon(qta.icon('fa5s.trash', color='#FF3B30'))
+        btn_yes.setIcon(qta_icon('fa5s.trash', color='#FF3B30'))
         btn_no = msg_box.addButton("取消", QMessageBox.ButtonRole.NoRole)
-        btn_no.setIcon(qta.icon('fa5s.times', color='#666'))
+        btn_no.setIcon(qta_icon('fa5s.times', color='#666'))
         
         msg_box.setDefaultButton(btn_no)
         
@@ -974,7 +974,7 @@ class CardEditDialog(QDialog):
         name_label_widget.setLayout(name_label_layout)
         
         name_icon_label = QLabel()
-        name_icon_label.setPixmap(qta.icon('fa5s.id-card', color='#667eea').pixmap(16, 16))
+        name_icon_label.setPixmap(qta_icon('fa5s.id-card', color='#667eea').pixmap(16, 16))
         name_label_layout.addWidget(name_icon_label)
         
         name_text_label = QLabel("名片名称:")
@@ -1031,7 +1031,7 @@ class CardEditDialog(QDialog):
         category_label_widget.setLayout(category_label_layout)
         
         category_icon_label = QLabel()
-        category_icon_label.setPixmap(qta.icon('fa5s.folder', color='#667eea').pixmap(16, 16))
+        category_icon_label.setPixmap(qta_icon('fa5s.folder', color='#667eea').pixmap(16, 16))
         category_label_layout.addWidget(category_icon_label)
         
         category_text_label = QLabel("所属分类:")
@@ -1067,7 +1067,7 @@ class CardEditDialog(QDialog):
         desc_label_widget.setLayout(desc_label_layout)
         
         desc_icon_label = QLabel()
-        desc_icon_label.setPixmap(qta.icon('fa5s.align-left', color='#667eea').pixmap(16, 16))
+        desc_icon_label.setPixmap(qta_icon('fa5s.align-left', color='#667eea').pixmap(16, 16))
         desc_label_layout.addWidget(desc_icon_label)
         
         desc_text_label = QLabel("描述:")
@@ -1089,7 +1089,7 @@ class CardEditDialog(QDialog):
         config_header.addStretch()
         
         btn_add_config = QPushButton(" 添加配置项")
-        btn_add_config.setIcon(qta.icon('fa5s.plus', color='white'))
+        btn_add_config.setIcon(qta_icon('fa5s.plus', color='white'))
         btn_add_config.clicked.connect(lambda: self.add_config_row())
         btn_add_config.setStyleSheet(f"""
             QPushButton {{
@@ -1136,7 +1136,7 @@ class CardEditDialog(QDialog):
         button_layout.setSpacing(10)
         
         btn_save = QPushButton(" 保存")
-        btn_save.setIcon(qta.icon('fa5s.save', color='white'))
+        btn_save.setIcon(qta_icon('fa5s.save', color='white'))
         btn_save.clicked.connect(self.save)
         btn_save.setStyleSheet(f"""
             QPushButton {{
@@ -1252,7 +1252,7 @@ class CardEditDialog(QDialog):
         row_layout.addWidget(value_input, 2)
         
         btn_remove = QPushButton()
-        btn_remove.setIcon(qta.icon('fa5s.trash-alt', color='white'))
+        btn_remove.setIcon(qta_icon('fa5s.trash-alt', color='white'))
         btn_remove.setToolTip("删除")
         btn_remove.setFixedSize(34, 34)
         btn_remove.setStyleSheet(f"""

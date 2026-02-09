@@ -1,10 +1,31 @@
 """
 图标管理器
 使用 QtAwesome 提供现代化图标
+Windows 字体加载失败时自动降级为空图标
 """
-import qtawesome as qta
 from PyQt6.QtGui import QIcon, QColor
 from PyQt6.QtCore import QSize
+
+# 安全导入 qtawesome，字体加载失败时降级
+_qta_available = False
+try:
+    import qtawesome as qta
+    # 测试字体是否能正常加载
+    qta.icon('fa5s.home')
+    _qta_available = True
+except Exception as e:
+    print(f"⚠️ qtawesome 字体加载失败，图标将降级为空图标: {e}")
+    _qta_available = False
+
+
+def safe_qta_icon(name, **kwargs):
+    """安全的 qtawesome 图标调用，失败时返回空图标"""
+    if not _qta_available:
+        return QIcon()
+    try:
+        return qta.icon(name, **kwargs)
+    except Exception:
+        return QIcon()
 
 
 class Icons:
@@ -50,7 +71,7 @@ class Icons:
             options['color'] = QColor(color)
         
         try:
-            return qta.icon(name, **options)
+            return safe_qta_icon(name, **options)
         except Exception as e:
             print(f"⚠️ 图标加载失败: {name}, 错误: {e}")
             # 返回空图标

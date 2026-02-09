@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize, QEvent
 from PyQt6.QtGui import QColor
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
-import qtawesome as qta
+from .icons import safe_qta_icon as qta_icon
 import json
 import time
 from collections import defaultdict
@@ -1884,10 +1884,10 @@ class NewFillWindow(QDialog):
         for i in range(self.category_combo.count()):
             if i == current_index:
                 # 选中项显示勾选图标
-                self.category_combo.setItemIcon(i, qta.icon('fa5s.check', color='#6B7280'))
+                self.category_combo.setItemIcon(i, qta_icon('fa5s.check', color='#6B7280'))
             else:
                 # 其他项显示空白图标（保持对齐）
-                self.category_combo.setItemIcon(i, qta.icon('fa5s.check', color='transparent'))
+                self.category_combo.setItemIcon(i, qta_icon('fa5s.check', color='transparent'))
     
     def load_cards_list(self, target_card_id=None):
         """加载名片列表（仅显示已选名片）- 网格布局"""
