@@ -1791,6 +1791,59 @@ class NewFillWindow(QDialog):
         
         return section
 
+    def show_card_info(self, card):
+        """显示名片信息"""
+        self.current_card = card
+        
+        # 更新标题
+        self.card_info_title.setText(card.name)
+        
+        print(f"\n🔍 显示名片信息: {card.name}")
+        
+        # 清空字段列表
+        while self.card_fields_layout.count():
+            child = self.card_fields_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # 显示字段
+        if hasattr(card, 'configs') and card.configs:
+            field_count = 0
+            for config in card.configs:
+                key = ""
+                value = ""
+                
+                # 兼容字典和对象两种格式
+                if isinstance(config, dict):
+                    key = config.get('key', '')
+                    value = config.get('value', '')
+                elif hasattr(config, 'key'): # 对象格式
+                    key = config.key
+                    value = getattr(config, 'value', '')
+                
+                if key:
+                    field_widget = self.create_field_item(key, str(value) if value is not None else "")
+                    self.card_fields_layout.addWidget(field_widget)
+                    field_count += 1
+            
+            print(f"  - 总共添加了 {field_count} 个字段")
+            
+            if field_count == 0:
+                self.show_empty_hint("该名片暂无字段信息")
+        else:
+            print(f"  - ⚠️ 名片没有configs或configs为空")
+            self.show_empty_hint("该名片暂无配置数据")
+            
+    def show_empty_hint(self, text):
+        """显示空状态提示"""
+        hint_label = QLabel(text)
+        hint_label.setStyleSheet(f"""
+            font-size: 13px;
+            color: {COLORS['text_secondary']};
+            padding: 20px;
+        """)
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.card_fields_layout.addWidget(hint_label)
     
     def load_categories(self):
         """加载分类列表（仅包含已选名片的分类）"""
