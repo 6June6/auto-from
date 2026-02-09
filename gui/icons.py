@@ -1,19 +1,76 @@
 """
 图标管理器
 使用 QtAwesome 提供现代化图标
-Windows 字体加载失败时自动降级为空图标
+Windows 字体加载失败时自动降级为 emoji 图标
 """
 import qtawesome as qta
-from PyQt6.QtGui import QIcon, QColor
-from PyQt6.QtCore import QSize
+from PyQt6.QtGui import QIcon, QColor, QPixmap, QPainter, QFont
+from PyQt6.QtCore import QSize, Qt, QRect
+
+# FontAwesome 图标名 → emoji 降级映射
+_EMOJI_FALLBACK = {
+    'fa5s.plus': '+', 'fa5s.plus-circle': '⊕',
+    'fa5s.edit': '✎', 'fa5s.trash': '✕', 'fa5s.trash-alt': '✕',
+    'fa5s.check': '✓', 'fa5s.check-circle': '✓',
+    'fa5s.times': '✕', 'fa5s.times-circle': '✕',
+    'fa5s.search': '⌕', 'fa5s.sync-alt': '↻', 'fa5s.sync': '↻',
+    'fa5s.cog': '⚙', 'fa5s.magic': '★',
+    'fa5s.home': '⌂', 'fa5s.user': '☺', 'fa5s.users': '☺',
+    'fa5s.link': '🔗', 'fa5s.unlink': '⊘',
+    'fa5s.bell': '♪', 'fa5s.bullhorn': '♪',
+    'fa5s.fire': '✦',
+    'fa5s.info-circle': 'ℹ', 'fa5s.exclamation-triangle': '⚠',
+    'fa5s.exclamation-circle': '!', 'fa5s.question-circle': '?',
+    'fa5s.chevron-down': '▾', 'fa5s.chevron-up': '▴',
+    'fa5s.chevron-left': '◂', 'fa5s.chevron-right': '▸',
+    'fa5s.arrow-up': '↑', 'fa5s.arrow-down': '↓',
+    'fa5s.arrow-left': '←', 'fa5s.arrow-right': '→',
+    'fa5s.folder': '📁', 'fa5s.folder-open': '📂', 'fa5s.folder-plus': '📁',
+    'fa5s.file': '📄', 'fa5s.file-alt': '📄',
+    'fa5s.copy': '⧉', 'fa5s.paste': '⎗',
+    'fa5s.save': '💾', 'fa5s.download': '↓', 'fa5s.upload': '↑',
+    'fa5s.play': '▶', 'fa5s.stop': '■', 'fa5s.pause': '❚❚',
+    'fa5s.id-card': '☐', 'fa5s.address-card': '☐',
+    'fa5s.bars': '☰', 'fa5s.list': '≡', 'fa5s.th': '⊞', 'fa5s.th-large': '⊞',
+    'fa5s.ellipsis-h': '⋯', 'fa5s.ellipsis-v': '⋮',
+    'fa5s.external-link-alt': '↗',
+    'fa5s.eye': '◉', 'fa5s.eye-slash': '◎',
+    'fa5s.lock': '🔒', 'fa5s.unlock': '🔓',
+    'fa5s.sign-out-alt': '→', 'fa5s.sign-in-alt': '←',
+    'fa5s.spinner': '◌', 'fa5s.tag': '⚑', 'fa5s.tags': '⚑',
+    'fa5s.calendar': '📅', 'fa5s.clock': '◷',
+    'fa5s.robot': '⚙', 'fa5s.database': '⊟',
+    'fa5s.plug': '⚡', 'fa5s.toggle-on': '●', 'fa5s.toggle-off': '○',
+    'fa5s.broadcast-tower': '📡', 'fa5s.clipboard-check': '☑',
+    'fa5s.clipboard-list': '☐', 'fa5s.circle': '●',
+    'fa5s.chart-bar': '▊', 'fa5s.grip-vertical': '⋮', 'fa5s.arrows-alt': '⇔',
+}
+
+
+def _create_emoji_icon(name, color='#666666'):
+    """用 emoji/符号创建降级图标"""
+    text = _EMOJI_FALLBACK.get(name, '•')
+    size = 64
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setFont(QFont('Segoe UI Symbol', 28))
+    if color:
+        c = color if isinstance(color, str) else color.name() if isinstance(color, QColor) else '#666666'
+        painter.setPen(QColor(c))
+    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, text)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def safe_qta_icon(name, **kwargs):
-    """安全的 qtawesome 图标调用，字体加载失败时返回空图标而非崩溃"""
+    """安全的 qtawesome 图标调用，字体加载失败时用 emoji 降级"""
     try:
         return qta.icon(name, **kwargs)
     except Exception:
-        return QIcon()
+        color = kwargs.get('color', '#666666')
+        return _create_emoji_icon(name, color)
 
 
 class Icons:
