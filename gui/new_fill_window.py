@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QPushBu
                              QLabel, QComboBox, QMessageBox, QFrame, QScrollArea,
                              QGraphicsDropShadowEffect, QApplication, QTabWidget,
                              QGridLayout, QSizePolicy, QStackedWidget, QLineEdit, QInputDialog)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QUrl, QSize, QEvent, QPoint, QObject
 from PyQt6.QtGui import QColor
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
@@ -81,6 +81,73 @@ class ChineseContextWebView(QWebEngineView):
         event.ignore()
 
 
+class StyledTooltip(QLabel):
+    """自定义样式的工具提示 - 替代原生 ToolTip 以解决黑色背景问题"""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        self.setStyleSheet("""
+            QLabel {
+                background-color: #FFFFFF;
+                color: #1D1D1F;
+                border: 1px solid #E5E5EA;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
+        
+        # 添加阴影
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setColor(QColor(0, 0, 0, 30))
+        self.shadow.setOffset(0, 4)
+        self.setGraphicsEffect(self.shadow)
+        
+        self.adjustSize()
+
+class ToolTipEventFilter(QObject):
+    def __init__(self, text_getter, parent=None):
+        super().__init__(parent)
+        self.text_getter = text_getter # Function that returns text or None
+        self.tooltip = None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Enter:
+            text = self.text_getter()
+            if text:
+                self.show_tooltip(obj, text)
+        elif event.type() == QEvent.Type.Leave:
+            self.hide_tooltip()
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            self.hide_tooltip()
+        return False
+
+    def show_tooltip(self, widget, text):
+        if self.tooltip:
+            self.tooltip.close()
+        
+        self.tooltip = StyledTooltip(text)
+        
+        # 计算位置 - 默认在上方
+        pos = widget.mapToGlobal(QPoint(0, 0))
+        x = pos.x() + (widget.width() - self.tooltip.width()) // 2
+        y = pos.y() - self.tooltip.height() - 5
+        
+        self.tooltip.move(x, y)
+        self.tooltip.show()
+
+    def hide_tooltip(self):
+        if self.tooltip:
+            self.tooltip.close()
+            self.tooltip.deleteLater()
+            self.tooltip = None
+
+
 class FillCardItemWidget(QWidget):
     """填充页面的名片项组件 - 横条样式（参考首页设计）"""
     
@@ -112,10 +179,21 @@ class FillCardItemWidget(QWidget):
         """)
         # 设置文本省略模式
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        
+        # 添加自定义 ToolTip 过滤器
+        self.name_tooltip_filter = ToolTipEventFilter(self._get_name_tooltip)
+        self.name_label.installEventFilter(self.name_tooltip_filter)
+        
         layout.addWidget(self.name_label, 1)  # stretch=1 让名称占据剩余空间
         
         self.update_style()
     
+    def _get_name_tooltip(self):
+        """获取名片名称的 ToolTip 文本 (仅当被截断时显示)"""
+        if self.name_label.text() != self.card.name:
+            return self.card.name
+        return None
+
     def resizeEvent(self, event):
         """大小改变时更新名称省略"""
         super().resizeEvent(event)

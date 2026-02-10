@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGraphicsDropShadowEffect, QScrollArea, QCheckBox, 
                              QListWidget, QListWidgetItem, QGridLayout, QDialog, QLineEdit,
                              QTabWidget, QComboBox, QInputDialog, QMenu)
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject, QEvent
 from PyQt6.QtGui import QFont, QColor, QAction
 from .icons import safe_qta_icon as qta_icon
 from database import DatabaseManager
@@ -2217,122 +2217,127 @@ class CollapsibleCategoryWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 2)
-        layout.setSpacing(0)
+        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setSpacing(4)
         self.setLayout(layout)
         
-        # 分类标题栏 - 使用 QWidget 而不是 QPushButton
+        # 极简标题栏 (Ultra Minimal Header)
+        # 不使用 QFrame，避免任何潜在的边框
         header = QWidget()
         header.setObjectName("categoryHeader")
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(8, 8, 8, 8)
+        header_layout.setContentsMargins(4, 4, 8, 4)
         header_layout.setSpacing(8)
         header.setLayout(header_layout)
+        
+        # 完全透明，无边框，无背景
         header.setStyleSheet("""
             #categoryHeader {
                 background: transparent;
-                border-radius: 6px;
-            }
-            #categoryHeader:hover {
-                background: #F2F2F7;
             }
         """)
         
-        # 折叠按钮（箭头 + 名称）
-        collapse_btn = QPushButton()
-        collapse_btn_layout = QHBoxLayout()
-        collapse_btn_layout.setContentsMargins(0, 0, 0, 0)
-        collapse_btn_layout.setSpacing(8)
-        collapse_btn.setLayout(collapse_btn_layout)
-        collapse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        collapse_btn.setStyleSheet("""
+        # 1. 折叠/展开 整体作为一个按钮区域
+        toggle_btn = QPushButton()
+        toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle_btn.setStyleSheet("""
             QPushButton {
+                border: none;
+                background: transparent;
+                text-align: left;
+                padding: 0px;
+                outline: none;
+            }
+            QPushButton:hover {
                 background: transparent;
                 border: none;
-                text-align: left;
+            }
+            QPushButton:focus {
+                border: none;
+                outline: none;
             }
         """)
-        collapse_btn.clicked.connect(self.toggle_collapse)
+        toggle_btn.clicked.connect(self.toggle_collapse)
         
-        # 箭头
-        self.arrow_label = QLabel("▼")
-        self.arrow_label.setStyleSheet("color: #8E8E93; font-size: 10px;")
-        collapse_btn_layout.addWidget(self.arrow_label)
+        toggle_layout = QHBoxLayout(toggle_btn)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(6)
         
-        # 分类名称
+        # 图标
+        self.arrow_icon = QLabel()
+        self.arrow_icon.setFixedSize(16, 16)
+        # 默认图标
+        self.arrow_icon.setPixmap(Icons.chevron_down('#666666').pixmap(12, 12))
+        self.arrow_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # 名称
         self.name_label = QLabel(self.category_name)
         self.name_label.setStyleSheet("""
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
-            color: #8E8E93;
+            color: #333333;
         """)
-        collapse_btn_layout.addWidget(self.name_label)
         
-        header_layout.addWidget(collapse_btn)
-        header_layout.addStretch()
+        toggle_layout.addWidget(self.arrow_icon)
+        toggle_layout.addWidget(self.name_label)
+        toggle_layout.addStretch()
         
-        # 编辑按钮
-        edit_btn = QPushButton()
-        edit_btn.setIcon(qta_icon('fa5s.edit', color='#8E8E93'))
-        edit_btn.setFixedSize(24, 24)
-        edit_btn.setToolTip("重命名分类")
-        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background: #E5E5EA;
-            }
-        """)
-        edit_btn.clicked.connect(lambda: self.rename_clicked.emit(self.category_name))
-        header_layout.addWidget(edit_btn)
+        header_layout.addWidget(toggle_btn, 1)
         
-        # 删除按钮
-        delete_btn = QPushButton()
-        delete_btn.setIcon(qta_icon('fa5s.trash', color='#FF3B30'))
-        delete_btn.setFixedSize(24, 24)
-        delete_btn.setToolTip("删除分类")
-        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background: #FFE5E5;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.category_name))
-        header_layout.addWidget(delete_btn)
+        # 2. 右侧操作区
+        actions_widget = QWidget()
+        actions_layout = QHBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(4)
         
-        # 复选框
-        self.category_checkbox = QCheckBox()
+        # 辅助方法：创建图标按钮
+        def create_action_btn(icon, tooltip, callback):
+            btn = QPushButton()
+            btn.setIcon(icon)
+            btn.setFixedSize(24, 24)
+            btn.setToolTip(tooltip)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background: rgba(0, 0, 0, 0.05);
+                }
+            """)
+            btn.clicked.connect(callback)
+            return btn
+        
+        # 编辑
+        edit_btn = create_action_btn(Icons.edit('#999999'), "重命名", lambda: self.rename_clicked.emit(self.category_name))
+        actions_layout.addWidget(edit_btn)
+        
+        # 删除
+        delete_btn = create_action_btn(Icons.trash('#FF3B30'), "删除", lambda: self.delete_clicked.emit(self.category_name))
+        actions_layout.addWidget(delete_btn)
+        
+        # 全选
+        self.category_checkbox = QCheckBox("全选")
         self.category_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.category_checkbox.setStyleSheet("""
-            QCheckBox::indicator {
-                width: 16px; height: 16px;
-                border-radius: 4px;
-                border: 1px solid #D1D1D6;
-                background: white;
-            }
-            QCheckBox::indicator:checked {
-                background: #007AFF; border-color: #007AFF;
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgNEw0LjUgNy41TDExIDEiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+);
-            }
+            QCheckBox { color: #86868B; font-size: 12px; margin-left: 8px; }
+            QCheckBox::indicator { width: 14px; height: 14px; border-radius: 4px; border: 1px solid #C7C7CC; background: white; }
+            QCheckBox::indicator:checked { background: #007AFF; border-color: #007AFF; image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgNEw0LjUgNy41TDExIDEiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+); }
+            QCheckBox::indicator:hover { border-color: #007AFF; }
         """)
         self.category_checkbox.stateChanged.connect(self.on_category_checkbox_changed)
-        header_layout.addWidget(self.category_checkbox)
+        actions_layout.addWidget(self.category_checkbox)
+        
+        header_layout.addWidget(actions_widget)
         
         layout.addWidget(header)
         
         # 内容容器
         self.cards_container = QWidget()
         self.cards_layout = QVBoxLayout()
-        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.cards_layout.setContentsMargins(12, 4, 12, 0)
         self.cards_layout.setSpacing(0)
         self.cards_container.setLayout(self.cards_layout)
         layout.addWidget(self.cards_container)
@@ -2347,7 +2352,14 @@ class CollapsibleCategoryWidget(QWidget):
     def toggle_collapse(self):
         self.is_collapsed = not self.is_collapsed
         self.cards_container.setVisible(not self.is_collapsed)
-        self.arrow_label.setText("▶" if self.is_collapsed else "▼")
+        # 切换图标
+        icon_pixmap = Icons.chevron_right('#666666').pixmap(12, 12) if self.is_collapsed else Icons.chevron_down('#666666').pixmap(12, 12)
+        self.arrow_icon.setPixmap(icon_pixmap)
+        
+    def update_category_name(self, new_name: str):
+        """更新分类名称显示"""
+        self.category_name = new_name
+        self.name_label.setText(new_name)
     
     def on_category_checkbox_changed(self, state):
         is_checked = (state == Qt.CheckState.Checked.value)
@@ -2615,6 +2627,73 @@ class DraggableCardGrid(QWidget):
         self._update_positions(animate=False)
 
 
+class StyledTooltip(QLabel):
+    """自定义样式的工具提示 - 替代原生 ToolTip 以解决黑色背景问题"""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        self.setStyleSheet("""
+            QLabel {
+                background-color: #FFFFFF;
+                color: #1D1D1F;
+                border: 1px solid #E5E5EA;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
+        
+        # 添加阴影
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setColor(QColor(0, 0, 0, 30))
+        self.shadow.setOffset(0, 4)
+        self.setGraphicsEffect(self.shadow)
+        
+        self.adjustSize()
+
+class ToolTipEventFilter(QObject):
+    def __init__(self, text_getter, parent=None):
+        super().__init__(parent)
+        self.text_getter = text_getter # Function that returns text or None
+        self.tooltip = None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Enter:
+            text = self.text_getter()
+            if text:
+                self.show_tooltip(obj, text)
+        elif event.type() == QEvent.Type.Leave:
+            self.hide_tooltip()
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            self.hide_tooltip()
+        return False
+
+    def show_tooltip(self, widget, text):
+        if self.tooltip:
+            self.tooltip.close()
+        
+        self.tooltip = StyledTooltip(text)
+        
+        # 计算位置 - 默认在上方
+        pos = widget.mapToGlobal(QPoint(0, 0))
+        x = pos.x() + (widget.width() - self.tooltip.width()) // 2
+        y = pos.y() - self.tooltip.height() - 5
+        
+        self.tooltip.move(x, y)
+        self.tooltip.show()
+
+    def hide_tooltip(self):
+        if self.tooltip:
+            self.tooltip.close()
+            self.tooltip.deleteLater()
+            self.tooltip = None
+
+
 class CardItemWidget(QWidget):
     """名片项组件 - 横条样式，支持拖拽，编辑按钮在边框外"""
     
@@ -2663,6 +2742,11 @@ class CardItemWidget(QWidget):
         """)
         # 设置文本省略模式
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        
+        # 添加自定义 ToolTip 过滤器
+        self.name_tooltip_filter = ToolTipEventFilter(self._get_name_tooltip)
+        self.name_label.installEventFilter(self.name_tooltip_filter)
+        
         container_layout.addWidget(self.name_label)
         
         layout.addWidget(self.card_container, 1)  # stretch=1 让名称容器占据剩余空间
@@ -2673,7 +2757,10 @@ class CardItemWidget(QWidget):
         edit_btn.setIcon(Icons.edit('#8E8E93'))
         edit_btn.setIconSize(QSize(12, 12))
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.setToolTip("编辑")
+        # edit_btn.setToolTip("编辑")
+        self.edit_tooltip_filter = ToolTipEventFilter(lambda: "编辑")
+        edit_btn.installEventFilter(self.edit_tooltip_filter)
+        
         edit_btn.setStyleSheet("""
             QPushButton { 
                 border: none; 
@@ -2690,6 +2777,12 @@ class CardItemWidget(QWidget):
         
         self.update_style()
     
+    def _get_name_tooltip(self):
+        """获取名片名称的 ToolTip 文本 (仅当被截断时显示)"""
+        if self.name_label.text() != self.card.name:
+            return self.card.name
+        return None
+
     def resizeEvent(self, event):
         """大小改变时更新名称省略"""
         super().resizeEvent(event)
@@ -2704,7 +2797,7 @@ class CardItemWidget(QWidget):
                 font_metrics = self.name_label.fontMetrics()
                 elided_text = font_metrics.elidedText(self.card.name, Qt.TextElideMode.ElideRight, available_width)
                 self.name_label.setText(elided_text)
-                self.name_label.setToolTip(self.card.name if elided_text != self.card.name else "")
+                # self.name_label.setToolTip(self.card.name if elided_text != self.card.name else "")
 
     def toggle_selection(self):
         self.is_selected = not self.is_selected

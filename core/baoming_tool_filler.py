@@ -303,20 +303,14 @@ class BaomingToolAPI:
             'Content-Type': 'application/json'
         }
         
-        # 第一步：调用新增接口 enroll/v5/enroll
+        # 调用新增接口 enroll/v5/enroll
         try:
             # 生成签名
             signature = generate_baoming_signature(self.eid)
             print(f"  🔐 [报名工具] 生成签名: eid={self.eid}, _a={signature[:50] if signature else 'None'}...")
             if not signature:
-                print(f"  ⚠️ [报名工具] 签名生成失败，尝试直接获取已有记录...")
-                # 签名失败时，尝试获取已有的 info_id
-                success, msg, info_id = self.get_enroll_detail()
-                if success and info_id:
-                    self.info_id = info_id  # 确保赋值
-                    print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
-                # 跳过新增接口，直接走更新
-                raise Exception("签名生成失败")
+                print(f"  ❌ [报名工具] 签名生成失败")
+                return False, '签名生成失败，请检查 pycryptodome 库是否安装'
             
             enroll_url = f"{self.BASE_URL}/enroll/v5/enroll"
             enroll_payload = {
@@ -351,29 +345,9 @@ class BaomingToolAPI:
             print(f"  📥 [报名工具] 新增接口响应: {data}")
             
             if data.get('sta') != 0:
-                error_msg = data.get('msg', '')
-                
-                # 如果返回 "您已报名过" 或 "只允许提交" 等错误，说明之前报过名，直接走更新接口
-                if '已报名' in error_msg or '已经报名' in error_msg or '只允许提交' in error_msg or '提交次数' in error_msg:
-                    print(f"  ⚡️ [报名工具] 已报名过或提交受限（{error_msg}），尝试直接更新...")
-                    # 已报名过的情况下，需要先获取 info_id
-                    if not self.info_id:
-                        success, msg, info_id = self.get_enroll_detail()
-                        if success and info_id:
-                            self.info_id = info_id  # 确保赋值
-                            print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
-                        else:
-                            print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
-                else:
-                    print(f"  ⚠️ [报名工具] 新增接口返回: {error_msg}")
-                    # 尝试获取 info_id（可能是已经报过名但接口返回其他错误）
-                    if not self.info_id:
-                        success, msg, info_id = self.get_enroll_detail()
-                        if success and info_id:
-                            self.info_id = info_id  # 确保赋值
-                            print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
-                        else:
-                            print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
+                error_msg = data.get('msg', '提交失败')
+                print(f"  ❌ [报名工具] 新增接口报错: {error_msg}")
+                return False, f'提交失败: {error_msg}'
             else:
                 print(f"  ✅ [报名工具] 新增接口调用成功")
                 # 新增成功后，更新 info_id
@@ -381,56 +355,11 @@ class BaomingToolAPI:
                 if new_info_id:
                     self.info_id = new_info_id
                     print(f"  ✅ [报名工具] 获取到新 info_id: {new_info_id}")
+                return True, '提交成功'
                     
         except Exception as e:
-            print(f"  ⚠️ [报名工具] 新增接口异常: {e}，尝试直接更新...")
-            # 尝试获取已有的 info_id
-            if not self.info_id:
-                try:
-                    success, msg, info_id = self.get_enroll_detail()
-                    if success and info_id:
-                        self.info_id = info_id  # 确保赋值
-                        print(f"  ✅ [报名工具] 获取到已有 info_id: {info_id}")
-                    else:
-                        print(f"  ⚠️ [报名工具] 获取已有 info_id 失败: {msg}")
-                except Exception as detail_err:
-                    print(f"  ⚠️ [报名工具] 获取 info_id 异常: {detail_err}")
-        
-        # 第二步：调用更新接口 enroll/v1/user_update
-        if not self.info_id:
-            print(f"  ❌ [报名工具] 无法获取 info_id，可能原因：")
-            print(f"     1. 新增接口调用失败且用户未报名过（无历史记录）")
-            print(f"     2. 服务器返回异常")
-            print(f"     3. 签名验证失败")
-            return False, '缺少info_id，无法更新。请检查：1.签名是否正确 2.是否为首次报名但新增接口失败'
-            
-        try:
-            update_url = f"{self.BASE_URL}/enroll/v1/user_update"
-            update_payload = {
-                'info_id': self.info_id,
-                'info': form_data,
-                'anon': 0,
-                'access_token': self.access_token,
-                'from': 'xcx'
-            }
-            
-            print(f"  📡 [API] POST {update_url}")
-            print(f"  📡 [API] 请求参数: info_id={self.info_id}, access_token={self.access_token[:20]}..., 表单字段数={len(form_data)}")
-            response = self.session.post(update_url, json=update_payload, headers=headers, timeout=15)
-            print(f"  📡 [API] 响应状态码: {response.status_code}")
-            data = response.json()
-            print(f"  📡 [API] 响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
-            
-            if data.get('sta') == 0:
-                print(f"  📡 [API] 更新接口调用成功")
-                return True, '提交成功'
-            else:
-                print(f"  📡 [API] 更新接口调用失败: {data.get('msg')}")
-                return False, data.get('msg', '提交失败')
-                
-        except Exception as e:
-            print(f"  📡 [API] 请求异常: {e}")
-            return False, f"请求失败: {str(e)}"
+            print(f"  ❌ [报名工具] 新增接口异常: {e}")
+            return False, f'提交失败: {str(e)}'
 
 
 class BaomingToolFiller:

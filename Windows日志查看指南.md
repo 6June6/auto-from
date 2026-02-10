@@ -9,6 +9,7 @@ C:\Users\你的用户名\.auto-form-filler\logs\
 ```
 
 **示例:**
+
 ```
 C:\Users\Administrator\.auto-form-filler\logs\
 C:\Users\张三\.auto-form-filler\logs\
@@ -82,6 +83,7 @@ python tools\log_viewer.py
 ```
 
 或双击运行:
+
 ```cmd
 view_logs.bat
 ```
@@ -110,11 +112,11 @@ check_crash_logs.bat
 
 ```powershell
 # PowerShell 查看最新的崩溃详情
-Get-ChildItem "$env:USERPROFILE\.auto-form-filler\logs\crash_*.json" | 
-    Sort-Object LastWriteTime -Descending | 
-    Select-Object -First 1 | 
-    Get-Content | 
-    ConvertFrom-Json | 
+Get-ChildItem "$env:USERPROFILE\.auto-form-filler\logs\crash_*.json" |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1 |
+    Get-Content |
+    ConvertFrom-Json |
     ConvertTo-Json -Depth 10
 ```
 
@@ -147,8 +149,8 @@ Select-String -Path "$env:USERPROFILE\.auto-form-filler\logs\error.log" -Pattern
 ```powershell
 # 导出特定用户的日志
 $Username = "test_user"
-Get-Content "$env:USERPROFILE\.auto-form-filler\logs\*.log" | 
-    Select-String $Username | 
+Get-Content "$env:USERPROFILE\.auto-form-filler\logs\*.log" |
+    Select-String $Username |
     Out-File "user_${Username}_logs.txt"
 ```
 
@@ -176,25 +178,27 @@ REM 然后手动压缩桌面上的 crash_logs 文件夹
 
 ## 🛠️ 常用命令速查
 
-| 操作 | PowerShell 命令 | CMD 命令 |
-|------|----------------|----------|
+| 操作         | PowerShell 命令                                    | CMD 命令                                        |
+| ------------ | -------------------------------------------------- | ----------------------------------------------- |
 | 打开日志目录 | `explorer $env:USERPROFILE\.auto-form-filler\logs` | `explorer %USERPROFILE%\.auto-form-filler\logs` |
-| 查看崩溃日志 | `Get-Content crash.log` | `type crash.log` |
-| 查看最后50行 | `Get-Content error.log -Tail 50` | `powershell Get-Content error.log -Tail 50` |
-| 实时监控 | `Get-Content error.log -Wait -Tail 20` | 不支持,需要用 PowerShell |
-| 搜索关键词 | `Select-String -Path error.log -Pattern "用户名"` | `findstr "用户名" error.log` |
-| 统计行数 | `(Get-Content error.log).Count` | `find /c /v "" error.log` |
+| 查看崩溃日志 | `Get-Content crash.log`                            | `type crash.log`                                |
+| 查看最后50行 | `Get-Content error.log -Tail 50`                   | `powershell Get-Content error.log -Tail 50`     |
+| 实时监控     | `Get-Content error.log -Wait -Tail 20`             | 不支持,需要用 PowerShell                        |
+| 搜索关键词   | `Select-String -Path error.log -Pattern "用户名"`  | `findstr "用户名" error.log`                    |
+| 统计行数     | `(Get-Content error.log).Count`                    | `find /c /v "" error.log`                       |
 
 ## 🐛 Windows 特有问题排查
 
 ### 问题1: 找不到日志目录
 
 **检查:**
+
 ```cmd
 echo %USERPROFILE%\.auto-form-filler\logs
 ```
 
 **手动创建:**
+
 ```cmd
 mkdir %USERPROFILE%\.auto-form-filler\logs
 ```
@@ -204,6 +208,7 @@ mkdir %USERPROFILE%\.auto-form-filler\logs
 **原因:** Windows 默认编码问题
 
 **解决:**
+
 ```cmd
 REM 在批处理文件开头添加
 chcp 65001
@@ -214,18 +219,21 @@ chcp 65001
 ### 问题3: 权限不足
 
 **以管理员身份运行:**
+
 1. 右键点击 `check_crash_logs.bat`
 2. 选择"以管理员身份运行"
 
 ### 问题4: Python 找不到
 
 **检查 Python 安装:**
+
 ```cmd
 python --version
 python3 --version
 ```
 
 **如果没有输出,需要:**
+
 1. 安装 Python 3.x
 2. 安装时勾选 "Add Python to PATH"
 3. 或手动添加到环境变量
@@ -235,11 +243,13 @@ python3 --version
 ### 使用 PowerShell 实时监控
 
 **终端1 - 监控错误日志:**
+
 ```powershell
 Get-Content "$env:USERPROFILE\.auto-form-filler\logs\error.log" -Wait -Tail 20
 ```
 
 **终端2 - 运行程序:**
+
 ```cmd
 python main.py
 ```
@@ -247,6 +257,7 @@ python main.py
 ### 使用 Windows Terminal(推荐)
 
 如果安装了 Windows Terminal:
+
 1. 分屏打开两个终端
 2. 一个运行监控命令
 3. 一个运行应用程序
@@ -271,6 +282,7 @@ REM 复制 crash.log 内容
 ### 3. 查看具体错误:
 
 在 `crash.log` 中查找:
+
 - 用户名
 - 异常类型
 - 堆栈跟踪
@@ -278,6 +290,7 @@ REM 复制 crash.log 内容
 ### 4. 分析原因:
 
 根据错误类型:
+
 - `AttributeError` → 对象属性问题
 - `FileNotFoundError` → 文件缺失
 - `ImportError` → 模块导入失败
@@ -288,6 +301,7 @@ REM 复制 crash.log 内容
 ### 1. 路径分隔符
 
 Windows 使用反斜杠 `\`:
+
 ```
 C:\Users\用户名\.auto-form-filler\logs\
 ```
@@ -295,6 +309,7 @@ C:\Users\用户名\.auto-form-filler\logs\
 ### 2. 文件编码
 
 日志文件使用 UTF-8 编码,建议使用:
+
 - Notepad++ (推荐)
 - VS Code
 - Sublime Text
@@ -308,17 +323,18 @@ C:\Users\用户名\.auto-form-filler\logs\
 ### 4. 防病毒软件
 
 防病毒软件可能阻止日志写入,需要添加例外:
+
 ```
 %USERPROFILE%\.auto-form-filler\
 ```
 
 ## 📚 相关脚本文件
 
-| 脚本 | 功能 | 使用方法 |
-|------|------|---------|
-| `check_crash_logs.bat` | 查看所有日志 | 双击运行 |
-| `view_logs.bat` | 启动图形界面查看器 | 双击运行 |
-| `test_logger.bat` | 测试日志系统 | 双击运行 |
+| 脚本                   | 功能               | 使用方法 |
+| ---------------------- | ------------------ | -------- |
+| `check_crash_logs.bat` | 查看所有日志       | 双击运行 |
+| `view_logs.bat`        | 启动图形界面查看器 | 双击运行 |
+| `test_logger.bat`      | 测试日志系统       | 双击运行 |
 
 ## 🆘 获取帮助
 
@@ -329,6 +345,7 @@ C:\Users\用户名\.auto-form-filler\logs\
    - `用户闪退排查手册.md`
 
 2. 导出日志:
+
    ```cmd
    check_crash_logs.bat > log_output.txt
    ```
