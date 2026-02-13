@@ -129,7 +129,13 @@ class AuditRowWidget(QFrame):
         c_layout.setContentsMargins(0, 0, 8, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        card_name = self.req.card.name if self.req.card else (self.req.original_name or "未知名片")
+        # 安全地获取名片名称，处理已删除的名片引用
+        try:
+            card_name = self.req.card.name if self.req.card else (self.req.original_name or "未知名片")
+        except Exception:
+            # 名片已被删除，使用备用名称
+            card_name = self.req.original_name or "已删除的名片"
+        
         lbl = QLabel(card_name)
         lbl.setStyleSheet(f"font-weight: 600; color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
         lbl.setToolTip(card_name)
@@ -143,7 +149,12 @@ class AuditRowWidget(QFrame):
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        user_name = self.req.user.username if self.req.user else "未知"
+        # 安全地获取用户名，处理已删除的用户引用
+        try:
+            user_name = self.req.user.username if self.req.user else "未知"
+        except Exception:
+            user_name = "已删除"
+        
         lbl = QLabel(user_name)
         lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
         c_layout.addWidget(lbl)
@@ -156,7 +167,12 @@ class AuditRowWidget(QFrame):
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        admin_name = self.req.admin.username if self.req.admin else "未知"
+        # 安全地获取管理员名，处理已删除的管理员引用
+        try:
+            admin_name = self.req.admin.username if self.req.admin else "未知"
+        except Exception:
+            admin_name = "已删除"
+        
         lbl = QLabel(admin_name)
         lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
         c_layout.addWidget(lbl)
@@ -359,9 +375,27 @@ class AdminAuditLogDetailDialog(QDialog):
         info_card = self._create_section("基本信息")
         info_layout = info_card.layout()
         
-        info_layout.addWidget(self._create_info_row("目标名片", self.request.card.name if self.request.card else self.request.original_name))
-        info_layout.addWidget(self._create_info_row("所属用户", self.request.user.username if self.request.user else "未知"))
-        info_layout.addWidget(self._create_info_row("申请管理员", self.request.admin.username if self.request.admin else "未知"))
+        # 安全地获取名片名称
+        try:
+            card_name = self.request.card.name if self.request.card else self.request.original_name
+        except Exception:
+            card_name = self.request.original_name or "已删除的名片"
+        
+        # 安全地获取用户名
+        try:
+            user_name = self.request.user.username if self.request.user else "未知"
+        except Exception:
+            user_name = "已删除"
+        
+        # 安全地获取管理员名
+        try:
+            admin_name = self.request.admin.username if self.request.admin else "未知"
+        except Exception:
+            admin_name = "已删除"
+        
+        info_layout.addWidget(self._create_info_row("目标名片", card_name))
+        info_layout.addWidget(self._create_info_row("所属用户", user_name))
+        info_layout.addWidget(self._create_info_row("申请管理员", admin_name))
         info_layout.addWidget(self._create_info_row("提交时间", self.request.created_at))
         if self.request.processed_at:
             info_layout.addWidget(self._create_info_row("处理时间", self.request.processed_at))

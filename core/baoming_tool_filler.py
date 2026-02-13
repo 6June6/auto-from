@@ -16,6 +16,7 @@ import json
 import time
 import base64
 import requests
+from datetime import datetime
 from typing import Optional, Dict, List, Tuple, Callable
 from urllib.parse import urlparse, parse_qs
 
@@ -438,84 +439,114 @@ class BaomingToolFiller:
         print(f"  ✅ [报名工具] 恢复登录状态: {token_data.get('uname', '用户')} (名片ID: {self.card_id})")
         return True
 
-    def _get_token_file_path(self):
-        """获取 Token 存储路径"""
-        import os
-        from pathlib import Path
-        # 存放在用户目录的 .auto-form-filler 文件夹下
-        home = Path.home()
-        config_dir = home / '.auto-form-filler'
-        config_dir.mkdir(parents=True, exist_ok=True)
-        return config_dir / 'baoming_tokens.json'
-
-    def _get_storage_key(self) -> str:
-        """
-        生成存储 Key: card_{card_id}
-        
-        ⚡️ 优化：只使用 card_id 作为 key，这样同一名片的所有报名工具链接共享 token
-        （之前是 card_{card_id}_eid_{eid}，每个活动都需要单独登录）
-        """
-        return f"card_{self.card_id}"
-
     def _save_token(self, user_data: Dict):
-        """保存 Token 到本地文件（支持多账号）"""
+        """保存 Token 到数据库"""
         try:
-            file_path = self._get_token_file_path()
-            key = self._get_storage_key()
+            from database.models import BaomingToken, Card
             
-            # 读取现有数据
-            all_tokens = {}
-            if file_path.exists():
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        all_tokens = json.load(f)
-                except:
-                    all_tokens = {}
+            if not self.card_id:
+                print(f"  ⚠️ [报名工具] 保存 Token 失败: 缺少 card_id")
+                return
             
-            # 更新特定 Key 的数据
-            # 添加保存时间
-            user_data['_save_time'] = time.time()
-            all_tokens[key] = user_data
+            # 查找名片
+            try:
+                card = Card.objects(id=self.card_id).first()
+                if not card:
+                    print(f"  ⚠️ [报名工具] 保存 Token 失败: 名片不存在 (ID: {self.card_id})")
+                    return
+            except Exception as e:
+                print(f"  ⚠️ [报名工具] 保存 Token 失败: 名片查询异常 - {e}")
+                return
             
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(all_tokens, f, ensure_ascii=False, indent=2)
-            print(f"  💾 [报名工具] Token 已保存: {key}")
+            # 查找或创建 Token 记录
+            token_record = BaomingToken.objects(card=card).first()
+            
+            if token_record:
+                # 更新现有记录
+                token_record.access_token = user_data.get('access_token', '')
+                token_record.uname = user_data.get('uname', '')
+                token_record.pic = user_data.get('pic', '')
+                token_record.unionid = user_data.get('unionid', '')
+                token_record.last_used = datetime.now()
+                token_record.save()
+                print(f"  💾 [报名工具] Token 已更新: 名片 '{card.name}' (ID: {self.card_id})")
+            else:
+                # 创建新记录
+                token_record = BaomingToken(
+                    card=card,
+                    access_token=user_data.get('access_token', ''),
+                    uname=user_data.get('uname', ''),
+                    pic=user_data.get('pic', ''),
+                    unionid=user_data.get('unionid', '')
+                )
+                token_record.save()
+                print(f"  💾 [报名工具] Token 已保存: 名片 '{card.name}' (ID: {self.card_id})")
+                
         except Exception as e:
             print(f"  ⚠️ [报名工具] 保存 Token 失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _load_token(self) -> Optional[Dict]:
-        """从本地文件加载特定 Key 的 Token"""
+        """从数据库加载 Token"""
         try:
-            file_path = self._get_token_file_path()
-            if not file_path.exists():
+            from database.models import BaomingToken, Card
+            from datetime import datetime
+            
+            if not self.card_id:
                 return None
             
-            key = self._get_storage_key()
+            # 查找名片
+            try:
+                card = Card.objects(id=self.card_id).first()
+                if not card:
+                    return None
+            except:
+                return None
             
-            with open(file_path, 'r', encoding='utf-8') as f:
-                all_tokens = json.load(f)
-                return all_tokens.get(key)
+            # 查找 Token 记录
+            token_record = BaomingToken.objects(card=card).first()
+            
+            if token_record:
+                # 更新最后使用时间
+                token_record.last_used = datetime.now()
+                token_record.save()
+                
+                return {
+                    'access_token': token_record.access_token,
+                    'uname': token_record.uname,
+                    'pic': token_record.pic,
+                    'unionid': token_record.unionid
+                }
+            
+            return None
+            
         except Exception as e:
             print(f"  ⚠️ [报名工具] 加载 Token 失败: {e}")
             return None
     
     def _clear_token(self):
-        """清空当前 Key 的 Token（token 失效时调用）"""
+        """清空数据库中的 Token（token 失效时调用）"""
         try:
-            file_path = self._get_token_file_path()
-            if not file_path.exists():
+            from database.models import BaomingToken, Card
+            
+            if not self.card_id:
                 return
             
-            key = self._get_storage_key()
+            # 查找名片
+            try:
+                card = Card.objects(id=self.card_id).first()
+                if not card:
+                    return
+            except:
+                return
             
-            with open(file_path, 'r', encoding='utf-8') as f:
-                all_tokens = json.load(f)
-            
-            if key in all_tokens:
-                del all_tokens[key]
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(all_tokens, f, ensure_ascii=False, indent=2)
-                print(f"  🗑️ [报名工具] Token 已清空: {key}")
+            # 删除 Token 记录
+            token_record = BaomingToken.objects(card=card).first()
+            if token_record:
+                token_record.delete()
+                print(f"  🗑️ [报名工具] Token 已清空: 名片 '{card.name}' (ID: {self.card_id})")
+                
         except Exception as e:
             print(f"  ⚠️ [报名工具] 清空 Token 失败: {e}")
     

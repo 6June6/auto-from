@@ -6790,40 +6790,12 @@ class NewFillWindow(QDialog):
                             coreTitle = title;
                         }}
                         
-                        // 使用核心标题作为主标识符
+                        // 使用核心标题作为标识符，直接交给共享匹配算法
                         const identifiers = [coreTitle];
-                        // 如果核心标题与原标题不同，也加入原标题
                         if (coreTitle !== title) {{
                             identifiers.push(title);
                         }}
                         
-                        // 添加补充标识符（基于原标题检测）
-                        if (title.includes('昵称')) identifiers.push('昵称', '达人昵称', '用户名', '名字');
-                        if (title.includes('达人')) identifiers.push('达人昵称', '达人');
-                        if (title.includes('id') || title.includes('ID')) identifiers.push('id', '账号', 'ID');
-                        if (title.includes('链接')) identifiers.push('主页链接', '链接', '主页');
-                        if (title.includes('粉丝')) identifiers.push('粉丝数', '粉丝');
-                        if (title.includes('赞藏')) identifiers.push('赞藏数', '点赞', '收藏');
-                        if (title.includes('价格') || title.includes('报价') || title.includes('底价')) identifiers.push('报价', '价格', '图文价格', '视频价格');
-                        if (title.includes('微信')) identifiers.push('微信号', '微信', 'wx');
-                        // ⚡️ 增强手机号匹配：同时检测 '电话' 和 '手机' 和 '联系方式' 和 '联系'
-                        if (title.includes('电话') || title.includes('手机') || title.includes('联系方式') || (title.includes('联系') && !title.includes('联系人'))) {{
-                            identifiers.push('手机', '电话', '手机号', '电话号码', '联系方式', '联系电话');
-                        }}
-                        // ⚡️ 新增：地区/城市相关字段识别
-                        if (title.includes('省') || title.includes('市') || title.includes('区') || title.includes('城市') || title.includes('地区')) {{
-                            identifiers.push('城市', '地区', '所在地', '省份', '所在城市', '地址');
-                        }}
-                        // ⚡️ 新增：账号类型相关字段识别
-                        if (title.includes('类型') || title.includes('类别') || title.includes('领域') || title.includes('分类')) {{
-                            identifiers.push('账号类型', '类型', '类别', '领域', '分类', '账号类别');
-                        }}
-                        // ⚡️ 新增：非报备相关字段识别
-                        if (title.includes('非报备') || title.includes('不报备')) {{
-                            identifiers.push('非报备', '不报备', '非报备价格', '非报备图文', '非报备视频');
-                        }}
-                        
-                        // 传入表单标题用于互斥检测
                         const match = findBestMatch(identifiers, title);
                         if (match.item && match.score >= 50) {{
                             filled = fillInput(textInput, match.item.value);

@@ -423,14 +423,37 @@ class CardEditRequest(Document):
     def to_dict(self):
         """转换为字典"""
         import json
+        
+        # 安全地获取引用字段，处理已删除的文档
+        try:
+            card_id = str(self.card.id) if self.card else None
+            card_name = self.card.name if self.card else ''
+        except Exception:
+            card_id = None
+            card_name = self.original_name or '已删除'
+        
+        try:
+            user_id = str(self.user.id) if self.user else None
+            username = self.user.username if self.user else ''
+        except Exception:
+            user_id = None
+            username = '已删除'
+        
+        try:
+            admin_id = str(self.admin.id) if self.admin else None
+            admin_name = self.admin.username if self.admin else ''
+        except Exception:
+            admin_id = None
+            admin_name = '已删除'
+        
         return {
             'id': str(self.id),
-            'card_id': str(self.card.id) if self.card else None,
-            'card_name': self.card.name if self.card else '',
-            'user_id': str(self.user.id) if self.user else None,
-            'username': self.user.username if self.user else '',
-            'admin_id': str(self.admin.id) if self.admin else None,
-            'admin_name': self.admin.username if self.admin else '',
+            'card_id': card_id,
+            'card_name': card_name,
+            'user_id': user_id,
+            'username': username,
+            'admin_id': admin_id,
+            'admin_name': admin_name,
             'original_name': self.original_name,
             'original_description': self.original_description,
             'original_category': self.original_category,
@@ -650,6 +673,49 @@ class FieldLibrary(Document):
             'created_by': self.created_by.username if self.created_by else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class BaomingToken(Document):
+    """报名工具 Token 模型"""
+    card = ReferenceField(Card, required=True, verbose_name="所属名片")
+    access_token = StringField(required=True, verbose_name="访问令牌")
+    uname = StringField(max_length=100, verbose_name="用户昵称")
+    pic = StringField(verbose_name="用户头像URL")
+    unionid = StringField(max_length=100, verbose_name="微信 unionid")
+    created_at = DateTimeField(default=datetime.now, verbose_name="创建时间")
+    updated_at = DateTimeField(default=datetime.now, verbose_name="更新时间")
+    last_used = DateTimeField(default=datetime.now, verbose_name="最后使用时间")
+    
+    meta = {
+        'collection': 'baoming_tokens',
+        'ordering': ['-updated_at'],
+        'auto_create_index': False,
+        'indexes': [
+            'card',
+            'unionid',
+            '-updated_at'
+        ]
+    }
+    
+    def save(self, *args, **kwargs):
+        """保存时更新时间"""
+        self.updated_at = datetime.now()
+        return super().save(*args, **kwargs)
+    
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            'id': str(self.id),
+            'card_id': str(self.card.id) if self.card else None,
+            'card_name': self.card.name if self.card else None,
+            'access_token': self.access_token,
+            'uname': self.uname,
+            'pic': self.pic,
+            'unionid': self.unionid,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'last_used': self.last_used.isoformat() if self.last_used else None
         }
 
 
