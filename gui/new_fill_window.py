@@ -6464,6 +6464,23 @@ class NewFillWindow(QDialog):
         return input.value === value;
     }}
     
+    // 辅助函数：最长公共子串（用于模糊匹配）
+    function longestCommonSubstring(s1, s2) {{
+        const m = s1.length, n = s2.length;
+        if (m === 0 || n === 0) return 0;
+        let maxLen = 0;
+        const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+        for (let i = 1; i <= m; i++) {{
+            for (let j = 1; j <= n; j++) {{
+                if (s1[i-1] === s2[j-1]) {{
+                    dp[i][j] = dp[i-1][j-1] + 1;
+                    maxLen = Math.max(maxLen, dp[i][j]);
+                }}
+            }}
+        }}
+        return maxLen;
+    }}
+    
     // 处理多选题（checkbox）
     function handleCheckbox(fieldDiv, value, questionTitle) {{
         const checkboxes = fieldDiv.querySelectorAll('input[type="checkbox"]');
