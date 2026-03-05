@@ -154,6 +154,7 @@ class InputGroup(QWidget):
         
         # 输入框
         self.input = QLineEdit()
+        self.input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.input.setPlaceholderText(placeholder)
         if is_password:
             self.input.setEchoMode(QLineEdit.EchoMode.Password)

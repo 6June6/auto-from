@@ -6,7 +6,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QMessageBox, QLineEdit, QFrame, QScrollArea,
-    QDialog, QComboBox, QTextEdit
+    QDialog, QComboBox, QTextEdit, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -20,12 +20,13 @@ from gui.admin_base_components import (
 # 固定模板列表列宽配置
 TEMPLATE_LIST_COLUMNS = {
     'field_name': 180,
-    'field_value': 180,
-    'value_count': 80,
-    'category': 100,
-    'description': 130,
-    'order': 60,
-    'status': 80,
+    'field_value': 160,
+    'value_count': 70,
+    'category': 90,
+    'description': 120,
+    'order': 50,
+    'is_special': 70,
+    'status': 70,
     'actions': 140
 }
 
@@ -41,6 +42,7 @@ class TemplateListHeader(BaseListHeader):
             ('分类', TEMPLATE_LIST_COLUMNS['category']),
             ('说明', TEMPLATE_LIST_COLUMNS['description']),
             ('排序', TEMPLATE_LIST_COLUMNS['order']),
+            ('特殊项', TEMPLATE_LIST_COLUMNS['is_special']),
             ('状态', TEMPLATE_LIST_COLUMNS['status']),
             ('操作', TEMPLATE_LIST_COLUMNS['actions'])
         ]
@@ -130,7 +132,34 @@ class TemplateRowWidget(BaseRowWidget):
         order_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
         layout.addWidget(order_label)
         
-        # 7. 状态
+        # 7. 特殊项
+        special_container = QWidget()
+        special_container.setFixedWidth(TEMPLATE_LIST_COLUMNS['is_special'])
+        special_layout = QHBoxLayout(special_container)
+        special_layout.setContentsMargins(0, 0, 0, 0)
+        special_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        is_special = getattr(self.template, 'is_special', False) or False
+        special_label = QLabel()
+        if is_special:
+            special_label.setText("⭐ 是")
+            special_label.setStyleSheet("""
+                color: #d97706; 
+                background: #fffbeb; 
+                padding: 4px 8px; 
+                border-radius: 6px; 
+                font-size: 11px; 
+                font-weight: 600;
+            """)
+        else:
+            special_label.setText("否")
+            special_label.setStyleSheet(f"""
+                color: {PREMIUM_COLORS['text_hint']}; 
+                font-size: 11px;
+            """)
+        special_layout.addWidget(special_label)
+        layout.addWidget(special_container)
+        
         status_container = QWidget()
         status_container.setFixedWidth(TEMPLATE_LIST_COLUMNS['status'])
         status_layout = QHBoxLayout(status_container)
@@ -347,6 +376,28 @@ class AddTemplateDialog(QDialog):
         self.order_input = self._create_input_field("排序", "数字越小越靠前", "0")
         form_layout.addWidget(self.order_input)
         
+        # 特殊项
+        self.special_checkbox = QCheckBox("标记为特殊项")
+        self.special_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {PREMIUM_COLORS['text_body']};
+                font-weight: 600;
+                font-size: 13px;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 2px solid {PREMIUM_COLORS['border']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {PREMIUM_COLORS['gradient_blue_start']};
+                border-color: {PREMIUM_COLORS['gradient_blue_start']};
+            }}
+        """)
+        form_layout.addWidget(self.special_checkbox)
+        
         form_layout.addStretch()
         scroll_area.setWidget(scroll_content)
         layout.addWidget(scroll_area, 1)
@@ -393,6 +444,7 @@ class AddTemplateDialog(QDialog):
             self.placeholder_input.input.setText(self.template.placeholder or '')
             self.desc_input.input.setText(self.template.description or '')
             self.order_input.input.setText(str(self.template.order))
+            self.special_checkbox.setChecked(getattr(self.template, 'is_special', False) or False)
             
             # 解析多值提示并回显（必须在设置 value_count 之前）
             template_str = getattr(self.template, 'value_placeholder_template', '') or ''
@@ -700,7 +752,8 @@ class AddTemplateDialog(QDialog):
             'placeholder': self.placeholder_input.input.text().strip(),
             'category': self.category_combo.currentText().strip() or '通用',
             'description': self.desc_input.input.text().strip(),
-            'order': order
+            'order': order,
+            'is_special': self.special_checkbox.isChecked()
         }
         
         try:

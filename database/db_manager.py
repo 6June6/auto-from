@@ -179,13 +179,14 @@ class DatabaseManager:
     @staticmethod
     def _sync_fixed_template_fields(user, exclude_card_id: str, updates: Dict[str, Dict[str, str]]) -> int:
         """
-        同步固定模板字段名到用户的其他名片（只同步字段名，不同步字段值）
+        同步固定模板字段到用户的其他名片
+        - 所有固定模板字段：同步字段名(key)
+        - 特殊项(is_special=True)：同时同步字段值(value)
         
         Args:
             user: 用户对象
             exclude_card_id: 排除的名片ID（当前正在编辑的名片）
             updates: 需要同步的更新 {fixed_template_id: {'key': key, 'value': value}}
-                     注意：value 仅用于记录，实际同步时只更新 key
         
         Returns:
             更新的名片数量
@@ -196,20 +197,20 @@ class DatabaseManager:
         
         print(f"🔄 开始同步固定模板字段，需要同步的模板ID: {list(updates.keys())}")
         
+        special_map = DatabaseManager.get_fixed_templates_special_map(list(updates.keys()))
+        special_template_ids = {tid for tid, is_sp in special_map.items() if is_sp}
+        
         try:
-            # 获取该用户的所有其他名片
             other_cards = Card.objects(user=user)
             updated_count = 0
             
             print(f"🔄 找到用户的 {other_cards.count()} 个名片，排除当前名片ID: {exclude_card_id}")
             
             for other_card in other_cards:
-                # 跳过当前编辑的名片
                 if str(other_card.id) == exclude_card_id:
                     print(f"  ⏭️ 跳过当前编辑的名片: {other_card.name}")
                     continue
                 
-                # 检查该名片的配置项是否有需要同步的固定模板
                 card_updated = False
                 new_configs = []
                 
@@ -221,20 +222,23 @@ class DatabaseManager:
                         'fixed_template_id': config.fixed_template_id
                     }
                     
-                    # 检查是否需要同步
                     if config.fixed_template_id and config.fixed_template_id in updates:
                         update_data = updates[config.fixed_template_id]
-                        # 只同步字段名，不同步字段值（保留每张名片原有的值）
+                        is_special = config.fixed_template_id in special_template_ids
+                        
                         if config_dict['key'] != update_data['key']:
-                            print(f"  📝 发现需要同步的字段名: 名片「{other_card.name}」的 {config_dict['key']} -> {update_data['key']}（值保持不变）")
+                            print(f"  📝 同步字段名: 名片「{other_card.name}」的 {config_dict['key']} -> {update_data['key']}")
                             config_dict['key'] = update_data['key']
+                            card_updated = True
+                        
+                        if is_special and config_dict['value'] != update_data['value']:
+                            print(f"  📝 同步特殊字段值: 名片「{other_card.name}」的 {config_dict['key']}: {config_dict['value']} -> {update_data['value']}")
+                            config_dict['value'] = update_data['value']
                             card_updated = True
                     
                     new_configs.append(config_dict)
                 
-                # 如果有更新，保存名片（不递归同步）
                 if card_updated:
-                    # 直接更新配置项，避免递归调用
                     config_items = []
                     for i, cfg in enumerate(new_configs):
                         config_item = CardConfigItem(
@@ -822,7 +826,7 @@ class DatabaseManager:
     @staticmethod
     def get_all_notices(category: str = None, platform: str = None, 
                        status: str = 'active', min_fans: int = None,
-                       keyword: str = None, limit: int = 100,
+                       keyword: str = None, limit: int = 0,
                        start_date=None, end_date=None,
                        max_reward: str = None) -> List[Notice]:
         """
@@ -855,7 +859,6 @@ class DatabaseManager:
                 query = query.filter(platform=platform)
                 
             if min_fans is not None:
-                # 筛选粉丝门槛 >= 指定值的通告（"5000+" 表示找门槛 >= 5000 的）
                 query = query.filter(min_fans__gte=min_fans)
             
             # 时间区间筛选：通告有效期与筛选区间有交集
@@ -1258,10 +1261,25 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_fixed_templates_special_map(template_ids: List[str]) -> Dict[str, bool]:
+        """批量查询固定模板的 is_special 状态，返回 {template_id: is_special}"""
+        result = {}
+        if not template_ids:
+            return result
+        try:
+            templates = FixedTemplate.objects(id__in=template_ids).only('id', 'is_special')
+            for tpl in templates:
+                result[str(tpl.id)] = tpl.is_special
+        except Exception as e:
+            print(f"❌ 批量查询固定模板特殊状态失败: {e}")
+        return result
+
+    @staticmethod
     def create_fixed_template(field_name: str, field_value: str, category: str = '通用',
                              description: str = None, placeholder: str = None,
                              order: int = 0, value_count: int = 1, 
-                             value_placeholder_template: str = None, created_by=None) -> FixedTemplate:
+                             value_placeholder_template: str = None,
+                             is_special: bool = False, created_by=None) -> FixedTemplate:
         """
         创建固定模板
         
@@ -1274,6 +1292,7 @@ class DatabaseManager:
             order: 排序
             value_count: 字段值数量，默认为1
             value_placeholder_template: 多值提示模板（JSON数组格式）
+            is_special: 是否特殊项
             created_by: 创建人
         
         Returns:
@@ -1289,6 +1308,7 @@ class DatabaseManager:
                 category=category,
                 description=description,
                 order=order,
+                is_special=is_special,
                 is_active=True,
                 created_by=created_by
             )
@@ -1419,7 +1439,7 @@ class DatabaseManager:
                 query = query.filter(Q(card__in=cards) | Q(link__in=links))
             
             total = query.count()
-            records = list(query.order_by('-created_at').skip(offset).limit(limit))
+            records = list(query.order_by('-created_at').skip(offset).limit(limit).select_related(max_depth=2))
             
             return {
                 'records': records,

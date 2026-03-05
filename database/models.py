@@ -5,7 +5,7 @@
 from mongoengine import (
     Document, EmbeddedDocument, 
     StringField, IntField, BooleanField, DateTimeField, 
-    EmbeddedDocumentListField, ReferenceField,
+    ListField, EmbeddedDocumentListField, ReferenceField,
     connect
 )
 from datetime import datetime
@@ -511,7 +511,7 @@ class Notice(Document):
     """通告广场-通告模型（简化版）"""
     # 核心字段
     platform = StringField(required=True, max_length=50, verbose_name="平台")
-    category = StringField(max_length=50, verbose_name="类目")
+    category = ListField(StringField(max_length=50), verbose_name="类目")
     content = StringField(verbose_name="通告内容")  # 长文本，包含所有信息和链接
     
     # 以下字段保留用于兼容旧数据，新数据主要使用 content 字段
@@ -772,6 +772,7 @@ class FixedTemplate(Document):
     category = StringField(default='通用', max_length=50, verbose_name="分类")
     description = StringField(verbose_name="说明")
     order = IntField(default=0, verbose_name="排序")
+    is_special = BooleanField(default=False, verbose_name="是否特殊项")  # 标记为特殊项的字段，用于前端特殊处理
     is_active = BooleanField(default=True, verbose_name="是否启用")
     created_by = ReferenceField(User, verbose_name="创建人")
     created_at = DateTimeField(default=datetime.now, verbose_name="创建时间")
@@ -805,6 +806,7 @@ class FixedTemplate(Document):
             'category': self.category,
             'description': self.description,
             'order': self.order,
+            'is_special': self.is_special,
             'is_active': self.is_active,
             'created_by': self.created_by.username if self.created_by else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,

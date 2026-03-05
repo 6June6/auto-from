@@ -521,7 +521,7 @@ class AdminFillRecordManager(QWidget):
         
     def on_search(self):
         self.current_page = 1
-        self.load_data()
+        self.load_data(refresh_stats=True)
         
     def change_page(self):
         sender = self.sender()
@@ -533,22 +533,21 @@ class AdminFillRecordManager(QWidget):
     def go_to_page(self, page):
         if 1 <= page <= self.total_pages:
             self.current_page = page
-            self.load_data()
+            self.load_data(refresh_stats=False)
             
-    def load_data(self):
+    def load_data(self, refresh_stats=True):
         keyword = self.search_input.text().strip()
         
-        # 获取统计
-        stats = self.db_manager.get_statistics()
-        if "总记录数" in self.stat_cards:
-            self.stat_cards["总记录数"].update_value(stats.get('total_records', 0))
-        if "今日记录" in self.stat_cards:
-            self.stat_cards["今日记录"].update_value(stats.get('today_records', 0))
-        if "成功率" in self.stat_cards:
-            rate = stats.get('success_rate', 0)
-            self.stat_cards["成功率"].update_value(f"{rate}%")
+        if refresh_stats:
+            stats = self.db_manager.get_statistics()
+            if "总记录数" in self.stat_cards:
+                self.stat_cards["总记录数"].update_value(stats.get('total_records', 0))
+            if "今日记录" in self.stat_cards:
+                self.stat_cards["今日记录"].update_value(stats.get('today_records', 0))
+            if "成功率" in self.stat_cards:
+                rate = stats.get('success_rate', 0)
+                self.stat_cards["成功率"].update_value(f"{rate}%")
             
-        # 获取分页数据
         offset = (self.current_page - 1) * self.page_size
         result = self.db_manager.get_all_fill_records(keyword=keyword, limit=self.page_size, offset=offset)
         

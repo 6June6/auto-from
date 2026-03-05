@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QMessageBox, QHeaderView, QFrame, QSpacerItem, QSizePolicy,
                              QGraphicsDropShadowEffect, QScrollArea, QCheckBox, 
                              QListWidget, QListWidgetItem, QGridLayout, QDialog, QLineEdit,
-                             QTabWidget, QComboBox, QInputDialog, QMenu)
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject, QEvent
+                             QTabWidget, QComboBox, QInputDialog, QMenu, QApplication)
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QPoint, QTimer, QThread, QObject, QEvent, QSettings
 from PyQt6.QtGui import QFont, QColor, QAction
 from .icons import safe_qta_icon as qta_icon
 from database import DatabaseManager
@@ -816,14 +816,7 @@ class AddCardDialog(QDialog):
         title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
         header_layout.addWidget(title)
         
-        # 如果是编辑模式，在右上角显示ID或其他信息
-        if self.card:
-            id_label = QLabel(f"ID: {str(self.card.id)[-6:]}")
-            id_label.setStyleSheet("color: #9CA3AF; font-size: 12px; font-family: monospace;")
-            header_layout.addStretch()
-            header_layout.addWidget(id_label)
-        else:
-            header_layout.addStretch()
+        header_layout.addStretch()
             
         top_layout.addLayout(header_layout)
         
@@ -1248,6 +1241,7 @@ class AddCardDialog(QDialog):
         
         for i, row_data in enumerate(self.field_rows):
             widget = row_data['widget']
+            widget.update_row_index(i + 1)
             target_pos = QPoint(0, current_y)
             
             # 确保宽度跟随容器
@@ -1318,6 +1312,22 @@ class AddCardDialog(QDialog):
         btn_layout.setSpacing(12)
         btn_layout.addStretch()
         
+        paste_btn = QPushButton("粘贴")
+        paste_btn.setFixedSize(80, 36)
+        paste_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        paste_btn.setStyleSheet("""
+            QPushButton {
+                background: white;
+                color: #666;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            QPushButton:hover { background: #F5F5F5; border-color: #3B82F6; color: #3B82F6; }
+        """)
+        paste_btn.clicked.connect(lambda: input_field.insert(QApplication.clipboard().text()))
+        
         ok_btn = QPushButton("确定")
         ok_btn.setFixedSize(80, 36)
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1339,19 +1349,20 @@ class AddCardDialog(QDialog):
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.setStyleSheet("""
             QPushButton {
-                background: #3B82F6;
-                color: white;
+                background: #F3F4F6;
+                color: #4B5563;
                 border: none;
                 border-radius: 6px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 500;
             }
-            QPushButton:hover { background: #2563EB; }
+            QPushButton:hover { background: #E5E7EB; }
         """)
         cancel_btn.clicked.connect(dialog.reject)
         
-        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(paste_btn)
         btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
         layout.addLayout(btn_layout)
         
         input_field.setFocus()
@@ -1489,7 +1500,7 @@ class AddCardDialog(QDialog):
             QMessageBox.warning(
                 self, 
                 "字段名重复", 
-                f"检测到重复的字段名：\n{duplicate_fields}\n\n请修改后再保存。"
+                f"{duplicate_fields}\n\n请修改后再保存。"
             )
             return
         
@@ -1600,7 +1611,7 @@ class AddCardDialog(QDialog):
             QMessageBox.warning(
                 self, 
                 "字段名重复", 
-                f"检测到重复的字段名：\n{duplicate_fields}\n\n请修改后再保存。"
+                f"{duplicate_fields}\n\n请修改后再保存。"
             )
             return
         
@@ -1790,15 +1801,29 @@ class AddCardDialog(QDialog):
                     field_segments_map[segment] = []
                 field_segments_map[segment].append((key, idx + 1))
         
-        # 查找重复的子字段名
-        duplicates = []
+        # 查找重复的子字段名，按行号聚合
+        row_duplicates = {}  # {(行A, 行B): [重复的子字段名, ...]}
         for segment, sources in field_segments_map.items():
             if len(sources) > 1:
-                # 这个子字段名出现在多个字段中
-                source_desc = "、".join([f"第{row}行「{name}」" for name, row in sources])
-                duplicates.append(f"「{segment}」出现在: {source_desc}")
+                rows = sorted(set(row for _, row in sources))
+                for i in range(len(rows)):
+                    for j in range(i + 1, len(rows)):
+                        pair = (rows[i], rows[j])
+                        if pair not in row_duplicates:
+                            row_duplicates[pair] = []
+                        row_duplicates[pair].append(segment)
         
-        return "\n".join(duplicates)
+        if not row_duplicates:
+            return ""
+        
+        lines = []
+        for (r1, r2), segs in sorted(row_duplicates.items()):
+            preview = "、".join(segs[:3])
+            if len(segs) > 3:
+                preview += f" 等{len(segs)}个"
+            lines.append(f"第 {r1} 行和第 {r2} 行有重复字段名：{preview}")
+        
+        return "\n".join(lines)
 
     def _check_field_key_length(self, configs: list, max_length: int = 500) -> str:
         """
@@ -1854,6 +1879,7 @@ class DraggableFieldRow(QWidget):
         self.value_placeholder_template = value_placeholder_template  # 多值提示模板，支持 {index} 占位符
         self.value_count = max(1, value_count or 1)  # 字段值数量，至少为1
         self.value_inputs = []  # 存储多个值输入框
+        self.row_index = 0  # 序号，由父级更新
         self.init_ui(key, value)
     
     def init_ui(self, key, value):
@@ -1894,10 +1920,33 @@ class DraggableFieldRow(QWidget):
         shadow.setOffset(0, 4)
         self.setGraphicsEffect(shadow)
         
-        # 主布局：水平排列 [字段名区] [字段值区] [操作区]
+        # 主布局：水平排列 [序号] [字段名区] [字段值区] [操作区]
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(20, 16, 20, 16)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(12, 16, 20, 16)
+        main_layout.setSpacing(12)
+        
+        # === 0. 序号标签 ===
+        index_container = QWidget()
+        index_container.setFixedWidth(24)
+        index_container.setStyleSheet("border:none; background:transparent;")
+        index_v_layout = QVBoxLayout(index_container)
+        index_v_layout.setContentsMargins(0, 28, 0, 0)
+        index_v_layout.setSpacing(0)
+        index_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.index_label = QLabel("0")
+        self.index_label.setFixedSize(24, 24)
+        self.index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.index_label.setStyleSheet("""
+            font-size: 11px;
+            font-weight: 700;
+            color: #9CA3AF;
+            background: #F3F4F6;
+            border-radius: 12px;
+            border: none;
+        """)
+        index_v_layout.addWidget(self.index_label)
+        main_layout.addWidget(index_container)
         
         # === 1. 左侧：字段名区域 (30%) ===
         left_container = QWidget()
@@ -2106,6 +2155,12 @@ class DraggableFieldRow(QWidget):
         """获取所有字段值（返回数组）"""
         return [inp.text().strip() for inp in self.value_inputs]
     
+    def update_row_index(self, index):
+        """更新序号显示"""
+        self.row_index = index
+        if hasattr(self, 'index_label'):
+            self.index_label.setText(str(index))
+    
     def eventFilter(self, obj, event):
         """事件过滤器 - 处理拖拽"""
         if obj == self.drag_btn:
@@ -2206,6 +2261,7 @@ class CollapsibleCategoryWidget(QWidget):
     category_clicked = pyqtSignal(str)
     rename_clicked = pyqtSignal(str)  # 重命名分类信号
     delete_clicked = pyqtSignal(str)  # 删除分类信号
+    collapsed_changed = pyqtSignal(str, bool)  # (分类名, 是否折叠)
     
     def __init__(self, category_name: str, parent=None):
         super().__init__(parent)
@@ -2217,23 +2273,27 @@ class CollapsibleCategoryWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 10, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 4, 0, 0)
+        layout.setSpacing(2)
         self.setLayout(layout)
         
-        # 极简标题栏 (Ultra Minimal Header)
-        # 不使用 QFrame，避免任何潜在的边框
+        # 现代设计风格的标题栏 (无背景框，更轻量优雅)
         header = QWidget()
         header.setObjectName("categoryHeader")
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(4, 4, 8, 4)
-        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(2, 4, 4, 4)
+        header_layout.setSpacing(6)
         header.setLayout(header_layout)
         
-        # 完全透明，无边框，无背景
+        # 标题栏背景样式 - 完全透明，靠排版区分层次
         header.setStyleSheet("""
             #categoryHeader {
                 background: transparent;
+                border: none;
+            }
+            #categoryHeader:hover {
+                background: rgba(241, 245, 249, 0.6); /* 极其微弱的悬停反馈 */
+                border-radius: 6px;
             }
         """)
         
@@ -2248,10 +2308,6 @@ class CollapsibleCategoryWidget(QWidget):
                 padding: 0px;
                 outline: none;
             }
-            QPushButton:hover {
-                background: transparent;
-                border: none;
-            }
             QPushButton:focus {
                 border: none;
                 outline: none;
@@ -2263,19 +2319,25 @@ class CollapsibleCategoryWidget(QWidget):
         toggle_layout.setContentsMargins(0, 0, 0, 0)
         toggle_layout.setSpacing(6)
         
-        # 图标
+        # 图标 (去除圆形白底，更极简)
         self.arrow_icon = QLabel()
         self.arrow_icon.setFixedSize(16, 16)
-        # 默认图标
-        self.arrow_icon.setPixmap(Icons.chevron_down('#666666').pixmap(12, 12))
+        self.arrow_icon.setStyleSheet("""
+            background: transparent;
+            border: none;
+        """)
+        self.arrow_icon.setPixmap(Icons.chevron_down('#64748B').pixmap(12, 12))
         self.arrow_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # 名称
+        # 名称 (设计感：更深的颜色，现代字体，无边框)
         self.name_label = QLabel(self.category_name)
         self.name_label.setStyleSheet("""
-            font-size: 14px;
-            font-weight: 600;
-            color: #333333;
+            font-size: 13px;
+            font-weight: 700;
+            color: #1E293B;
+            letter-spacing: 0.3px;
+            background: transparent;
+            border: none;
         """)
         
         toggle_layout.addWidget(self.arrow_icon)
@@ -2291,41 +2353,65 @@ class CollapsibleCategoryWidget(QWidget):
         actions_layout.setSpacing(4)
         
         # 辅助方法：创建图标按钮
-        def create_action_btn(icon, tooltip, callback):
+        def create_action_btn(icon, tooltip, hover_bg):
             btn = QPushButton()
             btn.setIcon(icon)
             btn.setFixedSize(24, 24)
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
+            btn.setStyleSheet(f"""
+                QPushButton {{
                     background: transparent;
                     border: none;
                     border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background: rgba(0, 0, 0, 0.05);
-                }
+                }}
+                QPushButton:hover {{
+                    background: {hover_bg};
+                }}
             """)
-            btn.clicked.connect(callback)
             return btn
         
         # 编辑
-        edit_btn = create_action_btn(Icons.edit('#999999'), "重命名", lambda: self.rename_clicked.emit(self.category_name))
+        edit_btn = create_action_btn(Icons.edit('#94A3B8'), "重命名", '#F1F5F9')
+        edit_btn.clicked.connect(lambda: self.rename_clicked.emit(self.category_name))
         actions_layout.addWidget(edit_btn)
         
         # 删除
-        delete_btn = create_action_btn(Icons.trash('#FF3B30'), "删除", lambda: self.delete_clicked.emit(self.category_name))
+        delete_btn = create_action_btn(Icons.trash('#94A3B8'), "删除", '#FEF2F2')
+        delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.category_name))
         actions_layout.addWidget(delete_btn)
+        
+        # 竖线分隔
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setStyleSheet("background: #E2E8F0; max-width: 1px; margin: 4px 6px;")
+        actions_layout.addWidget(separator)
         
         # 全选
         self.category_checkbox = QCheckBox("全选")
         self.category_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.category_checkbox.setStyleSheet("""
-            QCheckBox { color: #86868B; font-size: 12px; margin-left: 8px; }
-            QCheckBox::indicator { width: 14px; height: 14px; border-radius: 4px; border: 1px solid #C7C7CC; background: white; }
-            QCheckBox::indicator:checked { background: #007AFF; border-color: #007AFF; image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgNEw0LjUgNy41TDExIDEiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+); }
-            QCheckBox::indicator:hover { border-color: #007AFF; }
+            QCheckBox { 
+                color: #64748B; 
+                font-size: 12px; 
+                font-weight: 500;
+                background: transparent;
+            }
+            QCheckBox::indicator { 
+                width: 14px; 
+                height: 14px; 
+                border-radius: 3px; 
+                border: 1px solid #CBD5E1; 
+                background: white; 
+            }
+            QCheckBox::indicator:checked { 
+                background: #3B82F6; 
+                border-color: #3B82F6; 
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgNEw0LjUgNy41TDExIDEiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+); 
+            }
+            QCheckBox::indicator:hover { 
+                border-color: #94A3B8; 
+            }
         """)
         self.category_checkbox.stateChanged.connect(self.on_category_checkbox_changed)
         actions_layout.addWidget(self.category_checkbox)
@@ -2352,8 +2438,17 @@ class CollapsibleCategoryWidget(QWidget):
     def toggle_collapse(self):
         self.is_collapsed = not self.is_collapsed
         self.cards_container.setVisible(not self.is_collapsed)
-        # 切换图标
-        icon_pixmap = Icons.chevron_right('#666666').pixmap(12, 12) if self.is_collapsed else Icons.chevron_down('#666666').pixmap(12, 12)
+        icon_pixmap = Icons.chevron_right('#64748B').pixmap(12, 12) if self.is_collapsed else Icons.chevron_down('#64748B').pixmap(12, 12)
+        self.arrow_icon.setPixmap(icon_pixmap)
+        self.collapsed_changed.emit(self.category_name, self.is_collapsed)
+
+    def set_collapsed(self, collapsed: bool):
+        """直接设置折叠状态（不触发信号，用于恢复持久化状态）"""
+        if self.is_collapsed == collapsed:
+            return
+        self.is_collapsed = collapsed
+        self.cards_container.setVisible(not collapsed)
+        icon_pixmap = Icons.chevron_right('#64748B').pixmap(12, 12) if collapsed else Icons.chevron_down('#64748B').pixmap(12, 12)
         self.arrow_icon.setPixmap(icon_pixmap)
         
     def update_category_name(self, new_name: str):
@@ -2386,7 +2481,7 @@ class DraggableCardGrid(QWidget):
         self.current_placeholder_index = -1  # 当前占位符位置
         self.animations = []  # 存储动画对象
         
-        self.MAX_COLUMNS = 4
+        self.MAX_COLUMNS = 3
         self.CARD_HEIGHT = 36
         self.SPACING = 8
         self.MARGIN = 8
@@ -2657,41 +2752,70 @@ class StyledTooltip(QLabel):
         self.adjustSize()
 
 class ToolTipEventFilter(QObject):
+    AUTO_HIDE_MS = 3000  # tooltip 最长显示时间，防止 Leave 事件丢失
+
     def __init__(self, text_getter, parent=None):
         super().__init__(parent)
-        self.text_getter = text_getter # Function that returns text or None
+        self.text_getter = text_getter
         self.tooltip = None
+        self._auto_hide_timer = None
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Enter:
+        etype = event.type()
+        if etype == QEvent.Type.Enter:
             text = self.text_getter()
             if text:
                 self.show_tooltip(obj, text)
-        elif event.type() == QEvent.Type.Leave:
-            self.hide_tooltip()
-        elif event.type() == QEvent.Type.MouseButtonPress:
+        elif etype in (
+            QEvent.Type.Leave,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonDblClick,
+            QEvent.Type.Hide,
+            QEvent.Type.DeferredDelete,
+        ):
             self.hide_tooltip()
         return False
 
     def show_tooltip(self, widget, text):
-        if self.tooltip:
-            self.tooltip.close()
-        
+        self.hide_tooltip()
+
+        try:
+            if not widget.isVisible():
+                return
+        except RuntimeError:
+            return
+
         self.tooltip = StyledTooltip(text)
-        
-        # 计算位置 - 默认在上方
+
         pos = widget.mapToGlobal(QPoint(0, 0))
         x = pos.x() + (widget.width() - self.tooltip.width()) // 2
         y = pos.y() - self.tooltip.height() - 5
-        
         self.tooltip.move(x, y)
         self.tooltip.show()
 
+        self._start_auto_hide()
+
     def hide_tooltip(self):
+        self._stop_auto_hide()
         if self.tooltip:
-            self.tooltip.close()
-            self.tooltip.deleteLater()
+            try:
+                self.tooltip.close()
+                self.tooltip.deleteLater()
+            except RuntimeError:
+                pass
             self.tooltip = None
+
+    def _start_auto_hide(self):
+        self._stop_auto_hide()
+        self._auto_hide_timer = QTimer()
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.hide_tooltip)
+        self._auto_hide_timer.start(self.AUTO_HIDE_MS)
+
+    def _stop_auto_hide(self):
+        if self._auto_hide_timer:
+            self._auto_hide_timer.stop()
+            self._auto_hide_timer = None
 
 
 class CardItemWidget(QWidget):
@@ -2702,9 +2826,10 @@ class CardItemWidget(QWidget):
     
     LONG_PRESS_DURATION = 300  # 长按时间 (ms)
     
-    def __init__(self, card, parent=None):
+    def __init__(self, card, index=0, parent=None):
         super().__init__(parent)
         self.card = card
+        self.index = index
         self.is_selected = False
         self.drag_start_position = None
         self.long_press_timer = None
@@ -2728,10 +2853,25 @@ class CardItemWidget(QWidget):
         self.card_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         container_layout = QHBoxLayout()
         container_layout.setContentsMargins(10, 4, 10, 4)
-        container_layout.setSpacing(0)
+        container_layout.setSpacing(6)
         self.card_container.setLayout(container_layout)
         
-        # 名片名称 - 支持省略
+        # 序号标签
+        if self.index > 0:
+            self.index_label = QLabel(str(self.index))
+            self.index_label.setFixedWidth(18)
+            self.index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.index_label.setStyleSheet("""
+                font-size: 10px;
+                font-weight: 700;
+                color: #8E8E93;
+                background: #F2F2F7;
+                border-radius: 4px;
+                padding: 1px 0px;
+                border: none;
+            """)
+            container_layout.addWidget(self.index_label)
+        
         self.name_label = QLabel(self.card.name)
         self.name_label.setStyleSheet("""
             font-size: 12px;
@@ -2740,7 +2880,6 @@ class CardItemWidget(QWidget):
             background: transparent;
             border: none;
         """)
-        # 设置文本省略模式
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
         # 添加自定义 ToolTip 过滤器
@@ -2779,7 +2918,9 @@ class CardItemWidget(QWidget):
     
     def _get_name_tooltip(self):
         """获取名片名称的 ToolTip 文本 (仅当被截断时显示)"""
-        if self.name_label.text() != self.card.name:
+        fm = self.name_label.fontMetrics()
+        available_width = self.name_label.width() - 4  # 减去少量内边距
+        if fm.horizontalAdvance(self.card.name) > available_width:
             return self.card.name
         return None
 
@@ -2789,15 +2930,9 @@ class CardItemWidget(QWidget):
         self._update_elided_text()
     
     def _update_elided_text(self):
-        """更新省略文本"""
+        """更新名称显示，直接截断不加省略号"""
         if hasattr(self, 'name_label') and hasattr(self, 'card_container'):
-            # 计算可用宽度（减去编辑按钮和边距）
-            available_width = self.card_container.width() - 20  # 容器内边距
-            if available_width > 20:
-                font_metrics = self.name_label.fontMetrics()
-                elided_text = font_metrics.elidedText(self.card.name, Qt.TextElideMode.ElideRight, available_width)
-                self.name_label.setText(elided_text)
-                # self.name_label.setToolTip(self.card.name if elided_text != self.card.name else "")
+            self.name_label.setText(self.card.name)
 
     def toggle_selection(self):
         self.is_selected = not self.is_selected
@@ -4477,8 +4612,7 @@ class MainWindow(QMainWindow):
         self.notice_plaza_window = None
         self.selected_cards = []  # 选中的名片
         self.selected_links = []  # 选中的链接
-        self.fill_mode = "multi"  # 填充模式: "multi" (多开) 或 "single" (单开)
-        self.window_columns = 4   # 多开窗口列数设置 (默认一行4个)
+        self._load_user_preferences()
         self.links_empty_widget = None  # 链接空状态占位组件
         self.records_empty_widget = None  # 记录空状态占位组件
         self.init_ui()
@@ -4488,9 +4622,47 @@ class MainWindow(QMainWindow):
         self.message_timer.timeout.connect(self.check_messages)
         self.message_timer.start(5000)  # 5000毫秒 = 5秒
         
+        # 启动数据看板定时刷新 (每3分钟刷新一次统计面板和记录列表)
+        self.dashboard_timer = QTimer(self)
+        self.dashboard_timer.timeout.connect(self.refresh_dashboard)
+        self.dashboard_timer.start(3 * 60 * 1000)  # 3分钟
+        
         # 立即检查一次消息
         QTimer.singleShot(1000, self.check_messages)
     
+    def _load_user_preferences(self):
+        """从本地存储加载用户偏好设置"""
+        settings = QSettings("AutoFormFiller", "MainWindow")
+        user_key = self.current_user.username if self.current_user else "default"
+        self.fill_mode = settings.value(f"{user_key}/fill_mode", "multi")
+        self.window_columns = int(settings.value(f"{user_key}/window_columns", 4))
+
+    def _save_user_preference(self, key, value):
+        """保存单个用户偏好设置"""
+        settings = QSettings("AutoFormFiller", "MainWindow")
+        user_key = self.current_user.username if self.current_user else "default"
+        settings.setValue(f"{user_key}/{key}", value)
+
+    def _get_collapsed_categories(self) -> set:
+        """获取已折叠的分类名称集合"""
+        settings = QSettings("AutoFormFiller", "MainWindow")
+        user_key = self.current_user.username if self.current_user else "default"
+        collapsed = settings.value(f"{user_key}/collapsed_categories", [])
+        if isinstance(collapsed, str):
+            collapsed = [collapsed] if collapsed else []
+        return set(collapsed or [])
+
+    def _on_category_collapsed_changed(self, category_name: str, is_collapsed: bool):
+        """分类折叠状态变化时保存"""
+        collapsed = self._get_collapsed_categories()
+        if is_collapsed:
+            collapsed.add(category_name)
+        else:
+            collapsed.discard(category_name)
+        settings = QSettings("AutoFormFiller", "MainWindow")
+        user_key = self.current_user.username if self.current_user else "default"
+        settings.setValue(f"{user_key}/collapsed_categories", list(collapsed))
+
     def check_messages(self):
         """轮询检查消息"""
         self.update_message_badge()
@@ -4824,9 +4996,10 @@ class MainWindow(QMainWindow):
         mode_layout.setSpacing(0)
         
         # 多开按钮（左边）- 胶囊风格
-        self.mode_btn = QPushButton("多开")
+        is_multi_mode = (self.fill_mode == "multi")
+        self.mode_btn = QPushButton("多开" if is_multi_mode else "单开")
         self.mode_btn.setCheckable(True)
-        self.mode_btn.setChecked(True)  # 默认多开模式
+        self.mode_btn.setChecked(is_multi_mode)
         self.mode_btn.setFixedHeight(30)
         self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mode_btn.setStyleSheet("""
@@ -5717,19 +5890,24 @@ class MainWindow(QMainWindow):
         return color
     
     def refresh_data(self):
-        """刷新数据"""
-        # 刷新统计信息
-        self.update_statistics()
-        
+        """刷新数据（名片和链接列表即时刷新，看板数据由定时器周期刷新）"""
         # 刷新名片列表
         self.refresh_cards_list()
         
         # 刷新链接列表
         self.refresh_links_list()
         
-        # 刷新记录列表（同步加载，数据库查询已通过 select_related 优化）
-        records = self.db_manager.get_fill_records(limit=20, user=self.current_user)
-        self.records_list.set_records(records)
+        # 刷新看板数据（统计面板 + 记录列表）
+        self.refresh_dashboard()
+    
+    def refresh_dashboard(self):
+        """刷新数据看板（统计面板 + 记录列表），由定时器周期调用"""
+        self.update_statistics()
+        try:
+            records = self.db_manager.get_fill_records(limit=20, user=self.current_user)
+            self.records_list.set_records(records)
+        except Exception as e:
+            print(f"刷新记录列表失败: {e}")
     
     def refresh_cards_list(self):
         """刷新名片列表 - 按分类显示，支持拖拽排序"""
@@ -5770,6 +5948,8 @@ class MainWindow(QMainWindow):
             cards_by_category[category].append(card)
         
         # 为每个分类创建可折叠组件
+        collapsed_categories = self._get_collapsed_categories()
+        card_global_index = 0
         for category, category_cards in sorted(cards_by_category.items()):
             # 按 order 字段排序名片（order 越小越靠前）
             sorted_cards = sorted(category_cards, key=lambda c: getattr(c, 'order', 0) or 0)
@@ -5778,9 +5958,14 @@ class MainWindow(QMainWindow):
             category_widget = CollapsibleCategoryWidget(category)
             self.category_widgets[category] = category_widget
             
+            # 恢复折叠状态（在连接信号之前，避免触发保存）
+            if category in collapsed_categories:
+                category_widget.set_collapsed(True)
+            
             # 连接分类管理信号
             category_widget.rename_clicked.connect(self.rename_category)
             category_widget.delete_clicked.connect(self.delete_category)
+            category_widget.collapsed_changed.connect(self._on_category_collapsed_changed)
             
             # 创建可拖拽宫格容器
             grid_container = DraggableCardGrid()
@@ -5788,7 +5973,8 @@ class MainWindow(QMainWindow):
             
             # 添加名片到宫格
             for card in sorted_cards:
-                card_widget = CardItemWidget(card)
+                card_global_index += 1
+                card_widget = CardItemWidget(card, index=card_global_index)
                 card_widget.edit_clicked.connect(self.edit_card)
                 card_widget.selection_changed.connect(self.on_card_selection_changed)
                 
@@ -6061,9 +6247,11 @@ class MainWindow(QMainWindow):
         dialog.exec()
     
     def closeEvent(self, event):
-        """窗口关闭时停止消息轮询定时器"""
+        """窗口关闭时停止所有定时器"""
         if hasattr(self, 'message_timer'):
             self.message_timer.stop()
+        if hasattr(self, 'dashboard_timer'):
+            self.dashboard_timer.stop()
         event.accept()
     
     def create_empty_state(self, icon: str, title: str, subtitle: str, color: str) -> QWidget:
@@ -6484,6 +6672,15 @@ class MainWindow(QMainWindow):
                         category_obj.name = new_name
                         category_obj.save()
                 
+                # 迁移折叠状态
+                collapsed = self._get_collapsed_categories()
+                if old_name in collapsed:
+                    collapsed.discard(old_name)
+                    collapsed.add(new_name)
+                    settings = QSettings("AutoFormFiller", "MainWindow")
+                    user_key = self.current_user.username if self.current_user else "default"
+                    settings.setValue(f"{user_key}/collapsed_categories", list(collapsed))
+                
                 QMessageBox.information(self, "成功", f"已将分类 '{old_name}' 重命名为 '{new_name}'，共 {count} 个名片")
                 self.refresh_data()
             except Exception as e:
@@ -6724,7 +6921,6 @@ class MainWindow(QMainWindow):
         if self.mode_btn.isChecked():
             self.fill_mode = "multi"
             self.mode_btn.setText("多开")
-            # 显示窗口设置下拉按钮和分隔线
             if hasattr(self, 'window_dropdown_btn'):
                 self.window_dropdown_btn.setVisible(True)
             if hasattr(self, 'mode_separator'):
@@ -6732,19 +6928,19 @@ class MainWindow(QMainWindow):
         else:
             self.fill_mode = "single"
             self.mode_btn.setText("单开")
-            # 隐藏窗口设置下拉按钮和分隔线
             if hasattr(self, 'window_dropdown_btn'):
                 self.window_dropdown_btn.setVisible(False)
             if hasattr(self, 'mode_separator'):
                 self.mode_separator.setVisible(False)
+        self._save_user_preference("fill_mode", self.fill_mode)
     
     def set_window_columns(self, cols):
         """设置窗口列数"""
         self.window_columns = cols
-        # 更新菜单选中状态
         if hasattr(self, 'window_actions'):
             for c, action in self.window_actions:
                 action.setChecked(c == cols)
+        self._save_user_preference("window_columns", cols)
             
     def start_auto_fill(self):
         """开始自动填充"""
@@ -6773,6 +6969,7 @@ class MainWindow(QMainWindow):
             fill_mode=self.fill_mode
         )
         fill_window.exec()
+        self.refresh_data()
     
     def show_user_menu(self):
         """显示用户菜单"""

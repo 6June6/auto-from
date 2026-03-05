@@ -208,7 +208,6 @@ class FillCardItemWidget(QWidget):
                 font_metrics = self.name_label.fontMetrics()
                 elided_text = font_metrics.elidedText(self.card.name, Qt.TextElideMode.ElideRight, available_width)
                 self.name_label.setText(elided_text)
-                self.name_label.setToolTip(self.card.name if elided_text != self.card.name else "")
     
     def set_selected(self, selected: bool):
         self.is_selected = selected
@@ -329,7 +328,6 @@ class NewFillWindow(QDialog):
         
         # 清空该链接的 WebView 缓存
         if link_id in self.web_views_by_link:
-            # 停止并清理旧的 WebView
             for info in self.web_views_by_link[link_id]:
                 web_view = info.get('web_view')
                 if web_view:
@@ -339,6 +337,9 @@ class NewFillWindow(QDialog):
                     except:
                         pass
             del self.web_views_by_link[link_id]
+        
+        if hasattr(self, 'loading_queues') and link_id in self.loading_queues:
+            del self.loading_queues[link_id]
         
         # 重新创建该链接的标签页内容
         new_content = self.create_link_tab_content(link)
@@ -946,6 +947,7 @@ class NewFillWindow(QDialog):
         container.cards_container = cards_container
         container.cards_layout = cards_layout
         container.link = link
+        container.built_category = self.current_category
         
         print(f"✅ 为链接 '{link.name}' 准备了 {len(link_webview_info)} 个占位符（分类: {self.current_category}）")
         
@@ -2643,6 +2645,17 @@ class NewFillWindow(QDialog):
                     configs = []
             
             print(f"🔍 加载名片配置，共 {len(configs)} 个字段")
+            
+            template_ids = set()
+            for config in configs:
+                tid = config.get('fixed_template_id') if isinstance(config, dict) else getattr(config, 'fixed_template_id', None)
+                if tid:
+                    template_ids.add(tid)
+            
+            special_map = {}
+            if template_ids:
+                special_map = DatabaseManager.get_fixed_templates_special_map(list(template_ids))
+            
             for config in configs:
                 key = ""
                 value = ""
@@ -2656,8 +2669,10 @@ class NewFillWindow(QDialog):
                     value = getattr(config, 'value', '')
                     fixed_template_id = getattr(config, 'fixed_template_id', None)
                 
-                print(f"  - 加载字段: key={key}, fixed_template_id={fixed_template_id}")
-                self.add_edit_field_row(key, str(value) if value is not None else "", fixed_template_id)
+                is_special = special_map.get(fixed_template_id, True) if fixed_template_id else True
+                
+                print(f"  - 加载字段: key={key}, fixed_template_id={fixed_template_id}, is_special={is_special}")
+                self.add_edit_field_row(key, str(value) if value is not None else "", fixed_template_id, is_special)
         
         # 切换到编辑页 (index 1)
         self.right_panel_stack.setCurrentIndex(1)
@@ -2852,13 +2867,12 @@ class NewFillWindow(QDialog):
             print(f"⚠️ [自动保存] 保存失败: {e}")
     
     def _refresh_synced_cards_data(self, saved_configs):
-        """刷新被同步的其他名片的内存数据（只同步字段名，不同步字段值）
+        """刷新被同步的其他名片的内存数据
         
-        当修改名片时，如果包含固定模板字段，会同步字段名到其他名片。
-        这个方法刷新 self.selected_cards 中其他名片的内存数据，保持界面显示一致。
-        注意：只同步字段名，字段值保留每张名片原有的值。
+        当修改名片时，如果包含固定模板字段，会同步字段到其他名片。
+        - 所有固定模板字段：同步字段名(key)
+        - 特殊项(is_special=True)：同时同步字段值(value)
         """
-        # 收集当前保存的固定模板字段
         template_updates = {}  # {fixed_template_id: {'key': key, 'value': value}}
         for config in saved_configs:
             if isinstance(config, dict):
@@ -2872,23 +2886,23 @@ class NewFillWindow(QDialog):
         if not template_updates:
             return
         
-        print(f"🔄 刷新被同步的名片内存数据，涉及 {len(template_updates)} 个固定模板")
+        special_map = DatabaseManager.get_fixed_templates_special_map(list(template_updates.keys()))
+        special_template_ids = {tid for tid, is_sp in special_map.items() if is_sp}
         
-        # 遍历 selected_cards，更新其他名片的内存数据
+        print(f"🔄 刷新被同步的名片内存数据，涉及 {len(template_updates)} 个固定模板，其中 {len(special_template_ids)} 个特殊项")
+        
         current_card_id = str(self.current_card.id)
         updated_count = 0
         
         for card in self.selected_cards:
             if str(card.id) == current_card_id:
-                continue  # 跳过当前编辑的名片
+                continue
             
-            # 检查这张名片是否有需要同步的字段
             if not hasattr(card, 'configs') or not card.configs:
                 continue
             
             card_updated = False
             
-            # 遍历名片的配置项
             for config in card.configs:
                 template_id = None
                 if isinstance(config, dict):
@@ -2898,7 +2912,8 @@ class NewFillWindow(QDialog):
                 
                 if template_id and template_id in template_updates:
                     update_data = template_updates[template_id]
-                    # 只更新内存中的字段名，不更新字段值（保留每张名片原有的值）
+                    is_special = template_id in special_template_ids
+                    
                     old_key = config['key'] if isinstance(config, dict) else config.key
                     new_key = update_data['key']
                     if old_key != new_key:
@@ -2907,6 +2922,16 @@ class NewFillWindow(QDialog):
                         elif hasattr(config, 'key'):
                             config.key = new_key
                         card_updated = True
+                    
+                    if is_special:
+                        old_value = config['value'] if isinstance(config, dict) else config.value
+                        new_value = update_data['value']
+                        if old_value != new_value:
+                            if isinstance(config, dict):
+                                config['value'] = new_value
+                            elif hasattr(config, 'value'):
+                                config.value = new_value
+                            card_updated = True
             
             if card_updated:
                 updated_count += 1
@@ -2915,9 +2940,9 @@ class NewFillWindow(QDialog):
         if updated_count > 0:
             print(f"🔄 共刷新 {updated_count} 个名片的内存数据")
 
-    def add_edit_field_row(self, key="", value="", fixed_template_id=None):
+    def add_edit_field_row(self, key="", value="", fixed_template_id=None, is_special=True):
         """添加编辑字段行"""
-        row = EditFieldRow(key, value, self, fixed_template_id)
+        row = EditFieldRow(key, value, self, fixed_template_id, is_special)
         self.edit_fields_layout.addWidget(row)
         self.edit_field_rows.append(row)
         
@@ -3218,11 +3243,48 @@ class NewFillWindow(QDialog):
         # ⚡️ 清理其他标签页的资源，减少内存占用和卡顿
         self.unload_inactive_tabs(link_id)
         
+        # ⚡️ 检查标签页是否因分类切换需要重建（多开模式 + 多分类时）
+        current_tab_widget = self.tab_widget.widget(index)
+        built_category = getattr(current_tab_widget, 'built_category', None)
+        if (self.fill_mode == "multi" and len(self.category_list) > 1
+                and built_category is not None and built_category != self.current_category):
+            print(f"🔄 检测到分类变更: {built_category} -> {self.current_category}，重建标签页 '{current_link.name}'")
+            
+            if link_id in self.web_views_by_link:
+                for info in self.web_views_by_link[link_id]:
+                    web_view = info.get('web_view')
+                    if web_view:
+                        try:
+                            web_view.stop()
+                            web_view.loadFinished.disconnect()
+                        except:
+                            pass
+                del self.web_views_by_link[link_id]
+            
+            if hasattr(self, 'loading_queues') and link_id in self.loading_queues:
+                del self.loading_queues[link_id]
+            
+            new_content = self.create_link_tab_content(current_link)
+            
+            self.tab_widget.currentChanged.disconnect(self.on_tab_changed)
+            try:
+                self.tab_widget.removeTab(index)
+                self.tab_widget.insertTab(index, new_content, current_link.name or f"链接{index}")
+                self.tab_widget.setCurrentIndex(index)
+                if current_tab_widget:
+                    current_tab_widget.deleteLater()
+            finally:
+                self.tab_widget.currentChanged.connect(self.on_tab_changed)
+            
+            webview_infos = self.web_views_by_link.get(link_id, [])
+            if webview_infos:
+                self.load_webviews_only(webview_infos)
+            return
+        
         # ⚡️ 强制刷新当前标签页的UI
         current_widget = self.tab_widget.currentWidget()
         if current_widget:
             current_widget.update()
-            # QApplication.processEvents()
             
         # 获取该链接的WebView信息
         webview_infos = self.web_views_by_link.get(link_id, [])
@@ -5516,35 +5578,40 @@ class NewFillWindow(QDialog):
                     border-color: #ff4d4f;
                     background: #fff1f0;
                 }}
-                .result {{
+                .result-banner {{
+                    position: fixed;
+                    top: -80px;
+                    left: 0;
+                    right: 0;
+                    z-index: 9999;
                     text-align: center;
-                    margin-top: 16px;
-                    font-size: 14px;
-                    padding: 12px;
-                    border-radius: 8px;
-                    display: none;
-                    font-weight: 500;
+                    font-size: 15px;
+                    padding: 14px 20px;
+                    font-weight: 600;
+                    transition: top 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                 }}
-                .result.success {{
-                    background: #f6ffed;
-                    color: #52c41a;
-                    border: 1px solid #b7eb8f;
+                .result-banner.show {{
+                    top: 0;
                 }}
-                .result.error {{
-                    background: #fff1f0;
-                    color: #f5222d;
-                    border: 1px solid #ffa39e;
+                .result-banner.success {{
+                    background: linear-gradient(135deg, #52c41a, #73d13d);
+                    color: #fff;
+                }}
+                .result-banner.error {{
+                    background: linear-gradient(135deg, #f5222d, #ff4d4f);
+                    color: #fff;
                 }}
             </style>
         </head>
         <body>
+            <div class="result-banner" id="resultBanner"></div>
             {header_html}
             <div class="form-container">
                 {title_section}
                 {fields_html}
                 <button class="submit-btn" onclick="submitForm()">📤 立即提交表单</button>
                 <button class="logout-btn" onclick="logoutAccount()">🔄 退出登录 / 切换账号</button>
-                <div class="result" id="result"></div>
             </div>
             
             <script>
@@ -5702,13 +5769,20 @@ class NewFillWindow(QDialog):
                 }}
                 
                 function showResult(success, message) {{
-                    var result = document.getElementById('result');
+                    var banner = document.getElementById('resultBanner');
                     var btn = document.querySelector('.submit-btn');
-                    result.textContent = message;
-                    result.className = 'result ' + (success ? 'success' : 'error');
-                    result.style.display = 'block';
+                    banner.textContent = message;
+                    banner.className = 'result-banner ' + (success ? 'success' : 'error');
+                    // 触发重排后添加 show 类，实现滑入动画
+                    void banner.offsetHeight;
+                    banner.classList.add('show');
                     btn.disabled = false;
                     btn.textContent = '📤 立即提交表单';
+                    // 5秒后自动收起
+                    clearTimeout(window.__bannerTimer__);
+                    window.__bannerTimer__ = setTimeout(function() {{
+                        banner.classList.remove('show');
+                    }}, 5000);
                 }}
             </script>
         </body>
@@ -10140,10 +10214,11 @@ class NewFillWindow(QDialog):
 
 class EditFieldRow(QWidget):
     """编辑字段行组件 - 按原型图设计"""
-    def __init__(self, key="", value="", parent_window=None, fixed_template_id=None):
+    def __init__(self, key="", value="", parent_window=None, fixed_template_id=None, is_special=True):
         super().__init__()
         self.parent_window = parent_window
         self.fixed_template_id = fixed_template_id  # 固定模板ID
+        self.is_special = is_special
         self.init_ui(key, value)
         
     def init_ui(self, key, value):
@@ -10218,23 +10293,37 @@ class EditFieldRow(QWidget):
         # 字段值输入框
         self.value_input = QLineEdit(value)
         self.value_input.setPlaceholderText("值")
-        self.value_input.setFixedHeight(36) # 增加高度
+        self.value_input.setFixedHeight(36)
         self.value_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.value_input.setStyleSheet(f"""
-            QLineEdit {{
-                border: 1px solid #E0E0E0;
-                border-radius: 6px;
-                padding: 0 10px;
-                font-size: 13px;
-                background: white;
-                color: #333;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {COLORS['primary']};
-                background: #FDFDFD;
-            }}
-        """)
-        layout.addWidget(self.value_input, 4) # 占比改为4
+        
+        if self.fixed_template_id and not self.is_special:
+            self.value_input.setEnabled(False)
+            self.value_input.setStyleSheet(f"""
+                QLineEdit {{
+                    border: 1px solid #E0E0E0;
+                    border-radius: 6px;
+                    padding: 0 10px;
+                    font-size: 13px;
+                    background: #F5F5F5;
+                    color: #999;
+                }}
+            """)
+        else:
+            self.value_input.setStyleSheet(f"""
+                QLineEdit {{
+                    border: 1px solid #E0E0E0;
+                    border-radius: 6px;
+                    padding: 0 10px;
+                    font-size: 13px;
+                    background: white;
+                    color: #333;
+                }}
+                QLineEdit:focus {{
+                    border: 1px solid {COLORS['primary']};
+                    background: #FDFDFD;
+                }}
+            """)
+        layout.addWidget(self.value_input, 4)
         
         # 复制按钮
         copy_btn = QPushButton("复制")
@@ -10301,6 +10390,22 @@ class EditFieldRow(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         
+        paste_btn = QPushButton("粘贴")
+        paste_btn.setFixedSize(80, 36)
+        paste_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        paste_btn.setStyleSheet("""
+            QPushButton {
+                background: white;
+                color: #666;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            QPushButton:hover { background: #F5F5F5; border-color: #3B82F6; color: #3B82F6; }
+        """)
+        paste_btn.clicked.connect(lambda: input_field.insert(QApplication.clipboard().text()))
+        
         save_btn = QPushButton("保存")
         save_btn.setFixedSize(80, 36)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -10317,6 +10422,7 @@ class EditFieldRow(QWidget):
         """)
         save_btn.clicked.connect(dialog.accept)
         
+        btn_layout.addWidget(paste_btn)
         btn_layout.addWidget(save_btn)
         layout.addLayout(btn_layout)
         

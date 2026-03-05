@@ -25,8 +25,8 @@ from datetime import datetime
 # 列宽配置（简化版）
 NOTICE_LIST_COLUMNS = {
     'platform': 80,
-    'category': 80,
-    'content': 400,  # 内容预览
+    'category': 140,
+    'content': 360,
     'status': 80,
     'actions': 100,
 }
@@ -78,13 +78,17 @@ class NoticeListHeader(QFrame):
 class NoticeRowWidget(QFrame):
     """通告行组件（简化版）"""
     
+    CONTENT_LINE_CHARS = 50
+    CONTENT_MAX_LINES = 4
+    
     edit_clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(object)
     
     def __init__(self, notice, parent=None):
         super().__init__(parent)
         self.notice = notice
-        self.setFixedHeight(60)
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(self.CONTENT_MAX_LINES * 18 + 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._setup_ui()
     
@@ -141,30 +145,73 @@ class NoticeRowWidget(QFrame):
         container.setFixedWidth(NOTICE_LIST_COLUMNS['category'])
         c_layout = QHBoxLayout(container)
         c_layout.setContentsMargins(0, 0, 4, 0)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setSpacing(4)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        lbl = QLabel(self.notice.category or "-")
-        lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
-        c_layout.addWidget(lbl)
+        cats = self.notice.category if isinstance(self.notice.category, list) else ([self.notice.category] if self.notice.category else [])
+        if cats:
+            full_text = "、".join(cats)
+            lbl = QLabel(full_text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+            lbl.setToolTip(full_text)
+            lbl.setMaximumWidth(NOTICE_LIST_COLUMNS['category'] - 8)
+            c_layout.addWidget(lbl)
+        else:
+            lbl = QLabel("-")
+            lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 12px;")
+            c_layout.addWidget(lbl)
         layout.addWidget(container)
     
     def _add_content(self, layout):
-        """内容预览"""
+        """内容预览 - 每行固定字符数，超出部分可上下滚动"""
         container = QWidget()
         container.setFixedWidth(NOTICE_LIST_COLUMNS['content'])
-        c_layout = QHBoxLayout(container)
+        c_layout = QVBoxLayout(container)
         c_layout.setContentsMargins(0, 0, 8, 0)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        # 优先显示 content 字段，否则回退到 title
         content = self.notice.content if self.notice.content else (self.notice.title or "")
-        # 截取前100个字符作为预览
-        preview = content[:100].replace('\n', ' ') + ('...' if len(content) > 100 else '')
         
-        content_lbl = QLabel(preview)
-        content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-        content_lbl.setToolTip(content[:500])  # 悬停显示更多
-        c_layout.addWidget(content_lbl)
+        # 按原始换行拆分，再按固定字符数折行
+        raw_lines = content.split('\n')
+        display_lines = []
+        for raw_line in raw_lines:
+            if not raw_line:
+                display_lines.append('')
+                continue
+            for i in range(0, len(raw_line), self.CONTENT_LINE_CHARS):
+                display_lines.append(raw_line[i:i + self.CONTENT_LINE_CHARS])
+        
+        preview_text = '\n'.join(display_lines)
+        
+        if len(display_lines) > self.CONTENT_MAX_LINES:
+            content_area = QScrollArea()
+            content_area.setWidgetResizable(True)
+            content_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            content_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            content_area.setFixedHeight(self.CONTENT_MAX_LINES * 18 + 8)
+            content_area.setStyleSheet(f"""
+                QScrollArea {{ border: none; background: transparent; }}
+                QScrollBar:vertical {{ background: transparent; width: 6px; }}
+                QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 3px; min-height: 20px; }}
+                QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+            """)
+            
+            content_lbl = QLabel(preview_text)
+            content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px; background: transparent;")
+            content_lbl.setWordWrap(False)
+            content_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            content_area.setWidget(content_lbl)
+            c_layout.addWidget(content_area)
+        else:
+            content_lbl = QLabel(preview_text)
+            content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
+            content_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            c_layout.addWidget(content_lbl)
+        
+        content_lbl.setToolTip(content[:500])
         layout.addWidget(container)
     
     def _add_status(self, layout):
@@ -940,7 +987,10 @@ class NoticeManager(ModernBaseManager):
         
     def load_data(self):
         keyword = self.search_input.text().strip()
-        notices = self.db_manager.get_all_notices(keyword=keyword if keyword else None)
+        notices = self.db_manager.get_all_notices(
+            keyword=keyword if keyword else None,
+            status=None
+        )
         
         # 统计
         total = len(notices)
@@ -1248,36 +1298,84 @@ class NoticeDialog(BaseDialog):
         self.setup_ui()
         
     def setup_ui(self):
-        self.setFixedSize(650, 600)
+        self.setMinimumSize(650, 600)
+        self.resize(650, 700)
         
-        # 内部容器
+        # 用 QScrollArea 包裹表单，使整体可滚动
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
+        
         form_widget = QWidget()
         form_widget.setStyleSheet(self.input_style)
         form_layout = QVBoxLayout(form_widget)
         form_layout.setContentsMargins(32, 24, 32, 20)
         form_layout.setSpacing(20)
         
-        # 平台 & 类目 (一行两列)
-        row1 = QHBoxLayout()
-        row1.setSpacing(20)
-        
+        # 平台
         self.platform_combo = QComboBox()
         platforms = self.db_manager.get_all_platforms()
         for p in platforms:
             self.platform_combo.addItem(p.name)
         if self.notice:
             self.platform_combo.setCurrentText(self.notice.platform)
-            
-        self.category_combo = QComboBox()
+        form_layout.addLayout(self.create_field("发布平台", self.platform_combo))
+        
+        # 类目（多选复选框）
+        category_label = QLabel("通告类目（可多选）")
+        category_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-weight: 600; font-size: 13px;")
+        form_layout.addWidget(category_label)
+        
+        self.category_checkboxes = []
         categories = self.db_manager.get_all_notice_categories()
+        existing_cats = []
+        if self.notice and self.notice.category:
+            existing_cats = self.notice.category if isinstance(self.notice.category, list) else [self.notice.category]
+        
+        cat_flow_widget = QWidget()
+        cat_flow_layout = QHBoxLayout(cat_flow_widget)
+        cat_flow_layout.setContentsMargins(0, 0, 0, 0)
+        cat_flow_layout.setSpacing(12)
+        
         for c in categories:
-            self.category_combo.addItem(c.name)
-        if self.notice:
-            self.category_combo.setCurrentText(self.notice.category)
-            
-        row1.addLayout(self.create_field("发布平台", self.platform_combo))
-        row1.addLayout(self.create_field("通告类目", self.category_combo))
-        form_layout.addLayout(row1)
+            cb = QCheckBox(c.name)
+            cb.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {PREMIUM_COLORS['text_heading']};
+                    font-size: 13px;
+                    spacing: 6px;
+                }}
+                QCheckBox::indicator {{
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 4px;
+                    border: 1.5px solid {PREMIUM_COLORS['border']};
+                    background: #f8fafc;
+                }}
+                QCheckBox::indicator:checked {{
+                    background: {PREMIUM_COLORS['gradient_blue_start']};
+                    border-color: {PREMIUM_COLORS['gradient_blue_start']};
+                }}
+                QCheckBox::indicator:hover {{
+                    border-color: {PREMIUM_COLORS['gradient_blue_start']};
+                }}
+            """)
+            if c.name in existing_cats:
+                cb.setChecked(True)
+            cat_flow_layout.addWidget(cb)
+            self.category_checkboxes.append(cb)
+        
+        cat_flow_layout.addStretch()
+        form_layout.addWidget(cat_flow_widget)
         
         # 状态选择
         status_layout = QHBoxLayout()
@@ -1315,18 +1413,17 @@ class NoticeDialog(BaseDialog):
         """)
         self.content_edit.setMinimumHeight(280)
         
-        # 加载现有内容
         if self.notice:
             if self.notice.content:
                 self.content_edit.setPlainText(self.notice.content)
             else:
-                # 兼容旧数据：拼接旧字段为内容
                 old_content = self._build_content_from_old_fields()
                 self.content_edit.setPlainText(old_content)
         
         form_layout.addWidget(self.content_edit)
         
-        self.add_content(form_widget, stretch=1)
+        scroll_area.setWidget(form_widget)
+        self.add_content(scroll_area, stretch=1)
         self.create_bottom_buttons()
     
     def _build_content_from_old_fields(self):
@@ -1351,9 +1448,10 @@ class NoticeDialog(BaseDialog):
         return "\n".join(parts)
         
     def get_data(self):
+        selected_cats = [cb.text() for cb in self.category_checkboxes if cb.isChecked()]
         data = {
             'platform': self.platform_combo.currentText(),
-            'category': self.category_combo.currentText(),
+            'category': selected_cats,
             'content': self.content_edit.toPlainText(),
             'status': self.status_combo.currentText(),
             'publish_date': datetime.now(),

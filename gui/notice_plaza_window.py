@@ -3,8 +3,9 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QScrollArea, QFrame, 
                              QGridLayout, QComboBox, QLineEdit, QCheckBox,
                              QButtonGroup, QDateEdit, QApplication, QMessageBox,
-                             QGraphicsDropShadowEffect, QTextEdit)
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDate, QEvent
+                             QGraphicsDropShadowEffect, QTextEdit, QLayout,
+                             QSizePolicy)
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDate, QEvent, QRect, QPoint
 from PyQt6.QtGui import QColor, QFont, QIcon, QCursor
 
 from database.db_manager import DatabaseManager
@@ -55,6 +56,93 @@ class TagButton(QPushButton):
                 }}
             """)
 
+class FlowLayout(QLayout):
+    """自动换行的流式布局"""
+    def __init__(self, parent=None, margin=0, spacing=6):
+        super().__init__(parent)
+        self._items = []
+        self._spacing = spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        effective = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y = effective.x(), effective.y()
+        line_height = 0
+
+        for item in self._items:
+            w = item.sizeHint().width()
+            h = item.sizeHint().height()
+            if x + w > effective.right() + 1 and line_height > 0:
+                x = effective.x()
+                y += line_height + self._spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            x += w + self._spacing
+            line_height = max(line_height, h)
+
+        return y + line_height - rect.y() + m.bottom()
+
+
+class FlowTagsWidget(QWidget):
+    """使用 FlowLayout 展示多个类目标签，自动换行"""
+    def __init__(self, tags, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        flow = FlowLayout(self, margin=0, spacing=5)
+        for tag_text in tags:
+            lbl = QLabel(tag_text)
+            lbl.setStyleSheet("""
+                background-color: #FEF3C7;
+                color: #D97706;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+            lbl.adjustSize()
+            lbl.setFixedSize(lbl.sizeHint())
+            flow.addWidget(lbl)
+
+
 class NoticeCardWidget(QFrame):
     """通告卡片组件 - 简化版，直接显示内容"""
     
@@ -96,11 +184,10 @@ class NoticeCardWidget(QFrame):
         layout.setSpacing(10)
         self.setLayout(layout)
         
-        # 1. 头部：平台 + 类目
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(8)
+        # 1. 头部第一行：平台 + 日期
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
         
-        # 平台标签
         platform_tag = QLabel(self.notice.platform)
         platform_tag.setStyleSheet(f"""
             background-color: #EEF2FF;
@@ -110,41 +197,32 @@ class NoticeCardWidget(QFrame):
             font-size: 12px;
             font-weight: 600;
         """)
-        platform_tag.adjustSize()  # 自适应大小
-        header_layout.addWidget(platform_tag)
+        platform_tag.adjustSize()
+        top_row.addWidget(platform_tag)
         
-        # 类目标签
-        if self.notice.category:
-            category_tag = QLabel(self.notice.category)
-            category_tag.setStyleSheet(f"""
-                background-color: #FEF3C7;
-                color: #D97706;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 12px;
-                font-weight: 600;
-            """)
-            category_tag.adjustSize()  # 自适应大小
-            header_layout.addWidget(category_tag)
+        top_row.addStretch()
         
-        header_layout.addStretch()
-        
-        # 发布日期
         if self.notice.publish_date:
             date_str = self.notice.publish_date.strftime('%m-%d')
             date_label = QLabel(date_str)
             date_label.setStyleSheet(f"color: {COLORS['text_tertiary']}; font-size: 12px;")
-            date_label.setMinimumWidth(40)  # 确保日期能显示完整
-            header_layout.addWidget(date_label)
+            top_row.addWidget(date_label)
         
-        layout.addLayout(header_layout)
+        layout.addLayout(top_row)
+        
+        # 2. 头部第二行：类目标签（自动换行）
+        cats = self.notice.category if isinstance(self.notice.category, list) else ([self.notice.category] if self.notice.category else [])
+        cats = [c for c in cats if c]
+        if cats:
+            tags_widget = FlowTagsWidget(cats)
+            layout.addWidget(tags_widget)
         
         # 2. 通告内容 - 使用 QLabel 替代 QTextEdit，解决字体显示问题
         content = self._get_full_content()
         
         # 内容滚动区域
         content_scroll = QScrollArea()
-        content_scroll.setWidgetResizable(True)
+        content_scroll.setWidgetResizable(False)
         content_scroll.setFrameShape(QFrame.Shape.NoFrame)
         content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -166,8 +244,11 @@ class NoticeCardWidget(QFrame):
             }
         """)
         
+        # 固定宽度让 QLabel 正确计算 word-wrap 高度，避免被 ScrollArea 裁剪
+        label_width = 300 - 16 * 2 - 6  # 卡片宽度 - 左右 margin - 滚动条预留
         self.content_label = QLabel(content)
         self.content_label.setWordWrap(True)
+        self.content_label.setFixedWidth(label_width)
         self.content_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.content_label.setStyleSheet(f"""
@@ -502,7 +583,33 @@ class NoticePlazaWindow(QMainWindow):
         self.next_btn.setStyleSheet(page_btn_style)
         self.next_btn.clicked.connect(self.next_page)
         
+        self.home_btn = QPushButton("⌂")
+        self.home_btn.setFixedSize(40, 40)
+        self.home_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.home_btn.setToolTip("返回第一页")
+        self.home_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                border: 1px solid {COLORS['primary']};
+                border-radius: 8px;
+                color: {COLORS['primary']};
+                font-weight: 700;
+                font-size: 18px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['primary']};
+                color: white;
+            }}
+            QPushButton:disabled {{
+                background: #F3F4F6;
+                border-color: transparent;
+                color: {COLORS['text_tertiary']};
+            }}
+        """)
+        self.home_btn.clicked.connect(self.go_first_page)
+
         footer_layout.addStretch()
+        footer_layout.addWidget(self.home_btn)
         footer_layout.addWidget(self.prev_btn)
         footer_layout.addWidget(self.page_label)
         footer_layout.addWidget(self.next_btn)
@@ -592,6 +699,7 @@ class NoticePlazaWindow(QMainWindow):
         if total_pages == 0: total_pages = 1
         
         self.page_label.setText(f"{self.page} / {total_pages}")
+        self.home_btn.setEnabled(self.page > 1)
         self.prev_btn.setEnabled(self.page > 1)
         self.next_btn.setEnabled(self.page < total_pages)
         
@@ -628,6 +736,11 @@ class NoticePlazaWindow(QMainWindow):
             col = i % cols
             self.cards_grid.addWidget(card, row, col)
             
+    def go_first_page(self):
+        if self.page > 1:
+            self.page = 1
+            self.refresh_notices()
+
     def prev_page(self):
         if self.page > 1:
             self.page -= 1
@@ -637,20 +750,28 @@ class NoticePlazaWindow(QMainWindow):
         self.page += 1
         self.refresh_notices()
         
+    def _is_supported_platform(self, url):
+        """检查链接是否为支持的平台"""
+        supported_domains = [
+            "docs.qq.com", "wj.qq.com", "shimo.im",
+            "wjx.cn", "wjx.top", "jsj.top", "jinshuju.net",
+            "feishu.cn", "kdocs.cn", "wps.cn", "wps.com",
+            "wenjuan.com", "baominggongju.com", "fanqier.cn",
+            "credamo.com", "mikecrm.com", "mike-x.com",
+        ]
+        return any(domain in url for domain in supported_domains)
+
     def add_to_my_links(self, card: NoticeCardWidget):
-        """将通告直接添加到我的链接（无弹窗确认）"""
+        """将通告直接添加到我的链接"""
         import re
         
         notice = card.notice
         
-        # 设置 loading 状态
         card.set_loading(True)
         
         try:
-            # 获取完整内容
             content = notice.content if notice.content else ""
             if not content and notice.title:
-                # 兼容旧数据
                 parts = []
                 if notice.title:
                     parts.append(f"标题：{notice.title}")
@@ -664,7 +785,6 @@ class NoticePlazaWindow(QMainWindow):
                     parts.append(f"链接：{notice.link}")
                 content = "\n".join(parts)
             
-            # 尝试从内容中提取链接
             url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
             links = re.findall(url_pattern, content)
             
@@ -672,23 +792,27 @@ class NoticePlazaWindow(QMainWindow):
                 QMessageBox.warning(self, "提示", "未在通告内容中检测到有效链接！")
                 return
             
-            # 获取当前用户
             user = self.parent().current_user if self.parent() else None
             if not user:
                 QMessageBox.warning(self, "提示", "请先登录后再添加链接！")
                 return
             
-            # 使用第一个匹配到的链接
             link_url = links[0]
             
-            # 检查链接是否已存在
-            existing_link = self.db_manager.get_link_by_url(link_url, user=user)
-            if existing_link:
-                QMessageBox.information(self, "提示", "该链接已存在于您的链接库中！")
+            if not self._is_supported_platform(link_url):
+                QMessageBox.warning(self, "提示", "您上传的链接平台暂不支持")
                 return
             
-            # 创建新链接
-            # 链接名称：取内容前30个字符
+            existing_link = self.db_manager.get_link_by_url(link_url, user=user)
+            if existing_link:
+                reply = QMessageBox.question(
+                    self, "提示", "该链接已上传，是否继续上传？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
             link_name = f"【{notice.platform}】{content[:30]}..." if len(content) > 30 else f"【{notice.platform}】{content}"
             link_name = link_name.replace('\n', ' ')
             
@@ -697,22 +821,19 @@ class NoticePlazaWindow(QMainWindow):
                 url=link_url,
                 user=user,
                 status='active',
-                category=notice.category or '默认分类',
+                category=(notice.category[0] if isinstance(notice.category, list) and notice.category else (notice.category or '默认分类')),
                 description=f"来自通告广场"
             )
             
-            # 只刷新链接列表，避免刷新整个窗口导致卡顿
             if self.parent() and hasattr(self.parent(), 'refresh_links_list'):
                 self.parent().refresh_links_list()
             
-            # 成功后显示"已添加"
             card._set_added_style()
             
         except Exception as e:
             QMessageBox.warning(self, "失败", f"添加链接失败：{str(e)}")
             card.set_loading(False)
         finally:
-            # 如果不是成功状态，恢复按钮
             if card.join_btn.text() == "添加中...":
                 card.set_loading(False)
 
