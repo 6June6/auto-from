@@ -1015,10 +1015,35 @@ class NoticeManager(ModernBaseManager):
         self.notice_list.set_notices(current_notices)
         self.update_pagination()
 
+    def _check_duplicate_and_confirm(self, platform, content, exclude_id=None):
+        """检查重复通告，若存在则询问用户是否继续。返回 True 表示允许继续操作。"""
+        duplicates = self.db_manager.check_notice_duplicate(platform, content, exclude_id)
+        if not duplicates:
+            return True
+        
+        dup_info_parts = []
+        for i, dup in enumerate(duplicates[:3], 1):
+            preview = (dup.content or "")[:80].replace('\n', ' ')
+            created = dup.created_at.strftime('%Y-%m-%d %H:%M') if dup.created_at else "未知"
+            dup_info_parts.append(f"  {i}. [{dup.platform}] {preview}...  (创建于 {created})")
+        
+        dup_text = "\n".join(dup_info_parts)
+        extra = f"\n  ...等共 {len(duplicates)} 条重复通告" if len(duplicates) > 3 else ""
+        
+        reply = QMessageBox.warning(
+            self, "发现重复通告",
+            f"检测到已存在相同平台和内容的通告：\n\n{dup_text}{extra}\n\n是否仍要继续发布？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def add_item(self):
         dialog = NoticeDialog(self, self.db_manager)
         if dialog.exec():
             data = dialog.get_data()
+            if not self._check_duplicate_and_confirm(data.get('platform', ''), data.get('content', '')):
+                return
             if self.current_user:
                 data['created_by'] = self.current_user
             try:
@@ -1032,6 +1057,8 @@ class NoticeManager(ModernBaseManager):
         dialog = NoticeDialog(self, self.db_manager, item)
         if dialog.exec():
             data = dialog.get_data()
+            if not self._check_duplicate_and_confirm(data.get('platform', ''), data.get('content', ''), exclude_id=str(item.id)):
+                return
             try:
                 self.db_manager.update_notice(str(item.id), **data)
                 self.load_data()
@@ -1342,11 +1369,14 @@ class NoticeDialog(BaseDialog):
             existing_cats = self.notice.category if isinstance(self.notice.category, list) else [self.notice.category]
         
         cat_flow_widget = QWidget()
-        cat_flow_layout = QHBoxLayout(cat_flow_widget)
-        cat_flow_layout.setContentsMargins(0, 0, 0, 0)
-        cat_flow_layout.setSpacing(12)
+        from PyQt6.QtWidgets import QGridLayout
+        cat_grid_layout = QGridLayout(cat_flow_widget)
+        cat_grid_layout.setContentsMargins(0, 0, 0, 0)
+        cat_grid_layout.setHorizontalSpacing(16)
+        cat_grid_layout.setVerticalSpacing(10)
         
-        for c in categories:
+        cols_per_row = 4
+        for i, c in enumerate(categories):
             cb = QCheckBox(c.name)
             cb.setStyleSheet(f"""
                 QCheckBox {{
@@ -1371,10 +1401,9 @@ class NoticeDialog(BaseDialog):
             """)
             if c.name in existing_cats:
                 cb.setChecked(True)
-            cat_flow_layout.addWidget(cb)
+            cat_grid_layout.addWidget(cb, i // cols_per_row, i % cols_per_row)
             self.category_checkboxes.append(cb)
         
-        cat_flow_layout.addStretch()
         form_layout.addWidget(cat_flow_widget)
         
         # 状态选择

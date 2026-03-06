@@ -921,6 +921,30 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def check_notice_duplicate(platform: str, content: str, exclude_id: str = None) -> list:
+        """
+        检查是否存在重复通告（同平台+相同内容）
+        
+        Args:
+            platform: 平台名称
+            content: 通告内容
+            exclude_id: 排除的通告ID（编辑时排除自身）
+        
+        Returns:
+            重复的通告列表
+        """
+        try:
+            if not content or not content.strip():
+                return []
+            query = Notice.objects.filter(platform=platform, content=content.strip())
+            if exclude_id:
+                query = query.filter(id__ne=exclude_id)
+            return list(query)
+        except Exception as e:
+            print(f"❌ 检查通告重复失败: {e}")
+            return []
+
+    @staticmethod
     def create_notice(platform: str, **kwargs) -> Notice:
         """
         创建通告（简化版）

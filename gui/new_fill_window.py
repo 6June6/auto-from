@@ -1420,103 +1420,46 @@ class NewFillWindow(QDialog):
         
         layout.addLayout(top_toolbar)
         
-        # 类别选择区域 - 使用下拉框
-        category_box = QFrame()
-        category_box.setStyleSheet("""
-            QFrame {
-                background: #F8F9FA;
-                border-radius: 8px;
-                padding: 12px;
-                margin-bottom: 8px;
-            }
-        """)
-        cat_layout = QVBoxLayout()
-        cat_layout.setContentsMargins(8, 8, 8, 8)
-        cat_layout.setSpacing(8)
-        category_box.setLayout(cat_layout)
+        # 类别选择区域 - 轻量分段控件风格
+        cat_header = QHBoxLayout()
+        cat_header.setSpacing(0)
+        cat_header.setContentsMargins(0, 0, 0, 0)
         
-        # 标题行
-        title_row = QHBoxLayout()
-        title_row.setSpacing(8)
-        
-        cat_title = QLabel("切换分类")
+        cat_title = QLabel("分类")
         cat_title.setStyleSheet(f"""
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: {COLORS['text_primary']};
+            color: #9CA3AF;
+            letter-spacing: 0.5px;
         """)
-        title_row.addWidget(cat_title)
-        title_row.addStretch()
-        cat_layout.addLayout(title_row)
+        cat_header.addWidget(cat_title)
+        cat_header.addStretch()
+        layout.addLayout(cat_header)
         
-        # 下拉框 - 直接显示，样式统一
+        # 使用隐藏的 QComboBox 维持数据和信号，UI 用自定义按钮组
         self.category_combo = QComboBox()
-        self.category_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.category_combo.setFixedHeight(40)
-        self.category_combo.setIconSize(QSize(14, 14))  # 设置图标大小
-        self.category_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: white;
-                color: {COLORS['text_primary']};
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
-                padding: 8px 12px;
-                padding-right: 32px;
-                font-size: 14px;
-                font-weight: 500;
-            }}
-            QComboBox:hover {{
-                border-color: #D1D5DB;
-                background: #FAFAFA;
-            }}
-            QComboBox:focus {{
-                border-color: {COLORS['primary']};
-                outline: none;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 28px;
-                subcontrol-position: center right;
-                subcontrol-origin: padding;
-                right: 8px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #9CA3AF;
-            }}
-            QComboBox::down-arrow:hover {{
-                border-top-color: #6B7280;
-            }}
-            QComboBox QAbstractItemView {{
-                background: white;
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
-                padding: 6px 0;
-                margin-top: 2px;
-                outline: none;
-                selection-background-color: transparent;
-            }}
-            QComboBox QAbstractItemView::item {{
-                min-height: 36px;
-                padding: 8px 12px;
-                color: #374151;
-                background: white;
-                border: none;
-            }}
-            QComboBox QAbstractItemView::item:hover {{
-                background: #F8FAFC;
-            }}
-            QComboBox QAbstractItemView::item:selected {{
-                background: transparent;
-                color: #374151;
-            }}
-        """)
+        self.category_combo.hide()
         self.category_combo.currentTextChanged.connect(self.on_category_changed)
-        cat_layout.addWidget(self.category_combo)
         
-        layout.addWidget(category_box)
+        # 分段按钮容器 - 横向可滚动
+        self.cat_btn_scroll = QScrollArea()
+        self.cat_btn_scroll.setWidgetResizable(True)
+        self.cat_btn_scroll.setFixedHeight(42)
+        self.cat_btn_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.cat_btn_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.cat_btn_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        self.cat_btn_container = QWidget()
+        self.cat_btn_container.setStyleSheet("background: transparent;")
+        self.cat_btn_layout = QHBoxLayout(self.cat_btn_container)
+        self.cat_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.cat_btn_layout.setSpacing(8)
+        self.cat_btn_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        self.cat_btn_scroll.setWidget(self.cat_btn_container)
+        layout.addWidget(self.cat_btn_scroll)
+        
+        self._cat_buttons = []
         
         # 名片列表（可滚动）- 改为网格布局
         scroll = QScrollArea()
@@ -1926,48 +1869,104 @@ class NewFillWindow(QDialog):
         self.card_fields_layout.addWidget(hint_label)
     
     def load_categories(self):
-        """加载分类列表（仅包含已选名片的分类）"""
+        """加载分类列表（仅包含已选名片的分类）- 使用分段按钮"""
+        self.category_combo.blockSignals(True)
         self.category_combo.clear()
         
-        # ⚡️ 使用 _init_categories 中生成的 category_list，保持顺序一致
-        if self.category_list:
-            for category in self.category_list:
-                self.category_combo.addItem(category)
-            
-            # ⚡️ 设置 combo 选中为 current_category
-            if self.current_category:
-                index = self.category_combo.findText(self.current_category)
-                if index >= 0:
-                    self.category_combo.setCurrentIndex(index)
-        else:
-            self.category_combo.addItem("默认分类")
+        categories = self.category_list if self.category_list else ["默认分类"]
+        for category in categories:
+            self.category_combo.addItem(category)
         
-        # 更新勾选图标
-        self._update_category_icons()
+        if self.current_category:
+            index = self.category_combo.findText(self.current_category)
+            if index >= 0:
+                self.category_combo.setCurrentIndex(index)
+        
+        self.category_combo.blockSignals(False)
+        
+        self._rebuild_category_buttons()
             
     def on_category_changed(self, category: str):
         """类别改变时 - 重新生成当前链接的 webview 并自动填充"""
-        # ⚡️ 先更新当前分类，确保后续操作使用正确的分类
         self.current_category = category
         print(f"📂 分类切换: {category}, 当前分类名片数: {len(self.get_current_category_cards())}")
         
-        self._update_category_icons()
+        self._update_category_button_styles()
         self.load_cards_list()
         
-        # ⚡️ 多开模式下，重新生成当前链接的 webview
         if self.fill_mode == "multi" and len(self.category_list) > 1:
             self._rebuild_current_tab_for_category()
     
-    def _update_category_icons(self):
-        """更新分类下拉框的勾选图标"""
-        current_index = self.category_combo.currentIndex()
-        for i in range(self.category_combo.count()):
-            if i == current_index:
-                # 选中项显示勾选图标
-                self.category_combo.setItemIcon(i, qta_icon('fa5s.check', color='#6B7280'))
+    def _rebuild_category_buttons(self):
+        """重建分类分段按钮"""
+        for btn in self._cat_buttons:
+            btn.deleteLater()
+        self._cat_buttons.clear()
+        
+        while self.cat_btn_layout.count():
+            item = self.cat_btn_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        categories = self.category_list if self.category_list else ["默认分类"]
+        
+        for cat in categories:
+            btn = QPushButton(cat)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(32)
+            btn.setMinimumWidth(60)
+            btn.setProperty("category", cat)
+            btn.clicked.connect(lambda checked, c=cat: self._on_cat_btn_clicked(c))
+            self.cat_btn_layout.addWidget(btn)
+            self._cat_buttons.append(btn)
+        
+        self.cat_btn_layout.addStretch()
+        self._update_category_button_styles()
+    
+    def _on_cat_btn_clicked(self, category: str):
+        """分类按钮点击"""
+        if self.category_combo.currentText() == category:
+            return
+        index = self.category_combo.findText(category)
+        if index >= 0:
+            self.category_combo.setCurrentIndex(index)
+    
+    def _update_category_button_styles(self):
+        """更新分类按钮选中样式"""
+        current = self.current_category or ""
+        for btn in self._cat_buttons:
+            cat = btn.property("category")
+            if cat == current:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {COLORS['primary']};
+                        color: white;
+                        border: none;
+                        border-radius: 16px;
+                        font-size: 13px;
+                        font-weight: 600;
+                        padding: 0 16px;
+                    }}
+                    QPushButton:hover {{
+                        background: {COLORS['primary_dark']};
+                    }}
+                """)
             else:
-                # 其他项显示空白图标（保持对齐）
-                self.category_combo.setItemIcon(i, qta_icon('fa5s.check', color='transparent'))
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: #F3F4F6;
+                        color: #6B7280;
+                        border: none;
+                        border-radius: 16px;
+                        font-size: 13px;
+                        font-weight: 500;
+                        padding: 0 16px;
+                    }}
+                    QPushButton:hover {{
+                        background: #E5E7EB;
+                        color: #374151;
+                    }}
+                """)
     
     def load_cards_list(self, target_card_id=None):
         """加载名片列表（仅显示已选名片）- 网格布局"""
@@ -10361,7 +10360,7 @@ class EditFieldRow(QWidget):
         dialog.setWindowTitle("新增字段别名")
         dialog.setFixedWidth(400)
         dialog.setStyleSheet("""
-            QDialog { background: white; }
+            QDialog { background: white; font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif; }
             QLabel { color: #333333; font-size: 13px; }
             QLineEdit {
                 border: 1px solid #CCCCCC;
@@ -10372,6 +10371,7 @@ class EditFieldRow(QWidget):
                 font-size: 14px;
             }
             QLineEdit:focus { border-color: #3B82F6; }
+            QPushButton { font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif; }
         """)
         
         layout = QVBoxLayout(dialog)
@@ -10391,7 +10391,8 @@ class EditFieldRow(QWidget):
         btn_layout.addStretch()
         
         paste_btn = QPushButton("粘贴")
-        paste_btn.setFixedSize(80, 36)
+        paste_btn.setFixedHeight(36)
+        paste_btn.setMinimumWidth(90)
         paste_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         paste_btn.setStyleSheet("""
             QPushButton {
@@ -10401,13 +10402,15 @@ class EditFieldRow(QWidget):
                 border-radius: 6px;
                 font-size: 14px;
                 font-weight: 500;
+                padding: 0 16px;
             }
             QPushButton:hover { background: #F5F5F5; border-color: #3B82F6; color: #3B82F6; }
         """)
         paste_btn.clicked.connect(lambda: input_field.insert(QApplication.clipboard().text()))
         
         save_btn = QPushButton("保存")
-        save_btn.setFixedSize(80, 36)
+        save_btn.setFixedHeight(36)
+        save_btn.setMinimumWidth(90)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.setStyleSheet("""
             QPushButton {
@@ -10417,6 +10420,7 @@ class EditFieldRow(QWidget):
                 border-radius: 6px;
                 font-size: 14px;
                 font-weight: 600;
+                padding: 0 16px;
             }
             QPushButton:hover { background: #2563EB; }
         """)

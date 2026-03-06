@@ -163,8 +163,7 @@ def main():
                 f"详细日志已保存到:\n{logger.get_log_dir()}"
             )
     
-    # 显示登录窗口（会自动检测并尝试自动登录）
-    login_window = LoginWindow(auto_login=True)
+    login_window = LoginWindow()
     login_window.login_success.connect(on_login_success)
     
     result = login_window.exec()

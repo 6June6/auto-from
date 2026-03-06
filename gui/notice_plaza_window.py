@@ -12,6 +12,31 @@ from database.db_manager import DatabaseManager
 from .styles import COLORS, GLOBAL_STYLE
 from .icons import Icons
 
+class NestedScrollArea(QScrollArea):
+    """不向父级冒泡滚轮事件的 ScrollArea"""
+    def wheelEvent(self, event):
+        sb = self.verticalScrollBar()
+        if sb.isVisible():
+            event.accept()
+            sb.setValue(sb.value() - event.angleDelta().y())
+        else:
+            event.ignore()
+
+
+class NestedTextEdit(QTextEdit):
+    """不向父级冒泡滚轮事件的只读 TextEdit"""
+    def wheelEvent(self, event):
+        sb = self.verticalScrollBar()
+        if sb.isVisible() and sb.maximum() > 0:
+            event.accept()
+            sb.setValue(sb.value() - event.angleDelta().y())
+        else:
+            event.ignore()
+
+    def contextMenuEvent(self, event):
+        event.ignore()
+
+
 class TagButton(QPushButton):
     """标签按钮 - 紧凑胶囊样式"""
     def __init__(self, text, parent=None, is_active=False):
@@ -148,11 +173,14 @@ class NoticeCardWidget(QFrame):
     
     join_clicked = pyqtSignal(object)  # 链接信号，传递卡片自身
     
-    def __init__(self, notice, parent=None, is_added=False):
+    MAX_VISIBLE_TAGS = 2
+    
+    def __init__(self, notice, parent=None, is_added=False, selected_category=None):
         super().__init__(parent)
         self.notice = notice
         self.is_loading = False
-        self.is_added = is_added  # 是否已添加到链接库
+        self.is_added = is_added
+        self.selected_category = selected_category
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.init_ui()
         
@@ -184,9 +212,9 @@ class NoticeCardWidget(QFrame):
         layout.setSpacing(10)
         self.setLayout(layout)
         
-        # 1. 头部第一行：平台 + 日期
+        # 1. 头部：平台 + 类目标签(最多2个) + 日期，同一行
         top_row = QHBoxLayout()
-        top_row.setSpacing(8)
+        top_row.setSpacing(6)
         
         platform_tag = QLabel(self.notice.platform)
         platform_tag.setStyleSheet(f"""
@@ -197,8 +225,44 @@ class NoticeCardWidget(QFrame):
             font-size: 12px;
             font-weight: 600;
         """)
-        platform_tag.adjustSize()
+        platform_tag.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         top_row.addWidget(platform_tag)
+        
+        cats = self.notice.category if isinstance(self.notice.category, list) else ([self.notice.category] if self.notice.category else [])
+        cats = [c for c in cats if c]
+        
+        if cats and self.selected_category and self.selected_category in cats:
+            cats = [self.selected_category] + [c for c in cats if c != self.selected_category]
+        
+        visible_cats = cats[:self.MAX_VISIBLE_TAGS]
+        hidden_count = len(cats) - len(visible_cats)
+        
+        for tag_text in visible_cats:
+            lbl = QLabel(tag_text)
+            lbl.setStyleSheet("""
+                background-color: #FEF3C7;
+                color: #D97706;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+            lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            top_row.addWidget(lbl)
+        
+        if hidden_count > 0:
+            more_lbl = QLabel(f"+{hidden_count}")
+            more_lbl.setStyleSheet(f"""
+                background-color: #F3F4F6;
+                color: {COLORS['text_tertiary']};
+                border-radius: 4px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: 600;
+            """)
+            more_lbl.setToolTip("、".join(cats[self.MAX_VISIBLE_TAGS:]))
+            more_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            top_row.addWidget(more_lbl)
         
         top_row.addStretch()
         
@@ -210,64 +274,42 @@ class NoticeCardWidget(QFrame):
         
         layout.addLayout(top_row)
         
-        # 2. 头部第二行：类目标签（自动换行）
-        cats = self.notice.category if isinstance(self.notice.category, list) else ([self.notice.category] if self.notice.category else [])
-        cats = [c for c in cats if c]
-        if cats:
-            tags_widget = FlowTagsWidget(cats)
-            layout.addWidget(tags_widget)
-        
-        # 2. 通告内容 - 使用 QLabel 替代 QTextEdit，解决字体显示问题
+        # 2. 通告内容 - 使用只读 QTextEdit，自带完整滚动支持
         content = self._get_full_content()
         
-        # 内容滚动区域
-        content_scroll = QScrollArea()
-        content_scroll.setWidgetResizable(False)
-        content_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        content_scroll.setStyleSheet("""
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
-            QScrollBar:vertical {
-                width: 4px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                background: #D1D5DB;
-                border-radius: 2px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-        
-        # 固定宽度让 QLabel 正确计算 word-wrap 高度，避免被 ScrollArea 裁剪
-        label_width = 300 - 16 * 2 - 6  # 卡片宽度 - 左右 margin - 滚动条预留
-        self.content_label = QLabel(content)
-        self.content_label.setWordWrap(True)
-        self.content_label.setFixedWidth(label_width)
-        self.content_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.content_label.setStyleSheet(f"""
-            QLabel {{
+        self.content_edit = NestedTextEdit()
+        self.content_edit.setPlainText(content)
+        self.content_edit.setReadOnly(True)
+        self.content_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.content_edit.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: transparent;
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                padding: 8px;
                 font-size: 13px;
                 color: {COLORS['text_primary']};
                 line-height: 1.5;
-                padding: 0;
+            }}
+            QScrollBar:vertical {{
+                width: 4px;
+                background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #D1D5DB;
+                border-radius: 2px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
             }}
         """)
-        
-        content_scroll.setWidget(self.content_label)
-        layout.addWidget(content_scroll, 1)
+        layout.addWidget(self.content_edit, 1)
         
         # 3. 底部按钮 - 根据是否已添加显示不同状态
         self.join_btn = QPushButton()
         self.join_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.join_btn.setFixedHeight(34)
+        self.join_btn.setFixedHeight(38)
         
         if self.is_added:
             self._set_added_style()
@@ -280,6 +322,7 @@ class NoticeCardWidget(QFrame):
     
     def _update_btn_style(self, loading=False):
         """更新按钮样式"""
+        font_family = '"PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif'
         if loading:
             self.join_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -288,7 +331,9 @@ class NoticeCardWidget(QFrame):
                     border: none;
                     border-radius: 8px;
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: 14px;
+                    font-family: {font_family};
+                    padding: 4px 0;
                 }}
             """)
         else:
@@ -299,7 +344,9 @@ class NoticeCardWidget(QFrame):
                     border: none;
                     border-radius: 8px;
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: 14px;
+                    font-family: {font_family};
+                    padding: 4px 0;
                 }}
                 QPushButton:hover {{
                     background: {COLORS['primary_light']};
@@ -314,6 +361,7 @@ class NoticeCardWidget(QFrame):
         self.is_added = True
         self.join_btn.setText("已添加 ✓")
         self.join_btn.setEnabled(False)
+        font_family = '"PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif'
         self.join_btn.setStyleSheet(f"""
             QPushButton {{
                 background: #10B981;
@@ -321,7 +369,9 @@ class NoticeCardWidget(QFrame):
                 border: none;
                 border-radius: 8px;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 14px;
+                font-family: {font_family};
+                padding: 4px 0;
             }}
         """)
     
@@ -730,7 +780,7 @@ class NoticePlazaWindow(QMainWindow):
                 if links and links[0] in user_link_urls:
                     is_added = True
             
-            card = NoticeCardWidget(notice, is_added=is_added)
+            card = NoticeCardWidget(notice, is_added=is_added, selected_category=self.current_category)
             card.join_clicked.connect(self.add_to_my_links)
             row = i // cols
             col = i % cols

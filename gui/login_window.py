@@ -14,7 +14,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QFont, QColor, QCursor, QLinearGradient, QPalette, QBrush, QPainter, QPen
 from database import User
-from core.auth import login_with_password, login_with_token, get_device_id
+from core.auth import login_with_password, get_device_id
 from pathlib import Path
 
 
@@ -195,27 +195,24 @@ class InputGroup(QWidget):
 class LoginWindow(QDialog):
     """登录窗口 - 左右分栏高端布局"""
     login_success = pyqtSignal(object)
-    ready_to_show_main = pyqtSignal(object)  # 新增：主窗口准备好后发出
+    ready_to_show_main = pyqtSignal(object)
     
     def __init__(self, parent=None, auto_login=True):
         super().__init__(parent)
         self.current_user = None
-        self.auto_login_enabled = auto_login
-        self.main_window_ready = False  # 主窗口是否准备好
-        self._is_closing = False  # 防止重复关闭
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)  # 无边框模式，自己画标题栏
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) # 透明背景用于圆角
+        self.main_window_ready = False
+        self._is_closing = False
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 动画对象引用，便于清理
         self._animations = []
         
         self.init_ui()
+        self._load_saved_credentials()
         
-        # 窗口拖动逻辑变量
         self.dragging = False
         self.drag_position = QPoint()
         
-        # 启动入场动画
         self.start_entrance_animation()
         
     def init_ui(self):
@@ -490,81 +487,51 @@ class LoginWindow(QDialog):
     
     def _on_animation_finished(self):
         """动画结束后的清理工作"""
-        # 强制重绘整个窗口，解决 Windows 上的残影问题
         self.main_frame.update()
         self.update()
         self.repaint()
-        
-        # 检查是否需要自动登录
-        if self.auto_login_enabled:
-            QTimer.singleShot(100, self._try_auto_login)
-        else:
-            # 聚焦输入框
-            self.username_input.setFocus()
+        self.username_input.setFocus()
     
-    def _try_auto_login(self):
-        """尝试使用保存的 token 自动登录"""
+    def _load_saved_credentials(self):
+        """加载已保存的账号密码并自动填充"""
         try:
-            # 读取保存的 token
+            import json
+            cred_file = Path.home() / '.auto-form-filler' / '.credentials'
+            if not cred_file.exists():
+                return
+            data = json.loads(cred_file.read_text(encoding='utf-8'))
+            username = data.get('username', '')
+            password = data.get('password', '')
+            if username:
+                self.username_input.input.setText(username)
+            if password:
+                self.password_input.input.setText(password)
+            self.remember_me.setChecked(True)
+        except Exception:
+            pass
+
+    def _save_credentials(self, username: str, password: str):
+        """保存账号密码到本地"""
+        try:
+            import json
             auth_dir = Path.home() / '.auto-form-filler'
-            token_file = auth_dir / '.token'
-            
-            if not token_file.exists():
-                # 没有保存的 token，让用户手动登录
-                self.username_input.setFocus()
-                return
-            
-            token = token_file.read_text().strip()
-            if not token:
-                self.username_input.setFocus()
-                return
-            
-            # 显示自动登录加载状态
-            self.show_loading_state(message="正在自动登录...")
-            
-            # 延迟执行自动登录
-            QTimer.singleShot(100, lambda: self._perform_auto_login(token))
-            
-        except Exception as e:
-            print(f"⚠️ 自动登录检查异常: {e}")
-            self.username_input.setFocus()
-    
-    def _perform_auto_login(self, token):
-        """执行自动登录"""
+            auth_dir.mkdir(exist_ok=True)
+            cred_file = auth_dir / '.credentials'
+            cred_file.write_text(
+                json.dumps({'username': username, 'password': password}, ensure_ascii=False),
+                encoding='utf-8'
+            )
+        except Exception:
+            pass
+
+    def _clear_credentials(self):
+        """清除已保存的账号密码"""
         try:
-            success, message, user = login_with_token(token)
-            
-            if success and user:
-                self.current_user = user
-                
-                # 更新加载文字
-                self.loading_text.setText("登录成功！")
-                if hasattr(self, 'sub_loading_text'):
-                    self.sub_loading_text.setText("即将进入...")
-                
-                # 短暂延迟后关闭
-                QTimer.singleShot(300, self._finish_login)
-            else:
-                # 自动登录失败，删除无效 token
-                try:
-                    auth_dir = Path.home() / '.auto-form-filler'
-                    token_file = auth_dir / '.token'
-                    if token_file.exists():
-                        token_file.unlink()
-                except:
-                    pass
-                
-                # 隐藏加载状态，让用户手动登录
-                self.hide_loading_state()
-                self.username_input.setFocus()
-                
-                # 可选：显示提示信息
-                # QMessageBox.information(self, "提示", f"自动登录失败：{message}\n请重新登录。")
-                
-        except Exception as e:
-            print(f"⚠️ 自动登录异常: {e}")
-            self.hide_loading_state()
-            self.username_input.setFocus()
+            cred_file = Path.home() / '.auto-form-filler' / '.credentials'
+            if cred_file.exists():
+                cred_file.unlink()
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Window Drag Logic
@@ -632,14 +599,17 @@ class LoginWindow(QDialog):
             if token:
                 self.save_token(token)
             
+            if self.remember_me.isChecked():
+                self._save_credentials(username, password)
+            else:
+                self._clear_credentials()
+            
             self.current_user = user
             
-            # 更新加载文字
             self.loading_text.setText("登录成功！")
             if hasattr(self, 'sub_loading_text'):
                 self.sub_loading_text.setText("即将进入...")
             
-            # 短暂延迟后关闭，让用户看到成功状态
             QTimer.singleShot(300, self._finish_login)
             
         except Exception as e:
