@@ -48,6 +48,26 @@ pyinstaller ^
     --windowed ^
     --onedir ^
     --clean ^
+    --collect-all PyQt6 ^
+    --collect-all PyQt6-WebEngine ^
+    --collect-all requests ^
+    --collect-all charset_normalizer ^
+    --collect-all chardet ^
+    --collect-all certifi ^
+    --collect-all pymongo ^
+    --collect-all mongoengine ^
+    --collect-all dns ^
+    --hidden-import=PyQt6.sip ^
+    --hidden-import=requests ^
+    --hidden-import=charset_normalizer ^
+    --hidden-import=chardet ^
+    --hidden-import=dns.resolver ^
+    --hidden-import=dns.rdatatype ^
+    --hidden-import=dns.nameserver ^
+    --hidden-import=pymongo ^
+    --hidden-import=mongoengine ^
+    --hidden-import=Crypto ^
+    --hidden-import=Crypto.Cipher ^
     main.py
 
 if errorlevel 1 (

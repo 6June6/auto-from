@@ -48,27 +48,53 @@ def build_app():
     cmd = [
         'pyinstaller',
         '--name=自动表单填写工具',
-        '--windowed',  # 不显示控制台窗口
-        '--onedir',    # 打包成目录（比 onefile 启动更快）
-        '--clean',     # 清理临时文件
-        'main.py'
+        '--windowed',
+        '--onedir',
+        '--clean',
     ]
+    
+    # 显式收集 PyInstaller 无法自动检测的依赖
+    collect_all_packages = [
+        'PyQt6',
+        'PyQt6-WebEngine',
+        'requests',
+        'charset_normalizer',
+        'chardet',
+        'certifi',
+        'pymongo',
+        'mongoengine',
+        'dns',
+    ]
+    for pkg in collect_all_packages:
+        cmd.append(f'--collect-all={pkg}')
+    
+    hidden_imports = [
+        'PyQt6.sip',
+        'requests',
+        'charset_normalizer',
+        'chardet',
+        'dns.resolver',
+        'dns.rdatatype',
+        'dns.nameserver',
+        'pymongo',
+        'mongoengine',
+        'pycryptodome',
+        'Crypto',
+        'Crypto.Cipher',
+    ]
+    for mod in hidden_imports:
+        cmd.append(f'--hidden-import={mod}')
     
     # macOS 特定配置
     if is_mac:
         print("🍎 检测到 macOS 系统")
-        cmd.extend([
-            '--osx-bundle-identifier=com.autofill.app',
-        ])
+        cmd.append('--osx-bundle-identifier=com.autofill.app')
     
     # Windows 特定配置
     elif is_windows:
         print("🪟 检测到 Windows 系统")
-        # 可以后续添加图标: --icon=icon.ico
-        pass
     
-    # 添加数据文件
-    # cmd.extend(['--add-data', 'data:data'])  # 如果需要打包数据库
+    cmd.append('main.py')
     
     print(f"📝 执行命令: {' '.join(cmd)}\n")
     
