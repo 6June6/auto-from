@@ -2403,6 +2403,7 @@ class CollapsibleCategoryWidget(QWidget):
         
         # 内容容器
         self.cards_container = QWidget()
+        self.cards_container.setStyleSheet("background: transparent;")
         self.cards_layout = QVBoxLayout()
         self.cards_layout.setContentsMargins(12, 4, 12, 0)
         self.cards_layout.setSpacing(0)
@@ -4749,12 +4750,13 @@ class MainWindow(QMainWindow):
     def create_sidebar(self) -> QFrame:
         """创建左侧边栏"""
         sidebar = QFrame()
+        sidebar.setObjectName("mainSidebar")
         sidebar.setFixedWidth(450)
-        sidebar.setStyleSheet(f"""
-            QFrame {{
+        sidebar.setStyleSheet("""
+            #mainSidebar {
                 background: #FAFAFA;
                 border-right: 1px solid #E5E5EA;
-            }}
+            }
         """)
         
         layout = QVBoxLayout()
@@ -4885,6 +4887,7 @@ class MainWindow(QMainWindow):
         """)
         
         self.cards_container = QWidget()
+        self.cards_container.setStyleSheet("background: transparent;")
         self.cards_container_layout = QVBoxLayout()
         self.cards_container_layout.setContentsMargins(0, 10, 0, 0)
         self.cards_container_layout.setSpacing(2)
