@@ -1032,7 +1032,7 @@ class NoticeManager(ModernBaseManager):
         
         reply = QMessageBox.warning(
             self, "发现重复通告",
-            f"检测到已存在相同平台和内容的通告：\n\n{dup_text}{extra}\n\n是否仍要继续发布？",
+            f"检测到已存在包含相同链接的通告：\n\n{dup_text}{extra}\n\n是否仍要继续发布？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )

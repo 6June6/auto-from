@@ -923,23 +923,40 @@ class DatabaseManager:
     @staticmethod
     def check_notice_duplicate(platform: str, content: str, exclude_id: str = None) -> list:
         """
-        检查是否存在重复通告（同平台+相同内容）
-        
+        检查是否存在重复通告（同平台 + 内容中包含相同链接）
+
+        只要新通告内容里的任意一条 URL 在已有同平台通告中出现过，即视为重复。
+
         Args:
             platform: 平台名称
             content: 通告内容
             exclude_id: 排除的通告ID（编辑时排除自身）
-        
+
         Returns:
             重复的通告列表
         """
+        import re
         try:
             if not content or not content.strip():
                 return []
-            query = Notice.objects.filter(platform=platform, content=content.strip())
+
+            urls = set(re.findall(r'https?://[^\s<>"\')\]]+', content))
+            if not urls:
+                return []
+
+            query = Notice.objects.filter(platform=platform)
             if exclude_id:
                 query = query.filter(id__ne=exclude_id)
-            return list(query)
+
+            duplicates = []
+            for notice in query:
+                if not notice.content:
+                    continue
+                notice_urls = set(re.findall(r'https?://[^\s<>"\')\]]+', notice.content))
+                if urls & notice_urls:
+                    duplicates.append(notice)
+
+            return duplicates
         except Exception as e:
             print(f"❌ 检查通告重复失败: {e}")
             return []

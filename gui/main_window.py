@@ -2353,12 +2353,12 @@ class CollapsibleCategoryWidget(QWidget):
             return btn
         
         # 编辑
-        edit_btn = create_action_btn(Icons.edit('#94A3B8'), "重命名", '#F1F5F9')
+        edit_btn = create_action_btn(Icons.edit('#8E8E93'), "重命名", '#F1F5F9')
         edit_btn.clicked.connect(lambda: self.rename_clicked.emit(self.category_name))
         actions_layout.addWidget(edit_btn)
         
         # 删除
-        delete_btn = create_action_btn(Icons.trash('#FF3B30'), "删除", '#FEF2F2')
+        delete_btn = create_action_btn(Icons.trash('#8E8E93'), "删除", '#FEF2F2')
         delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.category_name))
         actions_layout.addWidget(delete_btn)
         
@@ -2870,26 +2870,6 @@ class CardItemWidget(QWidget):
         """)
         edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.card))
         layout.addWidget(edit_btn)
-        
-        delete_btn = QPushButton()
-        delete_btn.setFixedSize(20, 20)
-        delete_btn.setIcon(Icons.trash('#FF3B30'))
-        delete_btn.setIconSize(QSize(12, 12))
-        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.delete_tooltip_filter = ToolTipEventFilter(lambda: "删除")
-        delete_btn.installEventFilter(self.delete_tooltip_filter)
-        delete_btn.setStyleSheet("""
-            QPushButton { 
-                border: none; 
-                background: transparent; 
-                border-radius: 3px;
-            } 
-            QPushButton:hover { 
-                background: #FEE2E2; 
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.card))
-        layout.addWidget(delete_btn)
         
         self.update_style()
     
