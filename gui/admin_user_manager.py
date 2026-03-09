@@ -1017,6 +1017,7 @@ class UserRowWidget(QFrame):
     enter_clicked = pyqtSignal(object)
     toggle_clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(object)
+    import_cards_clicked = pyqtSignal(object)
     
     def __init__(self, user, device_count, card_count=0, parent=None):
         super().__init__(parent)
@@ -1468,6 +1469,10 @@ class UserRowWidget(QFrame):
         shadow.setOffset(0, 4)
         menu.setGraphicsEffect(shadow)
         
+        # 导入名片
+        import_action = menu.addAction("📥 导入名片")
+        import_action.triggered.connect(lambda: self.import_cards_clicked.emit(self.user))
+        
         # 禁用/启用
         toggle_action = menu.addAction("🚫 禁用账号" if self.user.is_active else "✅ 启用账号")
         toggle_action.triggered.connect(lambda: self.toggle_clicked.emit(self.user))
@@ -1491,6 +1496,7 @@ class UserListWidget(QWidget):
     enter_user = pyqtSignal(object)
     toggle_user = pyqtSignal(object)
     delete_user = pyqtSignal(object)
+    import_cards_user = pyqtSignal(object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1583,6 +1589,7 @@ class UserListWidget(QWidget):
             row.enter_clicked.connect(self.enter_user.emit)
             row.toggle_clicked.connect(self.toggle_user.emit)
             row.delete_clicked.connect(self.delete_user.emit)
+            row.import_cards_clicked.connect(self.import_cards_user.emit)
             
             self.content_layout.addWidget(row)
             self.row_widgets.append(row)
@@ -1762,6 +1769,7 @@ class UserManagementWidget(QWidget):
         self.user_list.enter_user.connect(self.enter_user_client)
         self.user_list.toggle_user.connect(self.toggle_user_status)
         self.user_list.delete_user.connect(self.delete_user)
+        self.user_list.import_cards_user.connect(self.import_cards_for_user)
         
         card_layout.addWidget(self.user_list, 1)
         
@@ -1966,3 +1974,1057 @@ class UserManagementWidget(QWidget):
             if DatabaseManager.delete_user(str(user.id)):
                 self.load_users()
                 QMessageBox.information(self, "成功", f"用户 {user.username} 已删除")
+
+    def import_cards_for_user(self, user):
+        """为指定用户批量导入名片"""
+        dialog = BatchImportCardsDialog(user, self)
+        if dialog.exec():
+            self.load_users()
+
+
+class BatchImportCardsDialog(QDialog):
+    """批量导入名片对话框 - 管理员为用户批量创建名片"""
+    
+    def __init__(self, target_user, parent=None):
+        super().__init__(parent)
+        self.target_user = target_user
+        self.db_manager = DatabaseManager()
+        self.templates = []
+        self.categories = []
+        self.imported_cards = []
+        self._load_templates()
+        self._load_categories()
+        self.init_ui()
+    
+    def _load_templates(self):
+        """加载所有启用的固定模板"""
+        self.templates = self.db_manager.get_all_fixed_templates(is_active=True)
+    
+    def _load_categories(self):
+        """加载目标用户的分类列表"""
+        cats = self.db_manager.get_user_categories(self.target_user)
+        self.categories = [c.name for c in cats] if cats else []
+        if '默认分类' not in self.categories:
+            self.categories.insert(0, '默认分类')
+    
+    def init_ui(self):
+        self.setWindowTitle(f"批量导入名片 - {self.target_user.username}")
+        self.setMinimumSize(820, 620)
+        self.resize(900, 680)
+        self.setStyleSheet("QDialog { background-color: white; }")
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # === 1. 顶部 Header ===
+        header = QFrame()
+        header.setFixedHeight(100)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {PREMIUM_COLORS['gradient_green_start']}, 
+                    stop:1 {PREMIUM_COLORS['gradient_green_end']});
+            }}
+        """)
+        
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(32, 0, 32, 0)
+        header_layout.setSpacing(20)
+        
+        title_info = QVBoxLayout()
+        title_info.setSpacing(6)
+        title_info.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        title_lbl = QLabel("批量导入名片")
+        title_lbl.setStyleSheet("color: white; font-size: 24px; font-weight: 800;")
+        
+        subtitle_lbl = QLabel(f"为用户 {self.target_user.username} 批量创建名片，支持 CSV 模板导入")
+        subtitle_lbl.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 13px; font-weight: 500;")
+        
+        title_info.addWidget(title_lbl)
+        title_info.addWidget(subtitle_lbl)
+        
+        icon_bg = QLabel("📥")
+        icon_bg.setFixedSize(56, 56)
+        icon_bg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_bg.setStyleSheet("background: rgba(255,255,255,0.2); border-radius: 28px; font-size: 26px;")
+        
+        header_layout.addLayout(title_info)
+        header_layout.addStretch()
+        header_layout.addWidget(icon_bg)
+        
+        layout.addWidget(header)
+        
+        # === 2. 操作区域 ===
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(32, 28, 32, 20)
+        body_layout.setSpacing(20)
+        
+        # 步骤说明卡片
+        steps_frame = QFrame()
+        steps_frame.setStyleSheet(f"""
+            QFrame {{
+                background: #f0fdf4;
+                border: 1px solid #bbf7d0;
+                border-radius: 12px;
+            }}
+        """)
+        steps_layout = QVBoxLayout(steps_frame)
+        steps_layout.setContentsMargins(20, 16, 20, 16)
+        steps_layout.setSpacing(8)
+        
+        steps_title = QLabel("📋 操作步骤")
+        steps_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #166534;")
+        steps_layout.addWidget(steps_title)
+        
+        steps_desc = QLabel(
+            "① 点击「下载模板」获取 CSV 模板文件（已包含固定模板字段）\n"
+            "② 用 Excel / WPS 打开模板，每行填写一张名片的数据\n"
+            "③ 点击「选择文件导入」将填好的 CSV 导入系统"
+        )
+        steps_desc.setStyleSheet("font-size: 13px; color: #15803d; line-height: 1.6;")
+        steps_desc.setWordWrap(True)
+        steps_layout.addWidget(steps_desc)
+        
+        body_layout.addWidget(steps_frame)
+        
+        # 操作按钮行
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(16)
+        
+        download_btn = GradientButton(
+            "⬇ 下载模板",
+            PREMIUM_COLORS['gradient_green_start'],
+            PREMIUM_COLORS['gradient_green_end']
+        )
+        download_btn.setFixedSize(160, 44)
+        download_btn.clicked.connect(self.download_template)
+        btn_row.addWidget(download_btn)
+        
+        import_btn = GradientButton(
+            "📂 选择文件导入",
+            PREMIUM_COLORS['gradient_blue_start'],
+            PREMIUM_COLORS['gradient_blue_end']
+        )
+        import_btn.setFixedSize(160, 44)
+        import_btn.clicked.connect(self.import_from_file)
+        btn_row.addWidget(import_btn)
+        
+        btn_row.addStretch()
+        
+        # 模板字段预览按钮
+        preview_btn = QPushButton("查看模板字段")
+        preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        preview_btn.setFixedHeight(36)
+        preview_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+                border: 1px solid {PREMIUM_COLORS['gradient_blue_start']}40;
+                border-radius: 18px;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['gradient_blue_start']}10;
+                border-color: {PREMIUM_COLORS['gradient_blue_start']};
+            }}
+        """)
+        preview_btn.clicked.connect(self.show_template_preview)
+        btn_row.addWidget(preview_btn)
+        
+        body_layout.addLayout(btn_row)
+        
+        # 导入结果区域
+        self.result_frame = QFrame()
+        self.result_frame.setStyleSheet(f"""
+            QFrame {{
+                background: #f8fafc;
+                border: 1px solid {PREMIUM_COLORS['border_light']};
+                border-radius: 12px;
+            }}
+        """)
+        result_layout = QVBoxLayout(self.result_frame)
+        result_layout.setContentsMargins(20, 16, 20, 16)
+        result_layout.setSpacing(8)
+        
+        result_header = QLabel("📊 导入结果")
+        result_header.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {PREMIUM_COLORS['text_heading']};")
+        result_layout.addWidget(result_header)
+        
+        self.result_label = QLabel("尚未导入数据")
+        self.result_label.setStyleSheet(f"font-size: 13px; color: {PREMIUM_COLORS['text_hint']};")
+        self.result_label.setWordWrap(True)
+        result_layout.addWidget(self.result_label)
+        
+        self.result_detail = QLabel("")
+        self.result_detail.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_body']}; line-height: 1.5;")
+        self.result_detail.setWordWrap(True)
+        self.result_detail.hide()
+        result_layout.addWidget(self.result_detail)
+        
+        body_layout.addWidget(self.result_frame)
+        
+        body_layout.addStretch()
+        
+        layout.addWidget(body, 1)
+        
+        # === 3. 底部按钮 ===
+        bottom = QWidget()
+        bottom.setStyleSheet(f"border-top: 1px solid {PREMIUM_COLORS['border_light']};")
+        bottom_layout = QHBoxLayout(bottom)
+        bottom_layout.setContentsMargins(32, 16, 32, 16)
+        
+        bottom_layout.addStretch()
+        
+        close_btn = QPushButton("关闭")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedSize(100, 40)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {PREMIUM_COLORS['text_body']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 20px;
+                font-weight: 600;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: {PREMIUM_COLORS['background']};
+                border-color: {PREMIUM_COLORS['text_body']};
+            }}
+        """)
+        close_btn.clicked.connect(self.accept)
+        bottom_layout.addWidget(close_btn)
+        
+        layout.addWidget(bottom)
+    
+    def _build_csv_header_and_meta(self):
+        """构建表头和模板元数据
+        
+        表头只取 field_name 中第一个别名（'、'分隔的第一个）作为显示名
+        
+        Returns:
+            (header_row, field_meta)
+        """
+        header = ['名片名称', '分类']
+        field_meta = []
+        
+        for t in self.templates:
+            tid = str(t.id)
+            full_key = t.field_name
+            display_name = full_key.split('、')[0].strip()
+            vc = t.value_count or 1
+            
+            # 解析多值的逐项 placeholder
+            per_value_phs = []
+            vpt = getattr(t, 'value_placeholder_template', None)
+            if vpt and vc > 1:
+                import json
+                try:
+                    parsed = json.loads(vpt)
+                    if isinstance(parsed, list):
+                        per_value_phs = parsed
+                except (json.JSONDecodeError, TypeError):
+                    if '{index}' in vpt:
+                        per_value_phs = [vpt.replace('{index}', str(i+1)) for i in range(vc)]
+            
+            default_ph = t.placeholder or ''
+            
+            if vc <= 1:
+                col_name = f"{display_name}\n[{tid}]"
+                header.append(col_name)
+                field_meta.append({
+                    'template_id': tid,
+                    'key': full_key,
+                    'value_count': 1,
+                    'placeholder': default_ph
+                })
+            else:
+                for vi in range(vc):
+                    col_name = f"{display_name}__值{vi+1}\n[{tid}]"
+                    header.append(col_name)
+                    ph = per_value_phs[vi] if vi < len(per_value_phs) and per_value_phs[vi] else default_ph
+                    field_meta.append({
+                        'template_id': tid,
+                        'key': full_key,
+                        'value_count': vc,
+                        'value_index': vi,
+                        'placeholder': ph
+                    })
+        
+        return header, field_meta
+    
+    def download_template(self):
+        """下载 Excel 模板文件（.xlsx），带列宽和分类下拉"""
+        from PyQt6.QtWidgets import QFileDialog
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.worksheet.datavalidation import DataValidation
+        from openpyxl.utils import get_column_letter
+        
+        if not self.templates:
+            QMessageBox.warning(self, "提示", "当前没有启用的固定模板，无法生成模板文件")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存名片导入模板",
+            f"名片导入模板_{self.target_user.username}.xlsx",
+            "Excel 文件 (*.xlsx)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            header, field_meta = self._build_csv_header_and_meta()
+            
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "名片导入"
+            
+            # --- 样式定义 ---
+            header_font = Font(name='微软雅黑', bold=True, size=10, color="FFFFFF")
+            header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
+            fixed_col_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+            fixed_col_font = Font(name='微软雅黑', bold=True, size=11, color="1E40AF")
+            header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+            border_color = 'C7D2FE'
+            thin_border = Border(
+                left=Side(style='thin', color=border_color),
+                right=Side(style='thin', color=border_color),
+                top=Side(style='thin', color=border_color),
+                bottom=Side(style='thin', color=border_color)
+            )
+            
+            example_font = Font(name='微软雅黑', color="94A3B8", italic=True, size=10)
+            data_font = Font(name='微软雅黑', size=11)
+            data_align = Alignment(horizontal="left", vertical="center")
+            
+            even_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+            
+            # --- 写表头（纯文本，名称 + ID 换行，兼容 WPS）---
+            for col_idx, col_name in enumerate(header, 1):
+                cell = ws.cell(row=1, column=col_idx, value=col_name)
+                if col_idx <= 2:
+                    cell.font = fixed_col_font
+                    cell.fill = fixed_col_fill
+                else:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                cell.alignment = header_align
+                cell.border = thin_border
+            
+            ws.row_dimensions[1].height = 48
+            
+            # --- 列宽 ---
+            ws.column_dimensions['A'].width = 26
+            ws.column_dimensions['B'].width = 16
+            for col_idx in range(3, len(header) + 1):
+                ws.column_dimensions[get_column_letter(col_idx)].width = 22
+            
+            # --- 空白数据行（直接从第2行开始填写）---
+            total_rows = 50
+            for row_idx in range(2, total_rows + 2):
+                for col_idx in range(1, len(header) + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx, value='')
+                    cell.border = thin_border
+                    cell.font = data_font
+                    cell.alignment = data_align
+                    if row_idx % 2 == 1:
+                        cell.fill = even_fill
+                ws.row_dimensions[row_idx].height = 24
+            
+            # --- 列填写提示（点击单元格时弹出）---
+            col_hints = [
+                (1, '名片名称', '填写名片名称，每行一张名片'),
+            ]
+            for col_idx, meta in enumerate(field_meta, 3):
+                ph = meta.get('placeholder', '')
+                if ph:
+                    display = header[col_idx - 1].split('\n')[0] if '\n' in header[col_idx - 1] else header[col_idx - 1]
+                    col_hints.append((col_idx, display, ph))
+            
+            for col_idx, title, hint in col_hints:
+                dv = DataValidation(type="custom", formula1="TRUE", allow_blank=True)
+                dv.promptTitle = title
+                dv.prompt = hint
+                dv.showInputMessage = True
+                dv.showErrorMessage = False
+                col_letter = get_column_letter(col_idx)
+                ws.add_data_validation(dv)
+                dv.add(f'{col_letter}2:{col_letter}200')
+            
+            # --- 分类下拉 ---
+            if self.categories:
+                cat_list = ','.join(self.categories)
+                dv = DataValidation(
+                    type="list",
+                    formula1=f'"{cat_list}"',
+                    allow_blank=True,
+                    showDropDown=False
+                )
+                dv.prompt = "请选择分类"
+                dv.promptTitle = "分类"
+                dv.showInputMessage = True
+                dv.showErrorMessage = False
+                ws.add_data_validation(dv)
+                dv.add('B2:B200')
+            
+            ws.freeze_panes = 'C2'
+            ws.auto_filter.ref = f'A1:{get_column_letter(len(header))}1'
+            
+            wb.save(file_path)
+            
+            QMessageBox.information(
+                self, "下载成功",
+                f"模板已保存至：\n{file_path}\n\n"
+                f"共 {len(self.templates)} 个字段\n"
+                f"「分类」列可下拉选择\n"
+                f"请用 Excel / WPS 打开填写，每行一张名片"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存模板失败：{str(e)}")
+    
+    def import_from_file(self):
+        """从 Excel / CSV 文件导入名片"""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择名片文件",
+            "",
+            "Excel 文件 (*.xlsx);;CSV 文件 (*.csv);;所有文件 (*)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            if file_path.lower().endswith('.xlsx'):
+                cards_data = self._parse_xlsx(file_path)
+            else:
+                cards_data = self._parse_csv(file_path)
+            
+            if not cards_data:
+                QMessageBox.warning(self, "提示", "文件中没有有效的名片数据")
+                return
+            
+            preview = ImportPreviewDialog(cards_data, self.templates, self.target_user, self)
+            if preview.exec():
+                final_data = preview.get_final_data()
+                if final_data:
+                    result = self.db_manager.batch_create_cards(final_data, self.target_user)
+                    self._show_import_result(result)
+            
+        except UnicodeDecodeError:
+            QMessageBox.critical(self, "编码错误", "文件编码不支持，请确保 CSV 以 UTF-8 编码保存")
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", f"解析文件时发生错误：{str(e)}")
+    
+    def _parse_xlsx(self, file_path):
+        """解析 Excel (.xlsx) 文件为名片数据列表"""
+        from openpyxl import load_workbook
+        import json
+        
+        wb = load_workbook(file_path, read_only=True, data_only=True)
+        ws = wb.active
+        
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append([str(cell) if cell is not None else '' for cell in row])
+        wb.close()
+        
+        if len(rows) < 2:
+            return []
+        
+        return self._parse_rows(rows)
+    
+    def _parse_csv(self, file_path):
+        """解析 CSV 文件为名片数据列表"""
+        import csv, io
+        
+        content = None
+        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'gb18030']:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    content = f.read()
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        if content is None:
+            raise UnicodeDecodeError('', b'', 0, 0, '无法识别文件编码')
+        
+        rows = list(csv.reader(io.StringIO(content)))
+        if len(rows) < 2:
+            return []
+        
+        return self._parse_rows(rows)
+    
+    def _parse_rows(self, rows):
+        """通用行数据解析：根据表头中的 [template_id] 匹配模板，提取名片数据"""
+        header = rows[0]
+        if len(header) < 2:
+            return []
+        
+        # 构建 template_id -> 完整 field_name 的映射
+        tpl_map = {str(t.id): t.field_name for t in self.templates}
+        
+        field_columns = []
+        for col_idx in range(2, len(header)):
+            col_name = str(header[col_idx]).strip()
+            if not col_name:
+                continue
+            
+            template_id = None
+            value_index = 0
+            
+            # 从末尾提取 [template_id]
+            if col_name.endswith(']') and '[' in col_name:
+                bracket_start = col_name.rindex('[')
+                template_id = col_name[bracket_start + 1:-1].strip()
+                display_part = col_name[:bracket_start].strip()
+            else:
+                display_part = col_name
+            
+            # 解析多值后缀 __值N
+            if '__值' in display_part:
+                parts = display_part.rsplit('__值', 1)
+                try:
+                    value_index = int(parts[1]) - 1
+                except (ValueError, IndexError):
+                    value_index = 0
+            
+            # 通过 id 查找完整 key，找不到则跳过该列
+            if template_id and template_id in tpl_map:
+                key = tpl_map[template_id]
+            else:
+                continue
+            
+            field_columns.append({
+                'col_index': col_idx,
+                'template_id': template_id,
+                'key': key,
+                'value_index': value_index
+            })
+        
+        cards_data = []
+        for row_idx in range(1, len(rows)):
+            row = rows[row_idx]
+            if not row or len(row) < 1:
+                continue
+            
+            name = str(row[0]).strip() if len(row) > 0 else ''
+            if not name or name.startswith('(示例)') or name.startswith('示例'):
+                continue
+            
+            category = str(row[1]).strip() if len(row) > 1 else '默认分类'
+            
+            # 按 template_id 分组（同一个模板的多值列归为一组）
+            field_map = {}
+            for fc in field_columns:
+                col_idx = fc['col_index']
+                value = str(row[col_idx]).strip() if col_idx < len(row) else ''
+                
+                tid = fc['template_id']
+                if tid not in field_map:
+                    field_map[tid] = {
+                        'key': fc['key'],
+                        'fixed_template_id': tid,
+                        'values': [],
+                        'value_count': 1
+                    }
+                
+                fm = field_map[tid]
+                vi = fc['value_index']
+                while len(fm['values']) <= vi:
+                    fm['values'].append('')
+                fm['values'][vi] = value
+                fm['value_count'] = max(fm['value_count'], vi + 1)
+            
+            configs = []
+            for tid, fm in field_map.items():
+                vc = fm['value_count']
+                val = fm['values'][0] if (vc <= 1 and fm['values']) else (fm['values'] if vc > 1 else '')
+                configs.append({
+                    'key': fm['key'],
+                    'value': val,
+                    'fixed_template_id': fm['fixed_template_id'],
+                    'value_count': vc
+                })
+            
+            cards_data.append({
+                'name': name,
+                'category': category,
+                'configs': configs
+            })
+        
+        return cards_data
+    
+    def _show_import_result(self, result):
+        """显示导入结果"""
+        success = result['success_count']
+        errors = result['error_count']
+        error_msgs = result.get('errors', [])
+        
+        if errors == 0:
+            self.result_label.setText(f"✅ 导入完成！成功创建 {success} 张名片")
+            self.result_label.setStyleSheet("font-size: 14px; color: #16a34a; font-weight: 600;")
+        else:
+            self.result_label.setText(f"⚠️ 导入完成：成功 {success} 张，失败 {errors} 张")
+            self.result_label.setStyleSheet(f"font-size: 14px; color: {PREMIUM_COLORS['gradient_gold_start']}; font-weight: 600;")
+        
+        if error_msgs:
+            self.result_detail.setText('\n'.join(error_msgs[:10]))
+            if len(error_msgs) > 10:
+                self.result_detail.setText(self.result_detail.text() + f"\n... 还有 {len(error_msgs) - 10} 条错误")
+            self.result_detail.show()
+        else:
+            self.result_detail.hide()
+    
+    def show_template_preview(self):
+        """预览模板字段"""
+        if not self.templates:
+            QMessageBox.information(self, "模板字段", "当前没有启用的固定模板")
+            return
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("模板字段预览")
+        dialog.setMinimumSize(600, 450)
+        dialog.setStyleSheet("QDialog { background: white; }")
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        
+        title = QLabel(f"固定模板字段（共 {len(self.templates)} 个）")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {PREMIUM_COLORS['text_heading']};")
+        layout.addWidget(title)
+        
+        hint = QLabel("以下字段将出现在 CSV 模板中，表头格式为 [模板ID]字段名")
+        hint.setStyleSheet(f"font-size: 12px; color: {PREMIUM_COLORS['text_hint']};")
+        layout.addWidget(hint)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+        
+        for i, t in enumerate(self.templates, 1):
+            row = QFrame()
+            row.setStyleSheet(f"""
+                QFrame {{
+                    background: #f8fafc;
+                    border: 1px solid {PREMIUM_COLORS['border_light']};
+                    border-radius: 8px;
+                }}
+            """)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setSpacing(12)
+            
+            idx_label = QLabel(str(i))
+            idx_label.setFixedWidth(24)
+            idx_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            idx_label.setStyleSheet(f"""
+                background: {PREMIUM_COLORS['gradient_blue_start']}15;
+                color: {PREMIUM_COLORS['gradient_blue_start']};
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 2px;
+            """)
+            row_layout.addWidget(idx_label)
+            
+            info_layout = QVBoxLayout()
+            info_layout.setSpacing(2)
+            
+            name_label = QLabel(t.field_name)
+            name_label.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {PREMIUM_COLORS['text_heading']};")
+            info_layout.addWidget(name_label)
+            
+            meta_parts = [f"ID: {str(t.id)[:8]}..."]
+            if t.value_count and t.value_count > 1:
+                meta_parts.append(f"多值×{t.value_count}")
+            if t.placeholder:
+                meta_parts.append(f"提示: {t.placeholder}")
+            if t.category:
+                meta_parts.append(f"分类: {t.category}")
+            
+            meta_label = QLabel(" · ".join(meta_parts))
+            meta_label.setStyleSheet(f"font-size: 11px; color: {PREMIUM_COLORS['text_hint']};")
+            info_layout.addWidget(meta_label)
+            
+            row_layout.addLayout(info_layout, 1)
+            content_layout.addWidget(row)
+        
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+        
+        close_btn = QPushButton("关闭")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedSize(80, 36)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PREMIUM_COLORS['background']};
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 18px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {PREMIUM_COLORS['border_light']}; }}
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+        
+        dialog.exec()
+
+
+class ImportPreviewDialog(QDialog):
+    """导入预览对话框 - 解析后预览、编辑、确认再导入"""
+    
+    def __init__(self, cards_data, templates, target_user, parent=None):
+        super().__init__(parent)
+        self.cards_data = cards_data
+        self.templates = templates
+        self.target_user = target_user
+        self._confirmed = False
+        
+        # 构建模板 ID -> 显示名映射
+        self.tpl_display = {}
+        for t in templates:
+            self.tpl_display[str(t.id)] = t.field_name.split('、')[0].strip()
+        
+        # 收集所有出现的字段列（按 template_id 去重，保持顺序）
+        self.field_columns = []
+        seen_tids = set()
+        for card in cards_data:
+            for cfg in card.get('configs', []):
+                tid = cfg.get('fixed_template_id', '')
+                if tid and tid not in seen_tids:
+                    seen_tids.add(tid)
+                    self.field_columns.append({
+                        'template_id': tid,
+                        'display': self.tpl_display.get(tid, cfg.get('key', '').split('、')[0]),
+                        'value_count': cfg.get('value_count', 1)
+                    })
+        
+        self.init_ui()
+        self._populate_table()
+    
+    def init_ui(self):
+        self.setWindowTitle(f"导入预览 - {self.target_user.username}")
+        self.setMinimumSize(960, 580)
+        self.resize(1100, 680)
+        self.setStyleSheet("QDialog { background-color: white; }")
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # --- 顶部 Header ---
+        header = QFrame()
+        header.setFixedHeight(72)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {PREMIUM_COLORS['gradient_blue_start']}, stop:1 {PREMIUM_COLORS['gradient_blue_end']});
+            }}
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(28, 0, 28, 0)
+        
+        title = QLabel(f"📋 预览导入数据 — 共 {len(self.cards_data)} 张名片")
+        title.setStyleSheet("color: white; font-size: 16px; font-weight: 700;")
+        
+        hint = QLabel("双击单元格可编辑，确认无误后点击「确认导入」")
+        hint.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 12px;")
+        
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        title_box.addWidget(title)
+        title_box.addWidget(hint)
+        header_layout.addLayout(title_box)
+        header_layout.addStretch()
+        layout.addWidget(header)
+        
+        # --- 工具栏 ---
+        toolbar = QFrame()
+        toolbar.setFixedHeight(48)
+        toolbar.setStyleSheet(f"background: {PREMIUM_COLORS['background']}; border-bottom: 1px solid {PREMIUM_COLORS['border_light']};")
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(16, 0, 16, 0)
+        tb_layout.setSpacing(12)
+        
+        self.count_label = QLabel(f"共 {len(self.cards_data)} 条")
+        self.count_label.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px; font-weight: 600;")
+        tb_layout.addWidget(self.count_label)
+        
+        tb_layout.addStretch()
+        
+        del_btn = QPushButton("🗑 删除选中行")
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white; border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 6px; padding: 4px 14px; font-size: 12px;
+                color: {PREMIUM_COLORS['text_body']};
+            }}
+            QPushButton:hover {{ border-color: #ef4444; color: #ef4444; }}
+        """)
+        del_btn.clicked.connect(self._delete_selected)
+        tb_layout.addWidget(del_btn)
+        
+        layout.addWidget(toolbar)
+        
+        # --- 表格 ---
+        self.table = QTableWidget()
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                border: none;
+                gridline-color: {PREMIUM_COLORS['border_light']};
+                font-size: 12px;
+                alternate-background-color: #f8fafc;
+            }}
+            QTableWidget::item {{
+                padding: 6px 10px;
+            }}
+            QTableWidget::item:selected {{
+                background: {PREMIUM_COLORS['gradient_blue_start']}18;
+                color: {PREMIUM_COLORS['text_heading']};
+            }}
+            QHeaderView::section {{
+                background: {PREMIUM_COLORS['background']};
+                border: none;
+                border-bottom: 2px solid {PREMIUM_COLORS['border']};
+                padding: 8px 10px;
+                font-size: 12px;
+                font-weight: 700;
+                color: {PREMIUM_COLORS['text_heading']};
+            }}
+        """)
+        layout.addWidget(self.table, 1)
+        
+        # --- 底部按钮 ---
+        bottom = QFrame()
+        bottom.setFixedHeight(64)
+        bottom.setStyleSheet(f"background: white; border-top: 1px solid {PREMIUM_COLORS['border_light']};")
+        btn_layout = QHBoxLayout(bottom)
+        btn_layout.setContentsMargins(24, 0, 24, 0)
+        btn_layout.setSpacing(12)
+        
+        btn_layout.addStretch()
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setFixedSize(100, 38)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                border: 1px solid {PREMIUM_COLORS['border']};
+                border-radius: 8px;
+                color: {PREMIUM_COLORS['text_body']};
+                font-size: 13px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: #f1f5f9; }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        confirm_btn = QPushButton(f"✅ 确认导入 ({len(self.cards_data)} 张)")
+        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        confirm_btn.setFixedHeight(38)
+        confirm_btn.setMinimumWidth(160)
+        confirm_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {PREMIUM_COLORS['gradient_blue_start']}, stop:1 {PREMIUM_COLORS['gradient_blue_end']});
+                border: none; border-radius: 8px;
+                color: white; font-size: 13px; font-weight: 700;
+                padding: 0 24px;
+            }}
+            QPushButton:hover {{ opacity: 0.9; }}
+        """)
+        confirm_btn.clicked.connect(self._confirm_import)
+        self.confirm_btn = confirm_btn
+        btn_layout.addWidget(confirm_btn)
+        
+        layout.addWidget(bottom)
+    
+    def _build_col_headers(self):
+        """构建表格列头：序号 + 名片名称 + 分类 + 各字段列"""
+        headers = ['序号', '名片名称', '分类']
+        for fc in self.field_columns:
+            vc = fc['value_count']
+            if vc <= 1:
+                headers.append(fc['display'])
+            else:
+                for vi in range(vc):
+                    headers.append(f"{fc['display']}__值{vi+1}")
+        return headers
+    
+    def _populate_table(self):
+        """填充表格数据"""
+        headers = self._build_col_headers()
+        
+        self.table.setColumnCount(len(headers))
+        self.table.setRowCount(len(self.cards_data))
+        self.table.setHorizontalHeaderLabels(headers)
+        
+        h = self.table.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 48)
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(2, 100)
+        for ci in range(3, len(headers)):
+            h.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
+            self.table.setColumnWidth(ci, 140)
+        
+        for row_idx, card in enumerate(self.cards_data):
+            # 序号（只读）
+            idx_item = QTableWidgetItem(str(row_idx + 1))
+            idx_item.setFlags(idx_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            idx_item.setForeground(QColor(PREMIUM_COLORS['text_hint']))
+            self.table.setItem(row_idx, 0, idx_item)
+            
+            # 名片名称
+            self.table.setItem(row_idx, 1, QTableWidgetItem(card.get('name', '')))
+            
+            # 分类
+            self.table.setItem(row_idx, 2, QTableWidgetItem(card.get('category', '默认分类')))
+            
+            # 构建 template_id -> config 映射
+            cfg_map = {}
+            for cfg in card.get('configs', []):
+                tid = cfg.get('fixed_template_id', '')
+                if tid:
+                    cfg_map[tid] = cfg
+            
+            # 填充字段列
+            col_offset = 3
+            for fc in self.field_columns:
+                tid = fc['template_id']
+                vc = fc['value_count']
+                cfg = cfg_map.get(tid, {})
+                val = cfg.get('value', '')
+                
+                if vc <= 1:
+                    display_val = val if isinstance(val, str) else str(val)
+                    self.table.setItem(row_idx, col_offset, QTableWidgetItem(display_val))
+                    col_offset += 1
+                else:
+                    if isinstance(val, list):
+                        values = val
+                    else:
+                        values = [val] if val else []
+                    for vi in range(vc):
+                        v = values[vi] if vi < len(values) else ''
+                        self.table.setItem(row_idx, col_offset, QTableWidgetItem(str(v)))
+                        col_offset += 1
+    
+    def _delete_selected(self):
+        """删除选中的行"""
+        rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
+        if not rows:
+            return
+        
+        for r in rows:
+            if r < len(self.cards_data):
+                self.cards_data.pop(r)
+            self.table.removeRow(r)
+        
+        # 刷新序号
+        for i in range(self.table.rowCount()):
+            item = self.table.item(i, 0)
+            if item:
+                item.setText(str(i + 1))
+        
+        count = self.table.rowCount()
+        self.count_label.setText(f"共 {count} 条")
+        self.confirm_btn.setText(f"✅ 确认导入 ({count} 张)")
+    
+    def _confirm_import(self):
+        """确认导入"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "提示", "没有可导入的数据")
+            return
+        self._confirmed = True
+        self.accept()
+    
+    def get_final_data(self):
+        """从表格中读取最终数据（含用户编辑）"""
+        if not self._confirmed:
+            return None
+        
+        final = []
+        for row_idx in range(self.table.rowCount()):
+            name = (self.table.item(row_idx, 1).text().strip() 
+                    if self.table.item(row_idx, 1) else '')
+            if not name:
+                continue
+            
+            category = (self.table.item(row_idx, 2).text().strip()
+                       if self.table.item(row_idx, 2) else '默认分类')
+            
+            configs = []
+            col_offset = 3
+            for fc in self.field_columns:
+                tid = fc['template_id']
+                vc = fc['value_count']
+                
+                # 从原始数据中获取完整 key
+                original_key = None
+                if row_idx < len(self.cards_data):
+                    for cfg in self.cards_data[row_idx].get('configs', []):
+                        if cfg.get('fixed_template_id') == tid:
+                            original_key = cfg.get('key')
+                            break
+                if not original_key:
+                    original_key = self.tpl_display.get(tid, tid)
+                
+                if vc <= 1:
+                    val = (self.table.item(row_idx, col_offset).text().strip()
+                          if self.table.item(row_idx, col_offset) else '')
+                    col_offset += 1
+                else:
+                    val = []
+                    for vi in range(vc):
+                        v = (self.table.item(row_idx, col_offset).text().strip()
+                            if self.table.item(row_idx, col_offset) else '')
+                        val.append(v)
+                        col_offset += 1
+                
+                configs.append({
+                    'key': original_key,
+                    'value': val,
+                    'fixed_template_id': tid,
+                    'value_count': vc
+                })
+            
+            final.append({
+                'name': name,
+                'category': category or '默认分类',
+                'configs': configs
+            })
+        
+        return final

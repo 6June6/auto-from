@@ -22,6 +22,7 @@ PyJWT==2.10.1
 
 # 工具库
 python-dateutil==2.8.2
+openpyxl==3.1.5
 
 # 开发工具
 watchdog==3.0.0  # 文件监控（开发模式自动重启）

@@ -101,7 +101,68 @@ class DatabaseManager:
         except Exception as e:
             print(f"❌ 创建名片失败: {e}")
             raise
-    
+
+    @staticmethod
+    def batch_create_cards(cards_data: List[Dict], user) -> Dict:
+        """
+        批量创建名片
+        
+        Args:
+            cards_data: 名片数据列表，每项包含 name, category, configs
+            user: 所属用户对象或用户ID
+        
+        Returns:
+            {'success_count': int, 'error_count': int, 'errors': list}
+        """
+        if isinstance(user, str):
+            user = User.objects.get(id=user)
+        
+        result = {'success_count': 0, 'error_count': 0, 'errors': []}
+        
+        for idx, data in enumerate(cards_data):
+            try:
+                name = data.get('name', '').strip()
+                if not name:
+                    result['errors'].append(f"第{idx+1}行：名片名称为空，已跳过")
+                    result['error_count'] += 1
+                    continue
+                
+                category = data.get('category', '默认分类').strip() or '默认分类'
+                configs = data.get('configs', [])
+                
+                config_items = []
+                for i, config in enumerate(configs):
+                    if not config.get('key', '').strip():
+                        continue
+                    value = config.get('value', '')
+                    value_count = config.get('value_count', 1)
+                    if value_count > 1 and isinstance(value, list):
+                        import json
+                        value = json.dumps(value, ensure_ascii=False)
+                    config_item = CardConfigItem(
+                        key=config['key'],
+                        value=value if value else '',
+                        order=i,
+                        fixed_template_id=config.get('fixed_template_id'),
+                        value_count=value_count
+                    )
+                    config_items.append(config_item)
+                
+                card = Card(
+                    user=user,
+                    name=name,
+                    category=category,
+                    configs=config_items
+                )
+                card.save()
+                result['success_count'] += 1
+                
+            except Exception as e:
+                result['errors'].append(f"第{idx+1}行「{data.get('name', '?')}」: {str(e)}")
+                result['error_count'] += 1
+        
+        return result
+
     @staticmethod
     def update_card(card_id: str, name: str = None, configs: List[Dict[str, str]] = None, 
                    description: str = None, category: str = None, sync_fixed_templates: bool = True) -> bool:
