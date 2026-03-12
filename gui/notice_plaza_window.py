@@ -274,11 +274,11 @@ class NoticeCardWidget(QFrame):
         
         layout.addLayout(top_row)
         
-        # 2. 通告内容 - 使用只读 QTextEdit，自带完整滚动支持
-        content = self._get_full_content()
+        # 2. 通告内容 - 使用只读 QTextEdit + HTML 渲染，标签与内容两列对齐
+        content_html = self._get_full_content_html()
         
         self.content_edit = NestedTextEdit()
-        self.content_edit.setPlainText(content)
+        self.content_edit.setHtml(content_html)
         self.content_edit.setReadOnly(True)
         self.content_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -383,23 +383,113 @@ class NoticeCardWidget(QFrame):
         self._update_btn_style(loading)
         QApplication.processEvents()  # 立即更新UI
     
-    def _get_full_content(self):
-        """获取完整内容"""
+    @staticmethod
+    def _normalize_lines(text):
+        """将手动空格对齐的续行合并回上一个标签行"""
+        import re
+        lines = text.split('\n')
+        merged = []
+        for line in lines:
+            stripped = line.strip().replace('\u3000', '').strip()
+            if not stripped:
+                merged.append('')
+                continue
+            if re.match(r'【.+?】', stripped):
+                merged.append(stripped)
+            else:
+                if merged and merged[-1]:
+                    merged[-1] += stripped
+                else:
+                    merged.append(stripped)
+        return merged
+
+    @staticmethod
+    def _build_html(lines, text_color):
+        """
+        将规范化后的行列表转为 HTML。
+        【标签】行用 table 两列对齐；含 URL 的标签行，链接另起一行显示并可断词。
+        """
+        import re
+        from html import escape
+        tag_pattern = re.compile(r'^(【.+?】[：:]\s*)(.*)', re.DOTALL)
+        url_pattern = re.compile(r'(https?://[^\s<>"{}|\\^`\[\]]+)')
+        
+        html_parts = [
+            f'<div style="font-size:13px; color:{text_color}; line-height:1.6;">'
+        ]
+        for line in lines:
+            if not line:
+                html_parts.append('<br/>')
+                continue
+            m = tag_pattern.match(line)
+            if m:
+                label = escape(m.group(1))
+                value = m.group(2)
+                url_m = url_pattern.search(value)
+                if url_m:
+                    before = escape(value[:url_m.start()].strip())
+                    url = escape(url_m.group(1))
+                    after = escape(value[url_m.end():].strip())
+                    value_html = ''
+                    if before:
+                        value_html += before
+                    value_html += (
+                        f'<div style="word-break:break-all; margin-top:2px;">{url}</div>'
+                    )
+                    if after:
+                        value_html += after
+                    html_parts.append(
+                        f'<div style="margin:0; padding:0;">'
+                        f'<span style="font-weight:600;">{label}</span>'
+                        f'{value_html}'
+                        f'</div>'
+                    )
+                else:
+                    value_escaped = escape(value)
+                    value_escaped = value_escaped.replace('，', '，<br/>')
+                    value_escaped = value_escaped.replace(',', ',<br/>')
+                    html_parts.append(
+                        f'<table cellspacing="0" cellpadding="0" style="border:none; margin:0; padding:0;">'
+                        f'<tr>'
+                        f'<td style="white-space:nowrap; vertical-align:top; font-weight:600; padding:0;">{label}</td>'
+                        f'<td style="vertical-align:top; padding:0;">{value_escaped}</td>'
+                        f'</tr></table>'
+                    )
+            else:
+                url_m = url_pattern.search(line)
+                if url_m:
+                    before = escape(line[:url_m.start()])
+                    url = escape(url_m.group(1))
+                    after = escape(line[url_m.end():])
+                    html_parts.append(
+                        f'<p style="margin:0; padding:0; word-break:break-all;">'
+                        f'{before}{url}{after}</p>'
+                    )
+                else:
+                    html_parts.append(f'<p style="margin:0; padding:0;">{escape(line)}</p>')
+        html_parts.append('</div>')
+        return ''.join(html_parts)
+
+    def _get_full_content_html(self):
+        """获取完整内容的 HTML 格式"""
         if self.notice.content:
-            return self.notice.content
-        # 兼容旧数据
-        parts = []
-        if self.notice.title:
-            parts.append(self.notice.title)
-        if self.notice.brand:
-            parts.append(f"品牌：{self.notice.brand}")
-        if self.notice.product_info:
-            parts.append(f"产品：{self.notice.product_info}")
-        if self.notice.reward:
-            parts.append(f"报酬：{self.notice.reward}")
-        if self.notice.link:
-            parts.append(f"链接：{self.notice.link}")
-        return "\n".join(parts) if parts else "暂无内容"
+            raw = self.notice.content
+        else:
+            parts = []
+            if self.notice.title:
+                parts.append(self.notice.title)
+            if self.notice.brand:
+                parts.append(f"【品牌】：{self.notice.brand}")
+            if self.notice.product_info:
+                parts.append(f"【产品】：{self.notice.product_info}")
+            if self.notice.reward:
+                parts.append(f"【报酬】：{self.notice.reward}")
+            if self.notice.link:
+                parts.append(f"【链接】：{self.notice.link}")
+            raw = "\n".join(parts) if parts else "暂无内容"
+        
+        lines = self._normalize_lines(raw)
+        return self._build_html(lines, COLORS['text_primary'])
 
     def enterEvent(self, event):
         # 鼠标悬停效果

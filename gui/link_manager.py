@@ -92,6 +92,9 @@ def show_question(parent, title, message):
     msg.setStyleSheet(MESSAGEBOX_STYLE)
     return msg.exec() == QMessageBox.StandardButton.Yes
 
+from tools.link_utils import SUPPORTED_DOMAINS, is_supported_platform, extract_urls
+
+
 # 解析结果列宽配置
 PARSE_RESULT_COLUMNS = {
     'name': 170,
@@ -1239,27 +1242,8 @@ class SmartAddLinkDialog(QDialog):
         return "其他"
     
     def is_supported_platform(self, url):
-        """检查链接是否为支持的平台 - 共12个"""
-        supported_domains = [
-            "docs.qq.com",       # 1. 腾讯文档
-            "wj.qq.com",         # 2. 腾讯问卷
-            "shimo.im",          # 3. 石墨文档
-            "wjx.cn",            # 4. 问卷星
-            "wjx.top",           # 4.1 问卷星
-            "jsj.top",           # 5. 金数据
-            "jinshuju.net",      # 5. 金数据（备用域名）
-            "feishu.cn",         # 6. 飞书
-            "kdocs.cn",          # 7. 金山文档/WPS
-            "wps.cn",            # 7.1 金山文档/WPS
-            "wps.com",           # 7.2 金山文档/WPS
-            "wenjuan.com",       # 8. 问卷网
-            "baominggongju.com", # 9. 报名工具
-            "fanqier.cn",        # 10. 番茄表单
-            "credamo.com",       # 11. 见数
-            "mikecrm.com",       # 12. 麦客表单
-            "mike-x.com",        # 12.1 麦客企业版
-        ]
-        return any(domain in url for domain in supported_domains)
+        """检查链接是否为支持的平台"""
+        return is_supported_platform(url)
 
     def save_all(self):
         """保存所有链接"""

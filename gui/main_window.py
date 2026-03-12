@@ -262,10 +262,12 @@ class HomeRecordRowWidgetFromData(QFrame):
 
 
 class HomeRecordListWidget(QWidget):
-    """首页记录列表组件"""
+    """首页记录列表组件 - 支持无感刷新"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._current_data = []  # 缓存当前显示的数据指纹
+        self._row_widgets = []   # 当前行组件列表
         self._setup_ui()
         
     def _setup_ui(self):
@@ -320,6 +322,8 @@ class HomeRecordListWidget(QWidget):
             item = self.rows_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._row_widgets.clear()
+        self._current_data.clear()
         
         if self.empty_label:
             self.empty_label.deleteLater()
@@ -335,36 +339,155 @@ class HomeRecordListWidget(QWidget):
             padding: 60px;
         """)
         self.rows_layout.addWidget(self.empty_label)
-        
+
+    @staticmethod
+    def _record_to_fingerprint(record):
+        """将原始记录对象转为可比较的数据指纹"""
+        try:
+            time_str = record.created_at.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            time_str = ""
+        try:
+            card_name = record.card.name if record.card else "未知名片"
+        except Exception:
+            card_name = "名片已删除"
+        try:
+            link_url = record.link.url if record.link else "链接已删除"
+        except Exception:
+            link_url = "链接已删除"
+        return (time_str, card_name, link_url, record.total_count, record.fill_count)
+
+    @staticmethod
+    def _data_to_fingerprint(data):
+        """将序列化数据转为可比较的数据指纹"""
+        return (
+            data.get('time', ''),
+            data.get('card_name', ''),
+            data.get('link_url', data.get('link_name', '')),
+            data.get('total_count', 0),
+            data.get('fill_count', 0),
+        )
+
     def set_records(self, records):
-        """设置记录列表 - 支持原始记录对象"""
-        self.clear_rows()
-        
+        """设置记录列表 - 无感刷新版"""
         if not records:
-            self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            if self._current_data:
+                self.clear_rows()
+                self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            elif not self.empty_label:
+                self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
             return
-            
-        for record in records:
-            row = HomeRecordRowWidget(record)
-            self.rows_layout.addWidget(row)
-        
-        # 添加弹性空间
-        self.rows_layout.addStretch()
+
+        new_fingerprints = [self._record_to_fingerprint(r) for r in records]
+
+        if new_fingerprints == self._current_data:
+            return
+
+        # 隐藏空状态
+        if self.empty_label:
+            self.empty_label.deleteLater()
+            self.empty_label = None
+
+        # 增量更新：复用已有行，只修改变化的部分
+        old_len = len(self._row_widgets)
+        new_len = len(records)
+
+        # 更新已有行中数据变化的行（原地替换）
+        for i in range(min(old_len, new_len)):
+            if i < len(self._current_data) and new_fingerprints[i] == self._current_data[i]:
+                continue
+            old_widget = self._row_widgets[i]
+            new_widget = HomeRecordRowWidget(records[i])
+            self.rows_layout.replaceWidget(old_widget, new_widget)
+            old_widget.deleteLater()
+            self._row_widgets[i] = new_widget
+
+        # 移除多余的旧行（从尾部开始）
+        if new_len < old_len:
+            # 先移除 stretch
+            last = self.rows_layout.count() - 1
+            if last >= 0:
+                spacer = self.rows_layout.itemAt(last)
+                if spacer and not spacer.widget():
+                    self.rows_layout.takeAt(last)
+            for i in range(old_len - 1, new_len - 1, -1):
+                w = self._row_widgets.pop(i)
+                self.rows_layout.removeWidget(w)
+                w.deleteLater()
+            self.rows_layout.addStretch()
+
+        # 追加新行
+        if new_len > old_len:
+            # 先移除 stretch
+            last = self.rows_layout.count() - 1
+            if last >= 0:
+                spacer = self.rows_layout.itemAt(last)
+                if spacer and not spacer.widget():
+                    self.rows_layout.takeAt(last)
+            for i in range(old_len, new_len):
+                new_widget = HomeRecordRowWidget(records[i])
+                self.rows_layout.addWidget(new_widget)
+                self._row_widgets.append(new_widget)
+            self.rows_layout.addStretch()
+
+        self._current_data = new_fingerprints
     
     def set_records_data(self, records_data):
-        """设置记录列表 - 使用已序列化的数据，避免 N+1 查询"""
-        self.clear_rows()
-        
+        """设置记录列表 - 无感刷新版（序列化数据）"""
         if not records_data:
-            self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            if self._current_data:
+                self.clear_rows()
+                self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
+            elif not self.empty_label:
+                self._show_empty_state("暂无填写记录\n选择名片和链接后开始自动填写")
             return
-            
-        for data in records_data:
-            row = HomeRecordRowWidgetFromData(data)
-            self.rows_layout.addWidget(row)
-        
-        # 添加弹性空间
-        self.rows_layout.addStretch()
+
+        new_fingerprints = [self._data_to_fingerprint(d) for d in records_data]
+
+        if new_fingerprints == self._current_data:
+            return
+
+        if self.empty_label:
+            self.empty_label.deleteLater()
+            self.empty_label = None
+
+        old_len = len(self._row_widgets)
+        new_len = len(records_data)
+
+        for i in range(min(old_len, new_len)):
+            if i < len(self._current_data) and new_fingerprints[i] == self._current_data[i]:
+                continue
+            old_widget = self._row_widgets[i]
+            new_widget = HomeRecordRowWidgetFromData(records_data[i])
+            self.rows_layout.replaceWidget(old_widget, new_widget)
+            old_widget.deleteLater()
+            self._row_widgets[i] = new_widget
+
+        if new_len < old_len:
+            last = self.rows_layout.count() - 1
+            if last >= 0:
+                spacer = self.rows_layout.itemAt(last)
+                if spacer and not spacer.widget():
+                    self.rows_layout.takeAt(last)
+            for i in range(old_len - 1, new_len - 1, -1):
+                w = self._row_widgets.pop(i)
+                self.rows_layout.removeWidget(w)
+                w.deleteLater()
+            self.rows_layout.addStretch()
+
+        if new_len > old_len:
+            last = self.rows_layout.count() - 1
+            if last >= 0:
+                spacer = self.rows_layout.itemAt(last)
+                if spacer and not spacer.widget():
+                    self.rows_layout.takeAt(last)
+            for i in range(old_len, new_len):
+                new_widget = HomeRecordRowWidgetFromData(records_data[i])
+                self.rows_layout.addWidget(new_widget)
+                self._row_widgets.append(new_widget)
+            self.rows_layout.addStretch()
+
+        self._current_data = new_fingerprints
     
     def show_loading(self):
         """显示加载状态"""
@@ -5662,21 +5785,18 @@ class MainWindow(QMainWindow):
         )
 
     def create_statistics_panel(self) -> QFrame:
-        """创建统计面板 - 现代 Dashboard 风格"""
+        """创建统计面板 - 现代 Dashboard 风格，支持原地更新"""
         frame = QFrame()
         layout = QHBoxLayout()
         layout.setSpacing(20)
         layout.setContentsMargins(0, 0, 0, 0)
         frame.setLayout(layout)
         
-        # 获取当前用户的统计数据
         stats = self.db_manager.get_statistics(user=self.current_user)
         
-        # 计算真实的子文本
         active_links = stats.get('active_links', 0)
         today_notices = stats.get('today_notices', 0)
         
-        # 使用 qtawesome 图标 - 显示真实数据
         stat_items = [
             ("名片总数", stats['total_cards'], 'fa5s.address-card', "#007AFF", ""),
             ("链接总数", stats['total_links'], 'fa5s.link', "#34C759", f"活跃 {active_links}" if active_links > 0 else ""),
@@ -5684,14 +5804,16 @@ class MainWindow(QMainWindow):
             ("月更新通告", "9999+", 'fa5s.fire', "#FF9500", "通告数据")
         ]
         
+        self._stat_card_refs = []
         for label, value, icon, color, subtext in stat_items:
-            card = self.create_dashboard_card(label, value, icon, color, subtext)
+            card, refs = self._create_dashboard_card_with_refs(label, value, icon, color, subtext)
+            self._stat_card_refs.append(refs)
             layout.addWidget(card)
             
         return frame
 
-    def create_dashboard_card(self, label, value, icon_name, color, subtext) -> QFrame:
-        """创建单个仪表盘卡片 - 极简现代风格"""
+    def _create_dashboard_card_with_refs(self, label, value, icon_name, color, subtext):
+        """创建仪表盘卡片并返回可更新的引用"""
         card = QFrame()
         card.setMinimumHeight(140)
         card.setStyleSheet(f"""
@@ -5706,7 +5828,6 @@ class MainWindow(QMainWindow):
             }}
         """)
         
-        # 阴影
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(25)
         shadow.setColor(QColor(0, 0, 0, 10))
@@ -5718,10 +5839,8 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
         card.setLayout(layout)
         
-        # Top Section: Icon & Trend
         top_row = QHBoxLayout()
         
-        # Icon Container
         icon_btn = QPushButton()
         icon_btn.setIcon(Icons.get(icon_name, color))
         icon_btn.setIconSize(QSize(24, 24))
@@ -5737,24 +5856,21 @@ class MainWindow(QMainWindow):
         top_row.addWidget(icon_btn)
         top_row.addStretch()
         
-        # Trend / Subtext Pill
-        if subtext:
-            trend_lbl = QLabel(subtext)
-            trend_lbl.setStyleSheet(f"""
-                font-size: 12px;
-                font-weight: 600;
-                color: {color};
-                background: {color}10;
-                border-radius: 12px;
-                padding: 4px 10px;
-            """)
-            top_row.addWidget(trend_lbl)
+        trend_lbl = QLabel(subtext if subtext else "")
+        trend_lbl.setStyleSheet(f"""
+            font-size: 12px;
+            font-weight: 600;
+            color: {color};
+            background: {color}10;
+            border-radius: 12px;
+            padding: 4px 10px;
+        """)
+        trend_lbl.setVisible(bool(subtext))
+        top_row.addWidget(trend_lbl)
             
         layout.addLayout(top_row)
-        
         layout.addSpacing(10)
         
-        # Value Section
         value_label = QLabel(str(value))
         value_label.setStyleSheet("""
             font-size: 36px;
@@ -5765,7 +5881,6 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(value_label)
         
-        # Label Section
         label_lbl = QLabel(label)
         label_lbl.setStyleSheet("""
             font-size: 14px;
@@ -5775,6 +5890,12 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(label_lbl)
         
+        refs = {'value_label': value_label, 'trend_label': trend_lbl}
+        return card, refs
+
+    def create_dashboard_card(self, label, value, icon_name, color, subtext) -> QFrame:
+        """创建单个仪表盘卡片（兼容旧调用）"""
+        card, _ = self._create_dashboard_card_with_refs(label, value, icon_name, color, subtext)
         return card
 
     def create_stat_item(self, icon: str, label: str, value: int, color: str, light_color: str = None) -> QWidget:
@@ -5873,13 +5994,34 @@ class MainWindow(QMainWindow):
         self.refresh_dashboard()
     
     def refresh_dashboard(self):
-        """刷新数据看板（统计面板 + 记录列表），由定时器周期调用"""
+        """刷新数据看板（统计面板 + 记录列表），由定时器周期调用
+        
+        使用后台线程加载记录数据，避免阻塞 UI。
+        统计面板原地更新数值，记录列表 diff 更新，实现无感刷新。
+        """
         self.update_statistics()
+        
+        if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
+            return
+        
+        self._dashboard_thread = QThread()
+        self._dashboard_worker = RecordsLoaderWorker(
+            self.db_manager, 20, 1, self.current_user
+        )
+        self._dashboard_worker.moveToThread(self._dashboard_thread)
+        self._dashboard_thread.started.connect(self._dashboard_worker.run)
+        self._dashboard_worker.finished.connect(self._on_dashboard_records_loaded)
+        self._dashboard_worker.error.connect(lambda e: print(f"刷新记录列表失败: {e}"))
+        self._dashboard_worker.finished.connect(self._dashboard_thread.quit)
+        self._dashboard_worker.error.connect(self._dashboard_thread.quit)
+        self._dashboard_thread.start()
+    
+    def _on_dashboard_records_loaded(self, records_data):
+        """后台加载完成后在主线程更新 UI"""
         try:
-            records = self.db_manager.get_fill_records(limit=20, user=self.current_user)
-            self.records_list.set_records(records)
+            self.records_list.set_records_data(records_data)
         except Exception as e:
-            print(f"刷新记录列表失败: {e}")
+            print(f"更新记录列表失败: {e}")
     
     def refresh_cards_list(self, selected_card_ids=None):
         """刷新名片列表 - 按分类显示，支持拖拽排序
@@ -6133,39 +6275,42 @@ class MainWindow(QMainWindow):
 
     
     def update_statistics(self):
-        """更新统计信息"""
-        # 在主内容区找到统计面板并替换
-        if hasattr(self, 'main_content') and self.main_content:
-            layout = self.main_content.layout()
-            if layout:
-                for i in range(layout.count()):
-                    item = layout.itemAt(i)
-                    if item and item.widget():
-                        widget = item.widget()
-                        if hasattr(widget, 'objectName') and widget.objectName() == 'stats_panel':
-                            # 移除旧面板
-                            widget.setParent(None)
-                            widget.deleteLater()
-                            # 创建新面板
-                            stats_frame = self.create_statistics_panel()
-                            stats_frame.setObjectName('stats_panel')
-                            layout.insertWidget(i, stats_frame)
-                            return
+        """更新统计信息 - 原地更新数值，无闪烁"""
+        if not hasattr(self, '_stat_card_refs') or not self._stat_card_refs:
+            return
         
-        # 如果上面没找到，尝试在 centralWidget 中查找（兼容旧布局）
-        layout = self.centralWidget().layout()
-        if layout:
-            for i in range(layout.count()):
-                item = layout.itemAt(i)
-                if item and item.widget():
-                    widget = item.widget()
-                    if hasattr(widget, 'objectName') and widget.objectName() == 'stats_panel':
-                        widget.setParent(None)
-                        widget.deleteLater()
-                        stats_frame = self.create_statistics_panel()
-                        stats_frame.setObjectName('stats_panel')
-                        layout.insertWidget(i, stats_frame)
-                        return
+        try:
+            stats = self.db_manager.get_statistics(user=self.current_user)
+        except Exception:
+            return
+        
+        active_links = stats.get('active_links', 0)
+        today_notices = stats.get('today_notices', 0)
+        
+        new_values = [
+            (str(stats['total_cards']), ""),
+            (str(stats['total_links']), f"活跃 {active_links}" if active_links > 0 else ""),
+            (str(today_notices), f"{today_notices} 条"),
+            ("9999+", "通告数据"),
+        ]
+        
+        for i, (value, subtext) in enumerate(new_values):
+            if i >= len(self._stat_card_refs):
+                break
+            refs = self._stat_card_refs[i]
+            try:
+                vl = refs['value_label']
+                tl = refs['trend_label']
+                if vl.text() != value:
+                    vl.setText(value)
+                if subtext:
+                    if tl.text() != subtext:
+                        tl.setText(subtext)
+                    tl.setVisible(True)
+                else:
+                    tl.setVisible(False)
+            except RuntimeError:
+                pass
     
     def update_message_badge(self):
         """更新消息徽章数量"""
@@ -6236,11 +6381,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
     
     def closeEvent(self, event):
-        """窗口关闭时停止所有定时器"""
+        """窗口关闭时停止所有定时器和后台线程"""
         if hasattr(self, 'message_timer'):
             self.message_timer.stop()
         if hasattr(self, 'dashboard_timer'):
             self.dashboard_timer.stop()
+        if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
+            self._dashboard_thread.quit()
+            self._dashboard_thread.wait(2000)
         event.accept()
     
     def create_empty_state(self, icon: str, title: str, subtitle: str, color: str) -> QWidget:

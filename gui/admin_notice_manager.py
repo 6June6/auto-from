@@ -18,6 +18,7 @@ from gui.admin_base_components import (
     PREMIUM_COLORS, GlassFrame, GradientButton, CompactStatWidget, create_action_button
 )
 from datetime import datetime
+from gui.link_manager import is_supported_platform, extract_urls
 
 
 # ========== 通告列表自定义组件 ==========
@@ -83,6 +84,76 @@ class NoticeRowWidget(QFrame):
     
     edit_clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(object)
+    
+    @staticmethod
+    def _normalize_lines(text):
+        """将手动空格对齐的续行合并回上一个标签行，返回行列表"""
+        import re
+        lines = text.split('\n')
+        merged = []
+        for line in lines:
+            stripped = line.strip().replace('\u3000', '').strip()
+            if not stripped:
+                merged.append('')
+                continue
+            if re.match(r'【.+?】', stripped):
+                merged.append(stripped)
+            else:
+                if merged and merged[-1]:
+                    merged[-1] += stripped
+                else:
+                    merged.append(stripped)
+        return merged
+
+    @staticmethod
+    def _build_preview_html(lines, text_color):
+        """将行列表转为 HTML，【标签】行用 table 两列对齐，含 URL 的行单独处理"""
+        import re
+        from html import escape
+        tag_pattern = re.compile(r'^(【.+?】[：:]\s*)(.*)', re.DOTALL)
+        url_pattern = re.compile(r'(https?://[^\s<>"{}|\\^`\[\]]+)')
+        parts = [f'<div style="font-size:12px; color:{text_color}; line-height:1.5;">']
+        for line in lines:
+            if not line:
+                continue
+            m = tag_pattern.match(line)
+            if m:
+                label = escape(m.group(1))
+                value = m.group(2)
+                url_m = url_pattern.search(value)
+                if url_m:
+                    before = escape(value[:url_m.start()].strip())
+                    url = escape(url_m.group(1))
+                    after = escape(value[url_m.end():].strip())
+                    value_html = ''
+                    if before:
+                        value_html += before
+                    value_html += f'<div style="word-break:break-all; margin-top:1px;">{url}</div>'
+                    if after:
+                        value_html += after
+                    parts.append(
+                        f'<div style="margin:0;"><span style="font-weight:600;">{label}</span>{value_html}</div>'
+                    )
+                else:
+                    value_escaped = escape(value)
+                    value_escaped = value_escaped.replace('，', '，<br/>')
+                    value_escaped = value_escaped.replace(',', ',<br/>')
+                    parts.append(
+                        f'<table cellspacing="0" cellpadding="0" style="border:none; margin:0;">'
+                        f'<tr><td style="white-space:nowrap; vertical-align:top; font-weight:600; padding:0;">{label}</td>'
+                        f'<td style="vertical-align:top; padding:0;">{value_escaped}</td></tr></table>'
+                    )
+            else:
+                url_m = url_pattern.search(line)
+                if url_m:
+                    before = escape(line[:url_m.start()])
+                    url = escape(url_m.group(1))
+                    after = escape(line[url_m.end():])
+                    parts.append(f'<p style="margin:0; word-break:break-all;">{before}{url}{after}</p>')
+                else:
+                    parts.append(f'<p style="margin:0;">{escape(line)}</p>')
+        parts.append('</div>')
+        return ''.join(parts)
     
     def __init__(self, notice, parent=None):
         super().__init__(parent)
@@ -164,54 +235,39 @@ class NoticeRowWidget(QFrame):
         layout.addWidget(container)
     
     def _add_content(self, layout):
-        """内容预览 - 每行固定字符数，超出部分可上下滚动"""
+        """内容预览 - HTML 渲染，标签与内容两列对齐"""
         container = QWidget()
         container.setFixedWidth(NOTICE_LIST_COLUMNS['content'])
         c_layout = QVBoxLayout(container)
         c_layout.setContentsMargins(0, 0, 8, 0)
         
-        content = self.notice.content if self.notice.content else (self.notice.title or "")
+        raw = self.notice.content if self.notice.content else (self.notice.title or "")
+        lines = NoticeRowWidget._normalize_lines(raw)
+        html = NoticeRowWidget._build_preview_html(lines, PREMIUM_COLORS['text_heading'])
         
-        # 按原始换行拆分，再按固定字符数折行
-        raw_lines = content.split('\n')
-        display_lines = []
-        for raw_line in raw_lines:
-            if not raw_line:
-                display_lines.append('')
-                continue
-            for i in range(0, len(raw_line), self.CONTENT_LINE_CHARS):
-                display_lines.append(raw_line[i:i + self.CONTENT_LINE_CHARS])
+        content_area = QScrollArea()
+        content_area.setWidgetResizable(True)
+        content_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content_area.setFixedHeight(self.CONTENT_MAX_LINES * 18 + 8)
+        content_area.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 6px; }}
+            QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 3px; min-height: 20px; }}
+            QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
         
-        preview_text = '\n'.join(display_lines)
+        content_lbl = QLabel(html)
+        content_lbl.setWordWrap(True)
+        content_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        content_lbl.setStyleSheet("background: transparent;")
+        content_lbl.setMaximumWidth(NOTICE_LIST_COLUMNS['content'] - 16)
+        content_area.setWidget(content_lbl)
+        c_layout.addWidget(content_area)
         
-        if len(display_lines) > self.CONTENT_MAX_LINES:
-            content_area = QScrollArea()
-            content_area.setWidgetResizable(True)
-            content_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            content_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            content_area.setFixedHeight(self.CONTENT_MAX_LINES * 18 + 8)
-            content_area.setStyleSheet(f"""
-                QScrollArea {{ border: none; background: transparent; }}
-                QScrollBar:vertical {{ background: transparent; width: 6px; }}
-                QScrollBar::handle:vertical {{ background: {PREMIUM_COLORS['border']}; border-radius: 3px; min-height: 20px; }}
-                QScrollBar::handle:vertical:hover {{ background: {PREMIUM_COLORS['text_hint']}; }}
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-            """)
-            
-            content_lbl = QLabel(preview_text)
-            content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px; background: transparent;")
-            content_lbl.setWordWrap(False)
-            content_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            content_area.setWidget(content_lbl)
-            c_layout.addWidget(content_area)
-        else:
-            content_lbl = QLabel(preview_text)
-            content_lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_heading']}; font-size: 13px;")
-            content_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            c_layout.addWidget(content_lbl)
-        
-        content_lbl.setToolTip(content[:500])
+        content_lbl.setToolTip(raw[:500])
         layout.addWidget(container)
     
     def _add_status(self, layout):
@@ -1015,6 +1071,28 @@ class NoticeManager(ModernBaseManager):
         self.notice_list.set_notices(current_notices)
         self.update_pagination()
 
+    def _check_unsupported_links(self, content):
+        """检查内容中是否包含不支持的链接，返回 True 表示允许继续。"""
+        urls = extract_urls(content)
+        if not urls:
+            QMessageBox.warning(self, "无法发布", "通告内容中未检测到任何链接，请添加链接后再发布。")
+            return False
+
+        unsupported = [url for url in urls if not is_supported_platform(url)]
+        if not unsupported:
+            return True
+
+        preview_list = "\n".join(f"  • {u[:80]}" for u in unsupported[:5])
+        extra = f"\n  ...等共 {len(unsupported)} 个" if len(unsupported) > 5 else ""
+        QMessageBox.warning(
+            self, "无法发布 - 包含不支持的链接",
+            f"通告内容中包含 {len(unsupported)} 个不支持的链接：\n\n{preview_list}{extra}\n\n"
+            f"目前支持的平台：腾讯文档、腾讯问卷、石墨文档、问卷星、金数据、飞书、"
+            f"金山文档/WPS、问卷网、报名工具、番茄表单、见数、麦客表单\n\n"
+            f"请修改通告内容，替换为支持的平台链接后再发布。"
+        )
+        return False
+
     def _check_duplicate_and_confirm(self, platform, content, exclude_id=None):
         """检查重复通告，若存在则询问用户是否继续。返回 True 表示允许继续操作。"""
         duplicates = self.db_manager.check_notice_duplicate(platform, content, exclude_id)
@@ -1042,6 +1120,8 @@ class NoticeManager(ModernBaseManager):
         dialog = NoticeDialog(self, self.db_manager)
         if dialog.exec():
             data = dialog.get_data()
+            if not self._check_unsupported_links(data.get('content', '')):
+                return
             if not self._check_duplicate_and_confirm(data.get('platform', ''), data.get('content', '')):
                 return
             if self.current_user:
@@ -1057,6 +1137,8 @@ class NoticeManager(ModernBaseManager):
         dialog = NoticeDialog(self, self.db_manager, item)
         if dialog.exec():
             data = dialog.get_data()
+            if not self._check_unsupported_links(data.get('content', '')):
+                return
             if not self._check_duplicate_and_confirm(data.get('platform', ''), data.get('content', ''), exclude_id=str(item.id)):
                 return
             try:
