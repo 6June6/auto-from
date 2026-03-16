@@ -105,7 +105,7 @@ class ModernSpinner(QWidget):
         # --- 4. 绘制外部微弱光晕 (可选) ---
         c.setAlpha(30)
         painter.setBrush(QBrush(c))
-        painter.drawEllipse(center, radius_outer + 2, radius_outer + 2)
+        painter.drawEllipse(QPoint(int(center.x()), int(center.y())), int(radius_outer + 2), int(radius_outer + 2))
 
 # -----------------------------------------------------------------------------
 # Design System
