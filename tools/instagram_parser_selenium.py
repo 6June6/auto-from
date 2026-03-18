@@ -3,6 +3,8 @@ Instagram 解析服务（Selenium 版，通过 Clash 代理翻墙访问）
 支持：
   用户主页链接 → 昵称、用户名、粉丝、关注、帖子数、简介、头像、最新帖子
 """
+import json
+import os
 import re
 import time
 import argparse
@@ -201,11 +203,13 @@ class InstagramParser:
     """Instagram 主页解析器"""
 
     def __init__(self, headless: bool = True, timeout: int = 45,
-                 chrome_binary: str = None, proxy: str = "http://127.0.0.1:7890"):
+                 chrome_binary: str = None, proxy: str = "http://127.0.0.1:7890",
+                 cookies_file: str = None):
         self.headless = headless
         self.timeout = timeout
         self.chrome_binary = chrome_binary
         self.proxy = proxy
+        self.cookies_file = cookies_file or os.environ.get("IG_COOKIES_FILE", "")
 
     def _create_driver(self):
         if not HAS_SELENIUM:
@@ -239,6 +243,37 @@ class InstagramParser:
         driver.implicitly_wait(5)
         return driver
 
+    def _load_cookies(self) -> list:
+        """从 JSON 文件加载 Instagram Cookie"""
+        if not self.cookies_file or not os.path.isfile(self.cookies_file):
+            return []
+        try:
+            with open(self.cookies_file, "r", encoding="utf-8") as f:
+                cookies = json.load(f)
+            logger.info(f"加载 {len(cookies)} 个 Cookie from {self.cookies_file}")
+            return cookies
+        except Exception as e:
+            logger.warning(f"Cookie 加载失败: {e}")
+            return []
+
+    def _inject_cookies(self, driver, cookies: list):
+        """注入 Cookie 到 Selenium driver"""
+        for c in cookies:
+            cookie = {
+                "name": c.get("name", ""),
+                "value": c.get("value", ""),
+                "domain": c.get("domain", ".instagram.com"),
+                "path": c.get("path", "/"),
+            }
+            if c.get("secure"):
+                cookie["secure"] = True
+            if c.get("httpOnly"):
+                cookie["httpOnly"] = True
+            try:
+                driver.add_cookie(cookie)
+            except Exception:
+                pass
+
     def parse_profile(self, url: str) -> InstagramProfileData:
         """解析 Instagram 主页"""
         result = InstagramProfileData(url=url)
@@ -256,6 +291,13 @@ class InstagramParser:
             logger.info(f"解析 Instagram 主页: {url}")
             driver = self._create_driver()
 
+            cookies = self._load_cookies()
+            if cookies:
+                driver.get("https://www.instagram.com/")
+                time.sleep(2)
+                self._inject_cookies(driver, cookies)
+                logger.info("Cookie 已注入，重新访问目标页")
+
             try:
                 driver.get(url)
             except Exception as e:
@@ -268,13 +310,14 @@ class InstagramParser:
                 result.error = "无法通过代理访问 Instagram（请检查代理配置）"
                 return result
 
-            if "/accounts/login" in final_url:
-                result.error = "被重定向到登录页，可能需要登录"
-                return result
+            is_login_redirect = "/accounts/login" in final_url
 
             raw = driver.execute_script(EXTRACT_PROFILE_JS)
             if not raw:
-                result.error = "JavaScript 提取返回空"
+                if is_login_redirect:
+                    result.error = "被重定向到登录页且无法提取数据"
+                else:
+                    result.error = "JavaScript 提取返回空"
                 return result
 
             # Username
@@ -295,17 +338,33 @@ class InstagramParser:
             # Avatar
             result.avatar = raw.get("profileImg") or raw.get("ogImage", "")
 
-            # Stats
+            # Stats — from DOM or fallback to og:description
             result.posts_count = raw.get("posts", "0") or "0"
             result.followers = raw.get("followers", "0") or "0"
             result.following = raw.get("following", "0") or "0"
 
+            # Fallback: parse stats from og:description
+            # Format: "213 Followers, 89 Following, 11 Posts - ..."
+            og_desc = raw.get("ogDesc") or raw.get("description", "")
+            if (result.followers == "0" or result.posts_count == "0") and og_desc:
+                fm = re.search(r'([\d,.]+[KkMm]?)\s+Followers?', og_desc, re.IGNORECASE)
+                if fm:
+                    result.followers = fm.group(1)
+                fwm = re.search(r'([\d,.]+[KkMm]?)\s+Following', og_desc, re.IGNORECASE)
+                if fwm:
+                    result.following = fwm.group(1)
+                pm = re.search(r'([\d,.]+[KkMm]?)\s+Posts?', og_desc, re.IGNORECASE)
+                if pm:
+                    result.posts_count = pm.group(1)
+
             # Bio — from description meta
+            desc_meta = raw.get("description") or ""
             if raw.get("bio"):
                 result.bio = raw["bio"]
-            else:
-                desc = raw.get("description") or raw.get("ogDesc", "")
-                result.bio = self._extract_bio(desc)
+            elif desc_meta:
+                result.bio = self._extract_bio(desc_meta)
+            elif og_desc:
+                result.bio = self._extract_bio(og_desc)
 
             # External URL
             result.external_url = raw.get("externalUrl", "")
@@ -318,7 +377,7 @@ class InstagramParser:
                     post["caption"] = captions[i]
             result.recent_posts = posts[:10]
 
-            result.url = final_url
+            result.url = raw.get("ogUrl") or final_url
             logger.info(f"Instagram 解析完成: {result.full_name} (@{result.username})")
 
         except Exception as e:

@@ -1,8 +1,13 @@
 # 社交媒体解析 API 接口文档
 
-**版本**: v7.2.0  
-**基础地址**: `http://118.178.254.11:8900`  
-**支持平台**: 小红书、抖音、Facebook、Instagram、Threads、TikTok
+**版本**: v7.3.0  
+**基础地址**:  
+- 阿里云节点: `http://118.178.254.11:8900`  
+- 香港节点: `http://43.199.144.122/parser`  
+
+**支持平台**: 小红书、抖音、Facebook、Instagram、Threads、TikTok  
+
+> **架构说明**: 香港节点直接解析 Facebook、Threads；TikTok 和 Instagram 因地域/反爬限制，通过 SSH 隧道自动转发到阿里云节点解析，对调用方完全透明。
 
 ---
 
