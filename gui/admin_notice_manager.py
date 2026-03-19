@@ -1432,9 +1432,10 @@ class NoticeDialog(BaseDialog):
         
         # 平台
         self.platform_combo = QComboBox()
+        self.platform_combo.blockSignals(True)
         platforms = self.db_manager.get_all_platforms()
-        for p in platforms:
-            self.platform_combo.addItem(p.name)
+        self.platform_combo.addItems([p.name for p in platforms])
+        self.platform_combo.blockSignals(False)
         if self.notice:
             self.platform_combo.setCurrentText(self.notice.platform)
         form_layout.addLayout(self.create_field("发布平台", self.platform_combo))

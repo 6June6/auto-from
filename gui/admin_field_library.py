@@ -919,7 +919,9 @@ class AdminFieldLibraryManager(QWidget):
                 color: {PREMIUM_COLORS['text_body']};
             }}
         """)
-        self.category_filter.addItem("全部")
+        self.category_filter.blockSignals(True)
+        self.category_filter.addItems(["全部"])
+        self.category_filter.blockSignals(False)
         self.category_filter.currentTextChanged.connect(self.on_search)
         toolbar_layout.addWidget(self.category_filter)
         
@@ -1048,9 +1050,8 @@ class AdminFieldLibraryManager(QWidget):
         current = self.category_filter.currentText()
         self.category_filter.blockSignals(True)
         self.category_filter.clear()
-        self.category_filter.addItem("全部")
         cats = self.db_manager.get_field_library_categories()
-        self.category_filter.addItems(cats)
+        self.category_filter.addItems(["全部"] + cats)
         self.category_filter.setCurrentText(current if current in cats or current == "全部" else "全部")
         self.category_filter.blockSignals(False)
         

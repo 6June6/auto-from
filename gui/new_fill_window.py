@@ -1725,12 +1725,15 @@ class NewFillWindow(QDialog):
         batch_select_layout.addWidget(batch_label)
         
         self.batch_index_combo = QComboBox()
-        self.batch_index_combo.setFixedWidth(150)  # 增加宽度以适应文字
+        self.batch_index_combo.setFixedWidth(150)
         self.batch_index_combo.setFixedHeight(28)
-        # 三种格式形式
+        self.batch_index_combo.blockSignals(True)
+        self.batch_index_combo.model().blockSignals(True)
         self.batch_index_combo.addItem("数字形式", 1)
         self.batch_index_combo.addItem("w形式", 2)
         self.batch_index_combo.addItem("w为单位", 3)
+        self.batch_index_combo.model().blockSignals(False)
+        self.batch_index_combo.blockSignals(False)
         # 默认选中第1个值（数字形式）
         self.batch_index_combo.setStyleSheet(f"""
             QComboBox {{
@@ -1874,8 +1877,7 @@ class NewFillWindow(QDialog):
         self.category_combo.clear()
         
         categories = self.category_list if self.category_list else ["默认分类"]
-        for category in categories:
-            self.category_combo.addItem(category)
+        self.category_combo.addItems(categories)
         
         if self.current_category:
             index = self.category_combo.findText(self.current_category)
@@ -2382,19 +2384,23 @@ class NewFillWindow(QDialog):
                 }}
             """)
             
-            # 添加选项
+            # 阻塞信号后批量添加选项，避免每次 addItem 触发 selectionChanged
+            # 导致 macOS NSArray 越界崩溃（index 0 beyond bounds for empty array）
+            combo.blockSignals(True)
+            combo.model().blockSignals(True)
             for i, v in enumerate(values):
                 display_text = v if v else f"（值{i+1}为空）"
-                combo.addItem(display_text, v)  # userData 存储原始值
-            
-            # 设置当前选中项
+                combo.addItem(display_text, v)
+            combo.model().blockSignals(False)
+
             current_index = 0
             for i, v in enumerate(values):
                 if v == current_value:
                     current_index = i
                     break
             combo.setCurrentIndex(current_index)
-            
+            combo.blockSignals(False)
+
             # 选择变化时更新存储
             def on_value_changed(index):
                 selected_val = combo.itemData(index)
@@ -2402,7 +2408,7 @@ class NewFillWindow(QDialog):
                     self.selected_values[card_id] = {}
                 self.selected_values[card_id][key] = selected_val
                 print(f"  📝 字段「{key}」选择了值: {selected_val}")
-            
+
             combo.currentIndexChanged.connect(on_value_changed)
             layout.addWidget(combo, 1)
             
@@ -2617,13 +2623,13 @@ class NewFillWindow(QDialog):
         self.edit_name_input.setText(self.current_card.name)
         
         # 填充分类
+        self.edit_category_combo.blockSignals(True)
         self.edit_category_combo.clear()
-        # 获取当前所有分类（复用现有的category_combo的数据）
-        for i in range(self.category_combo.count()):
-            self.edit_category_combo.addItem(self.category_combo.itemText(i))
-        
+        items = [self.category_combo.itemText(i) for i in range(self.category_combo.count())]
+        self.edit_category_combo.addItems(items)
         current_cat = self.current_card.category if hasattr(self.current_card, 'category') and self.current_card.category else "默认分类"
         self.edit_category_combo.setCurrentText(current_cat)
+        self.edit_category_combo.blockSignals(False)
         
         # 清空旧字段
         while self.edit_fields_layout.count():

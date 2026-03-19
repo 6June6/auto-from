@@ -901,10 +901,6 @@ class AddCardDialog(QDialog):
         self.current_user = current_user
         self.card = card  # 编辑模式时传入的名片对象
         self.field_rows = []  # 存储字段行
-        self._is_closing = False
-        self._layout_update_timer = QTimer(self)
-        self._layout_update_timer.setSingleShot(True)
-        self._layout_update_timer.timeout.connect(self._flush_field_positions)
         self.init_ui()
         
         # 如果是编辑模式，回显数据；否则加载固定模板
@@ -1227,7 +1223,7 @@ class AddCardDialog(QDialog):
             }
         """)
         # 窗口显示时，强制延迟更新一次字段位置，确保宽度正确占满一行
-        self._schedule_field_positions_update(10)
+        QTimer.singleShot(10, lambda: self._update_field_positions(animate=False))
 
     def get_button_style(self):
         """获取按钮样式"""
@@ -1280,13 +1276,11 @@ class AddCardDialog(QDialog):
             all_categories.add(cat.name)
         all_categories.update(card_categories)
         
-        # 添加到下拉框
-        for category in sorted(all_categories):
-            self.category_combo.addItem(category)
-        
-        # 如果没有分类，添加默认分类
-        if self.category_combo.count() == 0:
-            self.category_combo.addItem("默认分类")
+        # 批量添加（addItems 只触发一次 endInsertRows，避免 macOS NSArray 越界崩溃）
+        items = sorted(all_categories)
+        if not items:
+            items = ["默认分类"]
+        self.category_combo.addItems(items)
         
         # ⚡️ 恢复信号
         self.category_combo.blockSignals(False)
@@ -1374,27 +1368,8 @@ class AddCardDialog(QDialog):
         super().resizeEvent(event)
         # 窗口大小改变时，更新字段行宽度
         if hasattr(self, 'field_rows'):
-            # 使用绑定到对话框生命周期的 timer，避免关闭后仍触发布局回调
-            self._schedule_field_positions_update(0)
-
-    def closeEvent(self, event):
-        """关闭时停止延迟布局更新，避免回调落到已销毁对象。"""
-        self._is_closing = True
-        if self._layout_update_timer.isActive():
-            self._layout_update_timer.stop()
-        super().closeEvent(event)
-
-    def _schedule_field_positions_update(self, delay_ms=0):
-        """调度字段布局刷新。"""
-        if self._is_closing:
-            return
-        self._layout_update_timer.start(max(0, delay_ms))
-
-    def _flush_field_positions(self):
-        """安全执行字段布局刷新。"""
-        if self._is_closing:
-            return
-        self._update_field_positions(animate=False)
+            # 使用 timer 避免过于频繁的更新，同时也给布局系统一点缓冲时间
+            QTimer.singleShot(0, lambda: self._update_field_positions(animate=False))
 
     def add_field_alias(self, key_input):
         """添加字段别名"""
@@ -3861,34 +3836,20 @@ class RecordsLoaderWorker(QObject):
         self.page_size = page_size
         self.page = page
         self.user = user
-        self._cancel_requested = False
-
-    def cancel(self):
-        """请求取消后台任务。"""
-        self._cancel_requested = True
         
     def run(self):
         """执行加载"""
         try:
-            if self._cancel_requested:
-                return
-
             offset = (self.page - 1) * self.page_size
             records = self.db_manager.get_fill_records(
                 limit=self.page_size, 
                 offset=offset, 
                 user=self.user
             )
-
-            if self._cancel_requested:
-                return
-
             # 预先获取所有需要的数据，避免在主线程中触发数据库查询
             # 使用列表存储序列化后的数据
             records_data = []
             for record in records:
-                if self._cancel_requested:
-                    return
                 try:
                     card_name = record.card.name if record.card else "未知名片"
                 except:
@@ -4728,10 +4689,6 @@ class MainWindow(QMainWindow):
         self.db_manager = DatabaseManager()
         self.auto_fill_window = None
         self.notice_plaza_window = None
-        self._dashboard_thread = None
-        self._dashboard_worker = None
-        self._is_closing = False
-        self._awaiting_dashboard_shutdown = False
         self.selected_cards = []  # 选中的名片
         self.selected_links = []  # 选中的链接
         self._load_user_preferences()
@@ -6040,39 +5997,35 @@ class MainWindow(QMainWindow):
         使用后台线程加载记录数据，避免阻塞 UI。
         统计面板原地更新数值，记录列表 diff 更新，实现无感刷新。
         """
-        if self._is_closing:
-            return
-
         self.update_statistics()
         
         if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
             return
         
-        self._dashboard_thread = QThread()
-        self._dashboard_worker = RecordsLoaderWorker(
+        # 断开旧 worker 的信号，防止旧线程完成时误触发新线程的 quit
+        if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
+            try:
+                self._dashboard_worker.finished.disconnect()
+                self._dashboard_worker.error.disconnect()
+            except Exception:
+                pass
+
+        thread = QThread()
+        worker = RecordsLoaderWorker(
             self.db_manager, 20, 1, self.current_user
         )
-        self._dashboard_worker.moveToThread(self._dashboard_thread)
-        self._dashboard_thread.started.connect(self._dashboard_worker.run)
-        self._dashboard_worker.finished.connect(self._on_dashboard_records_loaded)
-        self._dashboard_worker.error.connect(lambda e: print(f"刷新记录列表失败: {e}"))
-        self._dashboard_worker.finished.connect(self._dashboard_thread.quit)
-        self._dashboard_worker.error.connect(self._dashboard_thread.quit)
-        self._dashboard_thread.finished.connect(self._dashboard_worker.deleteLater)
-        self._dashboard_thread.finished.connect(self._dashboard_thread.deleteLater)
-        self._dashboard_thread.finished.connect(self._on_dashboard_thread_finished)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_dashboard_records_loaded)
+        worker.error.connect(lambda e: print(f"刷新记录列表失败: {e}"))
+        worker.finished.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        # 线程结束后再销毁 worker，避免 QThread 析构时 worker 仍存活
+        thread.finished.connect(worker.deleteLater)
+
+        self._dashboard_thread = thread
+        self._dashboard_worker = worker
         self._dashboard_thread.start()
-
-    def _on_dashboard_thread_finished(self):
-        """看板线程结束后清理引用，并在关闭流程中继续退出窗口。"""
-        finished_thread = self.sender()
-        if finished_thread is self._dashboard_thread:
-            self._dashboard_thread = None
-            self._dashboard_worker = None
-
-        if self._awaiting_dashboard_shutdown:
-            self._awaiting_dashboard_shutdown = False
-            QTimer.singleShot(0, self.close)
     
     def _on_dashboard_records_loaded(self, records_data):
         """后台加载完成后在主线程更新 UI"""
@@ -6440,24 +6393,27 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """窗口关闭时停止所有定时器和后台线程"""
-        self._is_closing = True
-
         if hasattr(self, 'message_timer'):
             self.message_timer.stop()
         if hasattr(self, 'dashboard_timer'):
             self.dashboard_timer.stop()
 
-        if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
-            if self._dashboard_worker:
-                self._dashboard_worker.cancel()
+        # 断开 worker 所有信号，防止线程完成后回调已销毁的 UI
+        if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
+            try:
+                self._dashboard_worker.finished.disconnect()
+                self._dashboard_worker.error.disconnect()
+            except Exception:
+                pass
 
-            if not self._awaiting_dashboard_shutdown:
-                self._awaiting_dashboard_shutdown = True
-                self.hide()
-                self._dashboard_thread.quit()
-
-            event.ignore()
-            return
+        if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
+            thread = self._dashboard_thread
+            self._dashboard_thread = None  # 清除引用，防止 GC 重复析构
+            if thread.isRunning():
+                # 通知事件循环退出，run() 阻塞结束后线程自动退出
+                thread.quit()
+            # 线程真正结束后由 Qt 异步销毁，不阻塞主线程
+            thread.finished.connect(thread.deleteLater)
 
         event.accept()
     
@@ -6797,23 +6753,8 @@ class MainWindow(QMainWindow):
         dialog = AddCardDialog(self, db_manager=self.db_manager, current_user=self.current_user, card=card)
         # 连接删除信号
         dialog.card_deleted.connect(self.refresh_data)
-        message_timer_was_active = hasattr(self, 'message_timer') and self.message_timer.isActive()
-        dashboard_timer_was_active = hasattr(self, 'dashboard_timer') and self.dashboard_timer.isActive()
-
-        if message_timer_was_active:
-            self.message_timer.stop()
-        if dashboard_timer_was_active:
-            self.dashboard_timer.stop()
-
-        try:
-            if dialog.exec():
-                self.refresh_data()
-        finally:
-            if not self._is_closing:
-                if message_timer_was_active and hasattr(self, 'message_timer'):
-                    self.message_timer.start(5000)
-                if dashboard_timer_was_active and hasattr(self, 'dashboard_timer'):
-                    self.dashboard_timer.start(3 * 60 * 1000)
+        if dialog.exec():
+            self.refresh_data()
     
     def delete_card(self, card):
         """删除名片"""
