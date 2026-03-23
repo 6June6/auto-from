@@ -1874,6 +1874,7 @@ class NewFillWindow(QDialog):
     def load_categories(self):
         """加载分类列表（仅包含已选名片的分类）- 使用分段按钮"""
         self.category_combo.blockSignals(True)
+        self.category_combo.model().blockSignals(True)
         self.category_combo.clear()
         
         categories = self.category_list if self.category_list else ["默认分类"]
@@ -1884,6 +1885,7 @@ class NewFillWindow(QDialog):
             if index >= 0:
                 self.category_combo.setCurrentIndex(index)
         
+        self.category_combo.model().blockSignals(False)
         self.category_combo.blockSignals(False)
         
         self._rebuild_category_buttons()
@@ -2624,11 +2626,13 @@ class NewFillWindow(QDialog):
         
         # 填充分类
         self.edit_category_combo.blockSignals(True)
+        self.edit_category_combo.model().blockSignals(True)
         self.edit_category_combo.clear()
         items = [self.category_combo.itemText(i) for i in range(self.category_combo.count())]
         self.edit_category_combo.addItems(items)
         current_cat = self.current_card.category if hasattr(self.current_card, 'category') and self.current_card.category else "默认分类"
         self.edit_category_combo.setCurrentText(current_cat)
+        self.edit_category_combo.model().blockSignals(False)
         self.edit_category_combo.blockSignals(False)
         
         # 清空旧字段

@@ -666,7 +666,11 @@ class LinkManagerDialog(QDialog):
         filter_layout.addWidget(filter_label)
         
         self.status_combo = QComboBox()
+        self.status_combo.blockSignals(True)
+        self.status_combo.model().blockSignals(True)
         self.status_combo.addItems(["全部", "激活", "归档", "已删除"])
+        self.status_combo.model().blockSignals(False)
+        self.status_combo.blockSignals(False)
         self.status_combo.setFixedWidth(120)
         self.status_combo.setStyleSheet(f"""
             QComboBox {{
@@ -1461,7 +1465,11 @@ class LinkEditDialog(QDialog):
         form_layout.addRow(category_label, self.category_input)
         
         self.status_combo = QComboBox()
+        self.status_combo.blockSignals(True)
+        self.status_combo.model().blockSignals(True)
         self.status_combo.addItems(["激活", "归档", "已删除"])
+        self.status_combo.model().blockSignals(False)
+        self.status_combo.blockSignals(False)
         self.status_combo.setStyleSheet(f"""
             QComboBox {{
                 border: 1px solid {PREMIUM_COLORS['border']};

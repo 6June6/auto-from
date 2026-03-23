@@ -347,7 +347,11 @@ class AddTemplateDialog(QDialog):
         existing_cats = self.db_manager.get_fixed_template_categories()
         default_cats = ['通用', '基本信息', '平台数据', '小红书', '抖音', '微博', '快手', '收货信息']
         all_cats = sorted(list(set(existing_cats + default_cats)))
+        self.category_combo.blockSignals(True)
+        self.category_combo.model().blockSignals(True)
         self.category_combo.addItems(all_cats)
+        self.category_combo.model().blockSignals(False)
+        self.category_combo.blockSignals(False)
         self.category_combo.setMinimumHeight(40)
         self.category_combo.setStyleSheet(f"""
             QComboBox {{
@@ -895,7 +899,9 @@ class AdminFixedTemplateManager(QWidget):
             }}
         """)
         self.category_filter.blockSignals(True)
+        self.category_filter.model().blockSignals(True)
         self.category_filter.addItems(["全部"])
+        self.category_filter.model().blockSignals(False)
         self.category_filter.blockSignals(False)
         self.category_filter.currentTextChanged.connect(self.on_search)
         toolbar_layout.addWidget(self.category_filter)
@@ -1022,10 +1028,12 @@ class AdminFixedTemplateManager(QWidget):
     def refresh_categories(self):
         current = self.category_filter.currentText()
         self.category_filter.blockSignals(True)
+        self.category_filter.model().blockSignals(True)
         self.category_filter.clear()
         cats = self.db_manager.get_fixed_template_categories()
         self.category_filter.addItems(["全部"] + cats)
         self.category_filter.setCurrentText(current if current in cats or current == "全部" else "全部")
+        self.category_filter.model().blockSignals(False)
         self.category_filter.blockSignals(False)
         
     def on_search(self):

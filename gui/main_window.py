@@ -1251,18 +1251,15 @@ class AddCardDialog(QDialog):
     
     def load_categories(self):
         """加载分类列表 - 性能优化版"""
-        # ⚡️ 修复：在修改 combo 内容前阻塞信号，避免 macOS Cocoa 层的竞态条件
         self.category_combo.blockSignals(True)
+        self.category_combo.model().blockSignals(True)
         self.category_combo.clear()
         
-        # 从 Category 表获取用户的分类
         user_categories = self.db_manager.get_user_categories(self.current_user)
         
-        # ⚡️ 性能优化：使用 distinct 查询获取名片分类，而不是加载所有名片
         card_categories = set()
         try:
             from database.models import Card
-            # 只查询分类字段，不加载完整名片数据
             distinct_categories = Card.objects(user=self.current_user).distinct('category')
             for cat in distinct_categories:
                 if cat:
@@ -1270,19 +1267,17 @@ class AddCardDialog(QDialog):
         except Exception:
             pass
         
-        # 合并所有分类（去重）
         all_categories = set()
         for cat in user_categories:
             all_categories.add(cat.name)
         all_categories.update(card_categories)
         
-        # 批量添加（addItems 只触发一次 endInsertRows，避免 macOS NSArray 越界崩溃）
         items = sorted(all_categories)
         if not items:
             items = ["默认分类"]
         self.category_combo.addItems(items)
         
-        # ⚡️ 恢复信号
+        self.category_combo.model().blockSignals(False)
         self.category_combo.blockSignals(False)
     
     def add_field_row(self, key="", value="", fixed_template_id=None, placeholder=None, value_count=1, value_placeholder_template=None, batch_mode=False):
@@ -5991,6 +5986,24 @@ class MainWindow(QMainWindow):
         # 刷新看板数据（统计面板 + 记录列表）
         self.refresh_dashboard()
     
+    def _cleanup_dashboard_thread(self):
+        """安全清理旧的 dashboard 线程，确保原生线程完全终止"""
+        if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
+            try:
+                self._dashboard_worker.finished.disconnect()
+                self._dashboard_worker.error.disconnect()
+            except Exception:
+                pass
+            self._dashboard_worker = None
+
+        if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
+            thread = self._dashboard_thread
+            self._dashboard_thread = None
+            if thread.isRunning():
+                thread.quit()
+            # wait() 确保原生线程完全退出，已终止时立即返回
+            thread.wait(5000)
+
     def refresh_dashboard(self):
         """刷新数据看板（统计面板 + 记录列表），由定时器周期调用
         
@@ -6002,13 +6015,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
             return
         
-        # 断开旧 worker 的信号，防止旧线程完成时误触发新线程的 quit
-        if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
-            try:
-                self._dashboard_worker.finished.disconnect()
-                self._dashboard_worker.error.disconnect()
-            except Exception:
-                pass
+        self._cleanup_dashboard_thread()
 
         thread = QThread()
         worker = RecordsLoaderWorker(
@@ -6020,8 +6027,8 @@ class MainWindow(QMainWindow):
         worker.error.connect(lambda e: print(f"刷新记录列表失败: {e}"))
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
-        # 线程结束后再销毁 worker，避免 QThread 析构时 worker 仍存活
         thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
 
         self._dashboard_thread = thread
         self._dashboard_worker = worker
@@ -6042,7 +6049,7 @@ class MainWindow(QMainWindow):
         """
         # 如果没传入，自动保存当前选中状态
         if selected_card_ids is None:
-            selected_card_ids = set()
+            selected_card_ids = {str(w.card.id) for w in self.card_widgets if w.is_selected}
         
         # 清空现有内容
         self.card_widgets.clear()
@@ -6129,6 +6136,12 @@ class MainWindow(QMainWindow):
         """
         if selected_link_ids is None:
             selected_link_ids = set()
+            for i in range(self.links_list.count()):
+                item = self.links_list.item(i)
+                widget = self.links_list.itemWidget(item)
+                if widget and hasattr(widget, 'checkbox') and widget.checkbox.isChecked():
+                    if hasattr(widget, 'link_data'):
+                        selected_link_ids.add(str(widget.link_data.id))
         
         self.links_list.clear()
         
@@ -6398,22 +6411,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'dashboard_timer'):
             self.dashboard_timer.stop()
 
-        # 断开 worker 所有信号，防止线程完成后回调已销毁的 UI
-        if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
-            try:
-                self._dashboard_worker.finished.disconnect()
-                self._dashboard_worker.error.disconnect()
-            except Exception:
-                pass
-
-        if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
-            thread = self._dashboard_thread
-            self._dashboard_thread = None  # 清除引用，防止 GC 重复析构
-            if thread.isRunning():
-                # 通知事件循环退出，run() 阻塞结束后线程自动退出
-                thread.quit()
-            # 线程真正结束后由 Qt 异步销毁，不阻塞主线程
-            thread.finished.connect(thread.deleteLater)
+        self._cleanup_dashboard_thread()
 
         event.accept()
     

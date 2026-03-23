@@ -1433,8 +1433,10 @@ class NoticeDialog(BaseDialog):
         # 平台
         self.platform_combo = QComboBox()
         self.platform_combo.blockSignals(True)
+        self.platform_combo.model().blockSignals(True)
         platforms = self.db_manager.get_all_platforms()
         self.platform_combo.addItems([p.name for p in platforms])
+        self.platform_combo.model().blockSignals(False)
         self.platform_combo.blockSignals(False)
         if self.notice:
             self.platform_combo.setCurrentText(self.notice.platform)
@@ -1494,7 +1496,11 @@ class NoticeDialog(BaseDialog):
         status_layout.setSpacing(20)
         
         self.status_combo = QComboBox()
+        self.status_combo.blockSignals(True)
+        self.status_combo.model().blockSignals(True)
         self.status_combo.addItems(['active', 'expired', 'closed'])
+        self.status_combo.model().blockSignals(False)
+        self.status_combo.blockSignals(False)
         if self.notice:
             self.status_combo.setCurrentText(self.notice.status)
         status_layout.addLayout(self.create_field("状态", self.status_combo))

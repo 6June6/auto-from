@@ -1016,7 +1016,11 @@ class CardEditDialog(QDialog):
         if not categories:
             categories.add('默认分类')
         
+        self.category_combo.blockSignals(True)
+        self.category_combo.model().blockSignals(True)
         self.category_combo.addItems(sorted(categories))
+        self.category_combo.model().blockSignals(False)
+        self.category_combo.blockSignals(False)
         
         if self.card and self.card.category:
             self.category_combo.setCurrentText(self.card.category)

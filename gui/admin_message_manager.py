@@ -498,7 +498,11 @@ class MessageSendWidget(QWidget):
         type_lbl.setStyleSheet(f"font-weight: 600; color: {COLORS['text_primary']};")
         
         self.type_combo = QComboBox()
+        self.type_combo.blockSignals(True)
+        self.type_combo.model().blockSignals(True)
         self.type_combo.addItems(["系统通知", "维护公告", "活动推广", "其他"])
+        self.type_combo.model().blockSignals(False)
+        self.type_combo.blockSignals(False)
         self.type_combo.setFixedWidth(200)
         self.type_combo.setFixedHeight(36)
         

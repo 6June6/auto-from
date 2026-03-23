@@ -440,7 +440,7 @@ class NoticeCardWidget(QFrame):
                         value_html += after
                     html_parts.append(
                         f'<div style="margin:0; padding:0;">'
-                        f'<span style="font-weight:600;">{label}</span>'
+                        f'<span>{label}</span>'
                         f'{value_html}'
                         f'</div>'
                     )
@@ -451,7 +451,7 @@ class NoticeCardWidget(QFrame):
                     html_parts.append(
                         f'<table cellspacing="0" cellpadding="0" style="border:none; margin:0; padding:0;">'
                         f'<tr>'
-                        f'<td style="white-space:nowrap; vertical-align:top; font-weight:600; padding:0;">{label}</td>'
+                        f'<td style="white-space:nowrap; vertical-align:top; padding:0;">{label}</td>'
                         f'<td style="vertical-align:top; padding:0;">{value_escaped}</td>'
                         f'</tr></table>'
                     )

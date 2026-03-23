@@ -361,8 +361,8 @@ class DatabaseManager:
             if not card:
                 return False
             
-            # 删除关联的填写记录
-            FillRecord.objects(card=card).delete()
+            # 不删除关联的填写记录，保留作为历史数据统计
+            # FillRecord.objects(card=card).delete()
             
             # 删除名片
             card.delete()
@@ -619,8 +619,8 @@ class DatabaseManager:
             if not link:
                 return False
             
-            # 删除关联的填写记录
-            FillRecord.objects(link=link).delete()
+            # 不删除关联的填写记录，保留作为历史数据统计
+            # FillRecord.objects(link=link).delete()
             
             # 删除链接
             link.delete()
@@ -710,8 +710,8 @@ class DatabaseManager:
             
             if object_ids:
                 # 先批量删除关联的填写记录
-                links = Link.objects(id__in=object_ids)
-                FillRecord.objects(link__in=links).delete()
+                # links = Link.objects(id__in=object_ids)
+                # FillRecord.objects(link__in=links).delete()
                 
                 # 批量删除链接
                 deleted_count = Link.objects(id__in=object_ids).delete()
@@ -1615,7 +1615,7 @@ class DatabaseManager:
                 user_cards = Card.objects(user=user)
                 card_ids = [card.id for card in user_cards]
                 
-                total_records = FillRecord.objects(card__in=card_ids).count()
+                total_records = user.usage_count or 0
                 success_records = FillRecord.objects(card__in=card_ids, success=True).count()
                 today_records = FillRecord.objects(card__in=card_ids, created_at__gte=today_start).count()
                 

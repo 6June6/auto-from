@@ -245,7 +245,11 @@ class UserEditDialog(QDialog):
         row1.addLayout(self._create_field("密码", self.password_input, "用户登录凭证"))
         
         self.role_combo = QComboBox()
+        self.role_combo.blockSignals(True)
+        self.role_combo.model().blockSignals(True)
         self.role_combo.addItems(['user', 'admin'])
+        self.role_combo.model().blockSignals(False)
+        self.role_combo.blockSignals(False)
         if self.user: self.role_combo.setCurrentText(self.user.role)
         row1.addLayout(self._create_field("角色", self.role_combo, "admin拥有所有权限"))
         
@@ -2436,8 +2440,22 @@ class BatchImportCardsDialog(QDialog):
         ws = wb.active
         
         rows = []
-        for row in ws.iter_rows(values_only=True):
-            rows.append([str(cell) if cell is not None else '' for cell in row])
+        for row in ws.iter_rows():
+            row_data = []
+            for cell in row:
+                val = cell.value
+                if val is not None:
+                    # 处理百分比格式，避免如 60% 变成 0.6 的情况
+                    if isinstance(val, (int, float)) and cell.number_format and '%' in cell.number_format:
+                        val_pct = round(val * 100, 10)
+                        if val_pct == int(val_pct):
+                            val = f"{int(val_pct)}%"
+                        else:
+                            val = f"{val_pct}%"
+                    row_data.append(str(val))
+                else:
+                    row_data.append('')
+            rows.append(row_data)
         wb.close()
         
         if len(rows) < 2:

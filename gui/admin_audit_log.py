@@ -628,7 +628,11 @@ class AdminAuditLogManager(QWidget):
         
         # Filter
         self.status_filter = QComboBox()
+        self.status_filter.blockSignals(True)
+        self.status_filter.model().blockSignals(True)
         self.status_filter.addItems(["全部状态", "待审批", "已通过", "已拒绝"])
+        self.status_filter.model().blockSignals(False)
+        self.status_filter.blockSignals(False)
         self.status_filter.setFixedSize(100, 32)
         self.status_filter.setStyleSheet(f"""
             QComboBox {{

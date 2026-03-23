@@ -119,10 +119,13 @@ class RecordRowWidget(QFrame):
         c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         user_name = "未知用户"
-        if self.record.card and self.record.card.user:
-            user_name = self.record.card.user.username
-        elif self.record.link and self.record.link.user:
-            user_name = self.record.link.user.username
+        try:
+            if self.record.card and self.record.card.user:
+                user_name = self.record.card.user.username
+            elif self.record.link and self.record.link.user:
+                user_name = self.record.link.user.username
+        except Exception:
+            pass
         
         avatar = QLabel(user_name[0].upper())
         avatar.setFixedSize(32, 32)
@@ -157,7 +160,11 @@ class RecordRowWidget(QFrame):
         c_layout.setContentsMargins(0, 0, 8, 0)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        card_name = self.record.card.name if self.record.card else "已删除名片"
+        try:
+            card_name = self.record.card.name if self.record.card else "已删除名片"
+        except Exception:
+            card_name = "已删除名片"
+            
         lbl = QLabel(card_name)
         lbl.setToolTip(card_name)
         lbl.setStyleSheet(f"color: {PREMIUM_COLORS['text_body']}; font-size: 13px;")
@@ -172,8 +179,12 @@ class RecordRowWidget(QFrame):
         c_layout.setSpacing(2)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
-        link_name = self.record.link.name if self.record.link else "已删除链接"
-        link_url = self.record.link.url if self.record.link else ""
+        try:
+            link_name = self.record.link.name if self.record.link else "已删除链接"
+            link_url = self.record.link.url if self.record.link else ""
+        except Exception:
+            link_name = "已删除链接"
+            link_url = ""
         
         name_lbl = QLabel(link_name)
         name_lbl.setStyleSheet(f"font-size: 13px; color: {PREMIUM_COLORS['text_body']};")

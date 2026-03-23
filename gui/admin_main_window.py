@@ -1036,12 +1036,20 @@ class AdminMainWindow(QMainWindow):
         info_layout = QVBoxLayout()
         info_layout.setSpacing(2)
         
-        title_text = f"{record.card.name}"
+        try:
+            card_name = record.card.name if record.card else "已删除名片"
+        except Exception:
+            card_name = "已删除名片"
+            
+        title_text = f"{card_name}"
         title = QLabel(title_text)
         title.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {COLORS['text_primary']};")
         
         # 链接名字如果不长，可以显示
-        link_name = record.link.name if record.link else '未知链接'
+        try:
+            link_name = record.link.name if record.link else '未知链接'
+        except Exception:
+            link_name = "已删除链接"
         if len(link_name) > 15:
             link_name = link_name[:15] + "..."
             
