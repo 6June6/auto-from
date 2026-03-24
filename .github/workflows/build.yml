@@ -1,4 +1,4 @@
-name: Build Apps (Nuitka)
+name: Build Apps
 
 on:
   push:
@@ -14,6 +14,9 @@ env:
   PYQT6_WEBENGINE_QT_VERSION: "6.6.0"
 
 jobs:
+  # ============================================================
+  # Windows: Nuitka (Python -> C -> 原生 exe，代码混淆保护)
+  # ============================================================
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 120
@@ -104,9 +107,11 @@ jobs:
           path: dist/自动表单填写工具-Windows.exe
           retention-days: 3
 
+  # ============================================================
+  # macOS Intel: Cython 预编译 + PyInstaller (代码保护)
+  # ============================================================
   build-macos-intel:
     runs-on: macos-15
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -115,25 +120,28 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/pip
-          key: mac-intel-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: mac-intel-pip-
-
-      - name: Cache Nuitka
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Nuitka
-          key: mac-intel-nuitka-${{ env.PYTHON_VERSION }}
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install nuitka ordered-set zstandard
+          pip install pyinstaller cython setuptools
+
+      - name: Cython pre-compile (code protection)
+        run: |
+          echo "=== Cython: .py -> .so native binary ==="
+          python cython_protect.py
+
+      - name: Generate hidden imports
+        id: hidden
+        run: |
+          HIDDEN_IMPORTS=""
+          if [ -f _hidden_imports.txt ]; then
+            while IFS= read -r module; do
+              HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
+            done < _hidden_imports.txt
+          fi
+          echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
 
       - name: Create ICNS icon
         run: |
@@ -151,51 +159,44 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Build with Nuitka
+      - name: Verify Cython output
         run: |
-          python -m nuitka \
-            --standalone \
-            --enable-plugin=pyqt6 \
-            --assume-yes-for-downloads \
-            --remove-output \
-            --output-dir=dist \
-            --macos-create-app-bundle \
-            --macos-app-name="自动表单填写工具-Intel" \
-            --macos-app-icon=app_icon.icns \
-            --include-package=core \
-            --include-package=gui \
-            --include-package=database \
-            --include-module=config \
-            --include-package=requests \
-            --include-package=charset_normalizer \
-            --include-package=chardet \
-            --include-package=pymongo \
-            --include-package=mongoengine \
-            --include-package=dns \
-            --include-package=certifi \
-            --include-package=Crypto \
-            --include-package=jwt \
-            --include-package=openpyxl \
-            --include-package=dateutil \
-            --include-module=PyQt6.sip \
-            --include-module=dns.resolver \
-            --include-module=dns.rdatatype \
-            --include-module=dns.nameserver \
-            --include-module=Crypto.Cipher \
-            --include-module=Crypto.Cipher.AES \
-            --include-module=Crypto.Util.Padding \
-            --nofollow-import-to=tools \
-            --nofollow-import-to=scripts \
-            --nofollow-import-to=setuptools \
-            --nofollow-import-to=pip \
-            --nofollow-import-to=fastapi \
-            --nofollow-import-to=uvicorn \
+          echo "=== Compiled .so files ==="
+          find core gui database -name "*.so" 2>/dev/null || true
+          echo "=== Remaining .py files ==="
+          find core gui database -name "*.py" 2>/dev/null || true
+          echo "=== config module ==="
+          ls -la config* 2>/dev/null || true
+
+      - name: Build macOS Intel App
+        run: |
+          pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
+            --icon=app_icon.icns \
+            --osx-bundle-identifier=com.autofill.app \
+            --collect-all PyQt6 \
+            --collect-all PyQt6-WebEngine \
+            --collect-all requests \
+            --collect-all charset_normalizer \
+            --collect-all chardet \
+            --collect-all certifi \
+            --collect-all pymongo \
+            --collect-all mongoengine \
+            --collect-all dns \
+            --hidden-import=PyQt6.sip \
+            --hidden-import=charset_normalizer \
+            --hidden-import=chardet \
+            --hidden-import=dns.resolver \
+            --hidden-import=dns.rdatatype \
+            --hidden-import=dns.nameserver \
+            --hidden-import=Crypto \
+            --hidden-import=Crypto.Cipher \
+            ${{ steps.hidden.outputs.flags }} \
             main.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg_contents
-          cp -R "dist/main.app" "dmg_contents/自动表单填写工具-Intel.app"
+          cp -R "dist/自动表单填写工具-Intel.app" dmg_contents/
           ln -s /Applications dmg_contents/Applications
           hdiutil create -volname "自动表单填写工具-Intel" \
             -srcfolder dmg_contents \
@@ -209,9 +210,11 @@ jobs:
           path: dist/自动表单填写工具-Intel.dmg
           retention-days: 3
 
+  # ============================================================
+  # macOS ARM: Cython 预编译 + PyInstaller (代码保护)
+  # ============================================================
   build-macos-arm:
     runs-on: macos-14
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -220,25 +223,28 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/pip
-          key: mac-arm-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: mac-arm-pip-
-
-      - name: Cache Nuitka
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Nuitka
-          key: mac-arm-nuitka-${{ env.PYTHON_VERSION }}
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install nuitka ordered-set zstandard
+          pip install pyinstaller cython setuptools
+
+      - name: Cython pre-compile (code protection)
+        run: |
+          echo "=== Cython: .py -> .so native binary ==="
+          python cython_protect.py
+
+      - name: Generate hidden imports
+        id: hidden
+        run: |
+          HIDDEN_IMPORTS=""
+          if [ -f _hidden_imports.txt ]; then
+            while IFS= read -r module; do
+              HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
+            done < _hidden_imports.txt
+          fi
+          echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
 
       - name: Create ICNS icon
         run: |
@@ -256,51 +262,44 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Build with Nuitka
+      - name: Verify Cython output
         run: |
-          python -m nuitka \
-            --standalone \
-            --enable-plugin=pyqt6 \
-            --assume-yes-for-downloads \
-            --remove-output \
-            --output-dir=dist \
-            --macos-create-app-bundle \
-            --macos-app-name="自动表单填写工具-AppleSilicon" \
-            --macos-app-icon=app_icon.icns \
-            --include-package=core \
-            --include-package=gui \
-            --include-package=database \
-            --include-module=config \
-            --include-package=requests \
-            --include-package=charset_normalizer \
-            --include-package=chardet \
-            --include-package=pymongo \
-            --include-package=mongoengine \
-            --include-package=dns \
-            --include-package=certifi \
-            --include-package=Crypto \
-            --include-package=jwt \
-            --include-package=openpyxl \
-            --include-package=dateutil \
-            --include-module=PyQt6.sip \
-            --include-module=dns.resolver \
-            --include-module=dns.rdatatype \
-            --include-module=dns.nameserver \
-            --include-module=Crypto.Cipher \
-            --include-module=Crypto.Cipher.AES \
-            --include-module=Crypto.Util.Padding \
-            --nofollow-import-to=tools \
-            --nofollow-import-to=scripts \
-            --nofollow-import-to=setuptools \
-            --nofollow-import-to=pip \
-            --nofollow-import-to=fastapi \
-            --nofollow-import-to=uvicorn \
+          echo "=== Compiled .so files ==="
+          find core gui database -name "*.so" 2>/dev/null || true
+          echo "=== Remaining .py files ==="
+          find core gui database -name "*.py" 2>/dev/null || true
+          echo "=== config module ==="
+          ls -la config* 2>/dev/null || true
+
+      - name: Build macOS ARM App
+        run: |
+          pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
+            --icon=app_icon.icns \
+            --osx-bundle-identifier=com.autofill.app \
+            --collect-all PyQt6 \
+            --collect-all PyQt6-WebEngine \
+            --collect-all requests \
+            --collect-all charset_normalizer \
+            --collect-all chardet \
+            --collect-all certifi \
+            --collect-all pymongo \
+            --collect-all mongoengine \
+            --collect-all dns \
+            --hidden-import=PyQt6.sip \
+            --hidden-import=charset_normalizer \
+            --hidden-import=chardet \
+            --hidden-import=dns.resolver \
+            --hidden-import=dns.rdatatype \
+            --hidden-import=dns.nameserver \
+            --hidden-import=Crypto \
+            --hidden-import=Crypto.Cipher \
+            ${{ steps.hidden.outputs.flags }} \
             main.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg_contents
-          cp -R "dist/main.app" "dmg_contents/自动表单填写工具-AppleSilicon.app"
+          cp -R "dist/自动表单填写工具-AppleSilicon.app" dmg_contents/
           ln -s /Applications dmg_contents/Applications
           hdiutil create -volname "自动表单填写工具-AppleSilicon" \
             -srcfolder dmg_contents \
