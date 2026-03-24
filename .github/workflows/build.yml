@@ -62,12 +62,11 @@ jobs:
         shell: cmd
         run: |
           python -m nuitka ^
-            --onefile ^
+            --standalone ^
             --enable-plugin=pyqt6 ^
             --assume-yes-for-downloads ^
             --remove-output ^
             --output-dir=dist ^
-            --output-filename=自动表单填写工具-Windows.exe ^
             --windows-disable-console ^
             --windows-icon-from-ico=app_icon.ico ^
             --include-package=core ^
@@ -100,11 +99,19 @@ jobs:
             --nofollow-import-to=uvicorn ^
             main.py
 
+      - name: Rename output
+        shell: pwsh
+        run: |
+          if (Test-Path "dist\main.dist") {
+            Rename-Item "dist\main.dist" "自动表单填写工具-Windows"
+            Rename-Item "dist\自动表单填写工具-Windows\main.exe" "自动表单填写工具-Windows.exe"
+          }
+
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
         with:
           name: Windows-App
-          path: dist/自动表单填写工具-Windows.exe
+          path: dist/自动表单填写工具-Windows/
           retention-days: 3
 
   # ============================================================

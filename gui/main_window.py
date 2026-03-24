@@ -7130,6 +7130,7 @@ class MainWindow(QMainWindow):
             fill_mode=self.fill_mode
         )
         fill_window.exec()
+        self._cleanup_dashboard_thread()
         self.refresh_data()
     
     def show_user_menu(self):
