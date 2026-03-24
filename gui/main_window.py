@@ -5963,10 +5963,13 @@ class MainWindow(QMainWindow):
             return '#E68A00' if amount < 0.18 else '#CC7A00'
         return color
     
-    def refresh_data(self):
+    def refresh_data(self, force_dashboard=False):
         """刷新数据（名片和链接列表即时刷新，看板数据由定时器周期刷新）
         
         自动保存当前选中的名片和链接状态，刷新后恢复。
+        
+        Args:
+            force_dashboard: 强制刷新看板数据，填充完成后应设为True以确保记录列表立即更新
         """
         # 保存当前选中状态
         selected_card_ids = {str(w.card.id) for w in self.card_widgets if w.is_selected}
@@ -5984,7 +5987,7 @@ class MainWindow(QMainWindow):
         self.refresh_links_list(selected_link_ids)
         
         # 刷新看板数据（统计面板 + 记录列表）
-        self.refresh_dashboard()
+        self.refresh_dashboard(force=force_dashboard)
     
     def _cleanup_dashboard_thread(self):
         """安全清理旧的 dashboard 线程，确保原生线程完全终止"""
@@ -6004,15 +6007,18 @@ class MainWindow(QMainWindow):
             # wait() 确保原生线程完全退出，已终止时立即返回
             thread.wait(5000)
 
-    def refresh_dashboard(self):
+    def refresh_dashboard(self, force=False):
         """刷新数据看板（统计面板 + 记录列表），由定时器周期调用
         
         使用后台线程加载记录数据，避免阻塞 UI。
         统计面板原地更新数值，记录列表 diff 更新，实现无感刷新。
+        
+        Args:
+            force: 强制刷新，即使后台线程正在运行也会等待其完成后重新加载
         """
         self.update_statistics()
         
-        if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
+        if not force and hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
             return
         
         self._cleanup_dashboard_thread()
@@ -7130,8 +7136,7 @@ class MainWindow(QMainWindow):
             fill_mode=self.fill_mode
         )
         fill_window.exec()
-        self._cleanup_dashboard_thread()
-        self.refresh_data()
+        self.refresh_data(force_dashboard=True)
     
     def show_user_menu(self):
         """显示用户菜单"""

@@ -2353,7 +2353,6 @@ class NewFillWindow(QDialog):
             copy_value = value_text
         else:
             # 多值：显示下拉选择框（禁用直接点击，只能通过批量选择切换）
-            from PyQt6.QtWidgets import QComboBox
             combo = QComboBox()
             combo.setFixedHeight(28)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -3397,7 +3396,6 @@ class NewFillWindow(QDialog):
             from core.auth import check_user_can_use
             can_use, message = check_user_can_use(self.current_user)
             if not can_use:
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "使用受限", f"{message}\n\n请联系平台客服续费后继续使用。")
                 return
         
@@ -3422,7 +3420,6 @@ class NewFillWindow(QDialog):
             from core.auth import check_user_can_use
             can_use, message = check_user_can_use(self.current_user)
             if not can_use:
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "使用受限", f"{message}\n\n请联系平台客服续费后继续使用。")
                 return
         
@@ -4054,7 +4051,6 @@ class NewFillWindow(QDialog):
                 # 只弹出一次提示（使用实例标记防止重复弹窗）
                 if not getattr(self, '_quota_exceeded_shown', False):
                     self._quota_exceeded_shown = True
-                    from PyQt6.QtWidgets import QMessageBox
                     QMessageBox.warning(self, "使用受限", f"{message}\n\n请联系平台客服续费后继续使用。")
                 return
         
@@ -4449,7 +4445,6 @@ class NewFillWindow(QDialog):
             from core.auth import check_user_can_use
             can_use, message = check_user_can_use(self.current_user)
             if not can_use:
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "使用受限", f"{message}\n\n请联系平台客服续费后继续使用。")
                 return
         
@@ -10148,7 +10143,6 @@ class NewFillWindow(QDialog):
                         # 只弹出一次提示（使用实例标记防止重复弹窗）
                         if not getattr(self, '_quota_exceeded_shown', False):
                             self._quota_exceeded_shown = True
-                            from PyQt6.QtWidgets import QMessageBox
                             QMessageBox.warning(self, "使用受限", f"{msg}\n\n请联系平台客服续费后继续使用。")
                 
                 # 保存记录

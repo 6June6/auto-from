@@ -491,8 +491,7 @@ class BaomingToolFiller:
         """从数据库加载 Token"""
         try:
             from database.models import BaomingToken, Card
-            from datetime import datetime
-            
+
             if not self.card_id:
                 return None
             

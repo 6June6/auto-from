@@ -698,8 +698,6 @@ class DatabaseManager:
             return result
         
         try:
-            from bson import ObjectId
-            
             # 将字符串ID转换为ObjectId
             object_ids = []
             for lid in link_ids:
@@ -932,7 +930,6 @@ class DatabaseManager:
                 query = query.filter(start_date__lte=end_date)
                 
             if keyword:
-                from mongoengine.queryset.visitor import Q
                 # 搜索内容、标题、品牌字段
                 query = query.filter(
                     Q(content__icontains=keyword) | 
