@@ -33,9 +33,18 @@ data/
 # PyInstaller
 *.spec
 
+# Nuitka
+*.build/
+*.dist/
+*.onefile-build/
+app_icon.ico
+app_icon.icns
+app_icon.iconset/
+
 # Build artifacts
 *.app/
 *.exe
+*.dmg
 
 # Cursor
 .cursor/

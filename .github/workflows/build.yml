@@ -1,30 +1,50 @@
-name: Build Apps
+name: Build Apps (Nuitka)
 
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.9"
+  PYQT6_VERSION: "6.6.1"
+  PYQT6_QT_VERSION: "6.6.1"
+  PYQT6_WEBENGINE_VERSION: "6.6.0"
+  PYQT6_WEBENGINE_QT_VERSION: "6.6.0"
 
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: win-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: win-pip-
+
+      - name: Cache Nuitka
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka
+          key: win-nuitka-${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install chardet charset-normalizer
-          # 强制指定 Windows 兼容版本
-          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
-          pip install pyinstaller pillow
+          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
+          pip install nuitka ordered-set zstandard pillow
 
       - name: Convert PNG to ICO
         run: |
@@ -35,55 +55,85 @@ jobs:
           print('ICO icon created successfully')
           "
 
-      - name: Build Windows App
+      - name: Build with Nuitka
         shell: cmd
         run: |
-          REM 显式收集关键依赖
-          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
-            --icon=app_icon.ico ^
-            --collect-all PyQt6 ^
-            --collect-all PyQt6-WebEngine ^
-            --collect-all requests ^
-            --collect-all charset_normalizer ^
-            --collect-all chardet ^
-            --collect-all pymongo ^
-            --collect-all mongoengine ^
-            --collect-all dns ^
-            --collect-all certifi ^
-            --hidden-import=PyQt6.sip ^
-            --hidden-import=requests ^
-            --hidden-import=charset_normalizer ^
-            --hidden-import=chardet ^
-            --hidden-import=dns.resolver ^
-            --hidden-import=dns.rdatatype ^
-            --hidden-import=dns.nameserver ^
-            --hidden-import=Crypto ^
-            --hidden-import=Crypto.Cipher ^
+          python -m nuitka ^
+            --onefile ^
+            --enable-plugin=pyqt6 ^
+            --assume-yes-for-downloads ^
+            --remove-output ^
+            --output-dir=dist ^
+            --output-filename=自动表单填写工具-Windows.exe ^
+            --windows-disable-console ^
+            --windows-icon-from-ico=app_icon.ico ^
+            --include-package=core ^
+            --include-package=gui ^
+            --include-package=database ^
+            --include-module=config ^
+            --include-package=requests ^
+            --include-package=charset_normalizer ^
+            --include-package=chardet ^
+            --include-package=pymongo ^
+            --include-package=mongoengine ^
+            --include-package=dns ^
+            --include-package=certifi ^
+            --include-package=Crypto ^
+            --include-package=jwt ^
+            --include-package=openpyxl ^
+            --include-package=dateutil ^
+            --include-module=PyQt6.sip ^
+            --include-module=dns.resolver ^
+            --include-module=dns.rdatatype ^
+            --include-module=dns.nameserver ^
+            --include-module=Crypto.Cipher ^
+            --include-module=Crypto.Cipher.AES ^
+            --include-module=Crypto.Util.Padding ^
+            --nofollow-import-to=tools ^
+            --nofollow-import-to=scripts ^
+            --nofollow-import-to=setuptools ^
+            --nofollow-import-to=pip ^
+            --nofollow-import-to=fastapi ^
+            --nofollow-import-to=uvicorn ^
             main.py
 
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
         with:
           name: Windows-App
-          path: dist/自动表单填写工具-Windows/
+          path: dist/自动表单填写工具-Windows.exe
           retention-days: 3
 
   build-macos-intel:
     runs-on: macos-15
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: mac-intel-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: mac-intel-pip-
+
+      - name: Cache Nuitka
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Nuitka
+          key: mac-intel-nuitka-${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
-          pip install pyinstaller
+          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
+          pip install nuitka ordered-set zstandard
 
       - name: Create ICNS icon
         run: |
@@ -101,34 +151,51 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Build macOS Intel App
+      - name: Build with Nuitka
         run: |
-          pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
-            --icon=app_icon.icns \
-            --osx-bundle-identifier=com.autofill.app \
-            --collect-all PyQt6 \
-            --collect-all PyQt6-WebEngine \
-            --collect-all requests \
-            --collect-all charset_normalizer \
-            --collect-all chardet \
-            --collect-all certifi \
-            --collect-all pymongo \
-            --collect-all mongoengine \
-            --collect-all dns \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=charset_normalizer \
-            --hidden-import=chardet \
-            --hidden-import=dns.resolver \
-            --hidden-import=dns.rdatatype \
-            --hidden-import=dns.nameserver \
-            --hidden-import=Crypto \
-            --hidden-import=Crypto.Cipher \
+          python -m nuitka \
+            --standalone \
+            --enable-plugin=pyqt6 \
+            --assume-yes-for-downloads \
+            --remove-output \
+            --output-dir=dist \
+            --macos-create-app-bundle \
+            --macos-app-name="自动表单填写工具-Intel" \
+            --macos-app-icon=app_icon.icns \
+            --include-package=core \
+            --include-package=gui \
+            --include-package=database \
+            --include-module=config \
+            --include-package=requests \
+            --include-package=charset_normalizer \
+            --include-package=chardet \
+            --include-package=pymongo \
+            --include-package=mongoengine \
+            --include-package=dns \
+            --include-package=certifi \
+            --include-package=Crypto \
+            --include-package=jwt \
+            --include-package=openpyxl \
+            --include-package=dateutil \
+            --include-module=PyQt6.sip \
+            --include-module=dns.resolver \
+            --include-module=dns.rdatatype \
+            --include-module=dns.nameserver \
+            --include-module=Crypto.Cipher \
+            --include-module=Crypto.Cipher.AES \
+            --include-module=Crypto.Util.Padding \
+            --nofollow-import-to=tools \
+            --nofollow-import-to=scripts \
+            --nofollow-import-to=setuptools \
+            --nofollow-import-to=pip \
+            --nofollow-import-to=fastapi \
+            --nofollow-import-to=uvicorn \
             main.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg_contents
-          cp -R "dist/自动表单填写工具-Intel.app" dmg_contents/
+          cp -R "dist/main.app" "dmg_contents/自动表单填写工具-Intel.app"
           ln -s /Applications dmg_contents/Applications
           hdiutil create -volname "自动表单填写工具-Intel" \
             -srcfolder dmg_contents \
@@ -144,20 +211,34 @@ jobs:
 
   build-macos-arm:
     runs-on: macos-14
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: mac-arm-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: mac-arm-pip-
+
+      - name: Cache Nuitka
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Nuitka
+          key: mac-arm-nuitka-${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
-          pip install pyinstaller
+          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
+          pip install nuitka ordered-set zstandard
 
       - name: Create ICNS icon
         run: |
@@ -175,34 +256,51 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Build macOS ARM App
+      - name: Build with Nuitka
         run: |
-          pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
-            --icon=app_icon.icns \
-            --osx-bundle-identifier=com.autofill.app \
-            --collect-all PyQt6 \
-            --collect-all PyQt6-WebEngine \
-            --collect-all requests \
-            --collect-all charset_normalizer \
-            --collect-all chardet \
-            --collect-all certifi \
-            --collect-all pymongo \
-            --collect-all mongoengine \
-            --collect-all dns \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=charset_normalizer \
-            --hidden-import=chardet \
-            --hidden-import=dns.resolver \
-            --hidden-import=dns.rdatatype \
-            --hidden-import=dns.nameserver \
-            --hidden-import=Crypto \
-            --hidden-import=Crypto.Cipher \
+          python -m nuitka \
+            --standalone \
+            --enable-plugin=pyqt6 \
+            --assume-yes-for-downloads \
+            --remove-output \
+            --output-dir=dist \
+            --macos-create-app-bundle \
+            --macos-app-name="自动表单填写工具-AppleSilicon" \
+            --macos-app-icon=app_icon.icns \
+            --include-package=core \
+            --include-package=gui \
+            --include-package=database \
+            --include-module=config \
+            --include-package=requests \
+            --include-package=charset_normalizer \
+            --include-package=chardet \
+            --include-package=pymongo \
+            --include-package=mongoengine \
+            --include-package=dns \
+            --include-package=certifi \
+            --include-package=Crypto \
+            --include-package=jwt \
+            --include-package=openpyxl \
+            --include-package=dateutil \
+            --include-module=PyQt6.sip \
+            --include-module=dns.resolver \
+            --include-module=dns.rdatatype \
+            --include-module=dns.nameserver \
+            --include-module=Crypto.Cipher \
+            --include-module=Crypto.Cipher.AES \
+            --include-module=Crypto.Util.Padding \
+            --nofollow-import-to=tools \
+            --nofollow-import-to=scripts \
+            --nofollow-import-to=setuptools \
+            --nofollow-import-to=pip \
+            --nofollow-import-to=fastapi \
+            --nofollow-import-to=uvicorn \
             main.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg_contents
-          cp -R "dist/自动表单填写工具-AppleSilicon.app" dmg_contents/
+          cp -R "dist/main.app" "dmg_contents/自动表单填写工具-AppleSilicon.app"
           ln -s /Applications dmg_contents/Applications
           hdiutil create -volname "自动表单填写工具-AppleSilicon" \
             -srcfolder dmg_contents \
