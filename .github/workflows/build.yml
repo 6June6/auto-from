@@ -37,20 +37,18 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools pillow
 
-      - name: Cython pre-compile + scan imports
+      - name: Cython pre-compile + generate hooks
         run: python cython_protect.py
 
-      - name: Generate hidden imports flags
-        id: hidden
+      - name: Show generated hook
         shell: pwsh
         run: |
-          $flags = ""
-          if (Test-Path "_hidden_imports.txt") {
-            Get-Content "_hidden_imports.txt" | ForEach-Object {
-              $flags += " --hidden-import=$_"
-            }
-          }
-          echo "flags=$flags" >> $env:GITHUB_OUTPUT
+          echo "=== PyInstaller hook file ==="
+          Get-Content _pyinstaller_hooks/hook-main.py
+          echo "=== Compiled .pyd files ==="
+          Get-ChildItem -Recurse -Filter "*.pyd" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          echo "=== Remaining .py files ==="
+          Get-ChildItem -Recurse -Filter "*.py" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
 
       - name: Convert PNG to ICO
         run: |
@@ -61,25 +59,15 @@ jobs:
           print('ICO icon created successfully')
           "
 
-      - name: Verify Cython output
-        shell: pwsh
-        run: |
-          echo "=== Compiled .pyd files ==="
-          Get-ChildItem -Recurse -Filter "*.pyd" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          echo "=== Remaining .py files ==="
-          Get-ChildItem -Recurse -Filter "*.py" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          echo "=== Hidden imports count ==="
-          if (Test-Path "_hidden_imports.txt") { (Get-Content "_hidden_imports.txt").Count }
-
       - name: Build Windows App
         shell: cmd
         run: |
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
             --icon=app_icon.ico ^
             --paths=. ^
+            --additional-hooks-dir=_pyinstaller_hooks ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
-            ${{ steps.hidden.outputs.flags }} ^
             main.py
 
       - name: Upload Windows Build
@@ -109,19 +97,17 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools
 
-      - name: Cython pre-compile + scan imports
+      - name: Cython pre-compile + generate hooks
         run: python cython_protect.py
 
-      - name: Generate hidden imports flags
-        id: hidden
+      - name: Show generated hook
         run: |
-          HIDDEN_IMPORTS=""
-          if [ -f _hidden_imports.txt ]; then
-            while IFS= read -r module; do
-              [ -n "$module" ] && HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
-            done < _hidden_imports.txt
-          fi
-          echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
+          echo "=== PyInstaller hook file ==="
+          cat _pyinstaller_hooks/hook-main.py
+          echo "=== Compiled .so files ==="
+          find core gui database -name "*.so" 2>/dev/null || true
+          echo "=== Remaining .py files ==="
+          find core gui database -name "*.py" 2>/dev/null || true
 
       - name: Create ICNS icon
         run: |
@@ -139,24 +125,15 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Verify Cython output
-        run: |
-          echo "=== Compiled .so files ==="
-          find core gui database -name "*.so" 2>/dev/null || true
-          echo "=== Remaining .py files ==="
-          find core gui database -name "*.py" 2>/dev/null || true
-          echo "=== Hidden imports count ==="
-          wc -l _hidden_imports.txt 2>/dev/null || true
-
       - name: Build macOS Intel App
         run: |
           pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
             --paths=. \
+            --additional-hooks-dir=_pyinstaller_hooks \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
-            ${{ steps.hidden.outputs.flags }} \
             main.py
 
       - name: Create DMG
@@ -196,19 +173,17 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools
 
-      - name: Cython pre-compile + scan imports
+      - name: Cython pre-compile + generate hooks
         run: python cython_protect.py
 
-      - name: Generate hidden imports flags
-        id: hidden
+      - name: Show generated hook
         run: |
-          HIDDEN_IMPORTS=""
-          if [ -f _hidden_imports.txt ]; then
-            while IFS= read -r module; do
-              [ -n "$module" ] && HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
-            done < _hidden_imports.txt
-          fi
-          echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
+          echo "=== PyInstaller hook file ==="
+          cat _pyinstaller_hooks/hook-main.py
+          echo "=== Compiled .so files ==="
+          find core gui database -name "*.so" 2>/dev/null || true
+          echo "=== Remaining .py files ==="
+          find core gui database -name "*.py" 2>/dev/null || true
 
       - name: Create ICNS icon
         run: |
@@ -226,24 +201,15 @@ jobs:
           iconutil -c icns app_icon.iconset -o app_icon.icns
           echo "ICNS icon created successfully"
 
-      - name: Verify Cython output
-        run: |
-          echo "=== Compiled .so files ==="
-          find core gui database -name "*.so" 2>/dev/null || true
-          echo "=== Remaining .py files ==="
-          find core gui database -name "*.py" 2>/dev/null || true
-          echo "=== Hidden imports count ==="
-          wc -l _hidden_imports.txt 2>/dev/null || true
-
       - name: Build macOS ARM App
         run: |
           pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
             --paths=. \
+            --additional-hooks-dir=_pyinstaller_hooks \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
-            ${{ steps.hidden.outputs.flags }} \
             main.py
 
       - name: Create DMG

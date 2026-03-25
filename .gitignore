@@ -44,6 +44,7 @@ app_icon.iconset/
 # Cython (temp files from cython_protect.py)
 _cython_setup.py
 _hidden_imports.txt
+_pyinstaller_hooks/
 
 # Build artifacts
 *.app/
