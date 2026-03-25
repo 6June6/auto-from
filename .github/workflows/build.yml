@@ -78,6 +78,7 @@ jobs:
         run: |
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
             --icon=app_icon.ico ^
+            --paths=. ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
             --collect-all requests ^
@@ -100,6 +101,7 @@ jobs:
             --hidden-import=dns.nameserver ^
             --hidden-import=Crypto ^
             --hidden-import=Crypto.Cipher ^
+            --hidden-import=config ^
             ${{ steps.hidden.outputs.flags }} ^
             main.py
 
@@ -176,6 +178,7 @@ jobs:
           pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
+            --paths=. \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
             --collect-all requests \
@@ -197,6 +200,7 @@ jobs:
             --hidden-import=dns.nameserver \
             --hidden-import=Crypto \
             --hidden-import=Crypto.Cipher \
+            --hidden-import=config \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 
@@ -283,6 +287,7 @@ jobs:
           pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
+            --paths=. \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
             --collect-all requests \
@@ -304,6 +309,7 @@ jobs:
             --hidden-import=dns.nameserver \
             --hidden-import=Crypto \
             --hidden-import=Crypto.Cipher \
+            --hidden-import=config \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 

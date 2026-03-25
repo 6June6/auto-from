@@ -16,7 +16,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 PROTECTED_DIRS = ["core", "gui", "database"]
-PROTECTED_FILES = ["config.py"]
+PROTECTED_FILES = []
 SKIP_NAMES = {"__init__.py", "main.py", "setup.py", "build.py",
               "build_nuitka.py", "cython_protect.py", "dev_run.py",
               "debug_runner.py", "debug_check.py"}
