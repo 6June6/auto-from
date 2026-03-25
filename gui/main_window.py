@@ -5993,8 +5993,10 @@ class MainWindow(QMainWindow):
         """安全清理旧的 dashboard 线程，确保原生线程完全终止"""
         if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
             try:
-                self._dashboard_worker.finished.disconnect()
-                self._dashboard_worker.error.disconnect()
+                import sip
+                if not sip.isdeleted(self._dashboard_worker):
+                    self._dashboard_worker.finished.disconnect()
+                    self._dashboard_worker.error.disconnect()
             except Exception:
                 pass
             self._dashboard_worker = None
@@ -6002,10 +6004,15 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
             thread = self._dashboard_thread
             self._dashboard_thread = None
-            if thread.isRunning():
-                thread.quit()
-            # wait() 确保原生线程完全退出，已终止时立即返回
-            thread.wait(5000)
+            try:
+                import sip
+                if not sip.isdeleted(thread):
+                    if thread.isRunning():
+                        thread.quit()
+                    # wait() 确保原生线程完全退出，已终止时立即返回
+                    thread.wait(5000)
+            except Exception:
+                pass
 
     def refresh_dashboard(self, force=False):
         """刷新数据看板（统计面板 + 记录列表），由定时器周期调用

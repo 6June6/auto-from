@@ -87,6 +87,10 @@ jobs:
             --collect-all mongoengine ^
             --collect-all dns ^
             --collect-all certifi ^
+            --collect-all qtawesome ^
+            --collect-all jwt ^
+            --collect-all openpyxl ^
+            --collect-all dateutil ^
             --hidden-import=PyQt6.sip ^
             --hidden-import=requests ^
             --hidden-import=charset_normalizer ^
@@ -181,6 +185,10 @@ jobs:
             --collect-all pymongo \
             --collect-all mongoengine \
             --collect-all dns \
+            --collect-all qtawesome \
+            --collect-all jwt \
+            --collect-all openpyxl \
+            --collect-all dateutil \
             --hidden-import=PyQt6.sip \
             --hidden-import=charset_normalizer \
             --hidden-import=chardet \
@@ -284,6 +292,10 @@ jobs:
             --collect-all pymongo \
             --collect-all mongoengine \
             --collect-all dns \
+            --collect-all qtawesome \
+            --collect-all jwt \
+            --collect-all openpyxl \
+            --collect-all dateutil \
             --hidden-import=PyQt6.sip \
             --hidden-import=charset_normalizer \
             --hidden-import=chardet \

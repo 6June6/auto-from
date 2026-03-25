@@ -2,10 +2,17 @@
 配置文件
 """
 import os
+import sys
 from pathlib import Path
 
-# 项目根目录
-BASE_DIR = Path(__file__).resolve().parent
+# 获取正确的根目录，兼容 PyInstaller
+if getattr(sys, 'frozen', False):
+    if hasattr(sys, '_MEIPASS'):
+        BASE_DIR = Path(sys._MEIPASS)
+    else:
+        BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 
 # 数据库配置 - MongoDB
 # 连接字符串 - 使用 auto-form-db 数据库，admin 作为认证源
