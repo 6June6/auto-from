@@ -15,11 +15,10 @@ env:
 
 jobs:
   # ============================================================
-  # Windows: Nuitka (Python -> C -> 原生 exe，代码混淆保护)
+  # Windows: Cython 预编译 + PyInstaller (代码保护)
   # ============================================================
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -28,26 +27,30 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Local\pip\Cache
-          key: win-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: win-pip-
-
-      - name: Cache Nuitka
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Local\Nuitka\Nuitka
-          key: win-nuitka-${{ env.PYTHON_VERSION }}
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install chardet charset-normalizer
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install nuitka ordered-set zstandard pillow
+          pip install pyinstaller cython setuptools pillow
+
+      - name: Cython pre-compile (code protection)
+        run: |
+          echo "=== Cython: .py -> .pyd native binary ==="
+          python cython_protect.py
+
+      - name: Generate hidden imports
+        id: hidden
+        shell: pwsh
+        run: |
+          $flags = ""
+          if (Test-Path "_hidden_imports.txt") {
+            Get-Content "_hidden_imports.txt" | ForEach-Object {
+              $flags += " --hidden-import=$_"
+            }
+          }
+          echo "flags=$flags" >> $env:GITHUB_OUTPUT
 
       - name: Convert PNG to ICO
         run: |
@@ -58,54 +61,41 @@ jobs:
           print('ICO icon created successfully')
           "
 
-      - name: Build with Nuitka
-        shell: cmd
-        run: |
-          python -m nuitka ^
-            --standalone ^
-            --enable-plugin=pyqt6 ^
-            --assume-yes-for-downloads ^
-            --remove-output ^
-            --output-dir=dist ^
-            --windows-disable-console ^
-            --windows-icon-from-ico=app_icon.ico ^
-            --include-package=core ^
-            --include-package=gui ^
-            --include-package=database ^
-            --include-module=config ^
-            --include-package=requests ^
-            --include-package=charset_normalizer ^
-            --include-package=chardet ^
-            --include-package=pymongo ^
-            --include-package=mongoengine ^
-            --include-package=dns ^
-            --include-package=certifi ^
-            --include-package=Crypto ^
-            --include-package=jwt ^
-            --include-package=openpyxl ^
-            --include-package=dateutil ^
-            --include-module=PyQt6.sip ^
-            --include-module=dns.resolver ^
-            --include-module=dns.rdatatype ^
-            --include-module=dns.nameserver ^
-            --include-module=Crypto.Cipher ^
-            --include-module=Crypto.Cipher.AES ^
-            --include-module=Crypto.Util.Padding ^
-            --nofollow-import-to=tools ^
-            --nofollow-import-to=scripts ^
-            --nofollow-import-to=setuptools ^
-            --nofollow-import-to=pip ^
-            --nofollow-import-to=fastapi ^
-            --nofollow-import-to=uvicorn ^
-            main.py
-
-      - name: Rename output
+      - name: Verify Cython output
         shell: pwsh
         run: |
-          if (Test-Path "dist\main.dist") {
-            Rename-Item "dist\main.dist" "自动表单填写工具-Windows"
-            Rename-Item "dist\自动表单填写工具-Windows\main.exe" "自动表单填写工具-Windows.exe"
-          }
+          echo "=== Compiled .pyd files ==="
+          Get-ChildItem -Recurse -Filter "*.pyd" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          echo "=== Remaining .py files ==="
+          Get-ChildItem -Recurse -Filter "*.py" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          echo "=== config module ==="
+          Get-ChildItem config* -ErrorAction SilentlyContinue
+
+      - name: Build Windows App
+        shell: cmd
+        run: |
+          pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
+            --icon=app_icon.ico ^
+            --collect-all PyQt6 ^
+            --collect-all PyQt6-WebEngine ^
+            --collect-all requests ^
+            --collect-all charset_normalizer ^
+            --collect-all chardet ^
+            --collect-all pymongo ^
+            --collect-all mongoengine ^
+            --collect-all dns ^
+            --collect-all certifi ^
+            --hidden-import=PyQt6.sip ^
+            --hidden-import=requests ^
+            --hidden-import=charset_normalizer ^
+            --hidden-import=chardet ^
+            --hidden-import=dns.resolver ^
+            --hidden-import=dns.rdatatype ^
+            --hidden-import=dns.nameserver ^
+            --hidden-import=Crypto ^
+            --hidden-import=Crypto.Cipher ^
+            ${{ steps.hidden.outputs.flags }} ^
+            main.py
 
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
