@@ -37,12 +37,10 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools pillow
 
-      - name: Cython pre-compile (code protection)
-        run: |
-          echo "=== Cython: .py -> .pyd native binary ==="
-          python cython_protect.py
+      - name: Cython pre-compile + scan imports
+        run: python cython_protect.py
 
-      - name: Generate hidden imports
+      - name: Generate hidden imports flags
         id: hidden
         shell: pwsh
         run: |
@@ -70,8 +68,8 @@ jobs:
           Get-ChildItem -Recurse -Filter "*.pyd" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           echo "=== Remaining .py files ==="
           Get-ChildItem -Recurse -Filter "*.py" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          echo "=== config module ==="
-          Get-ChildItem config* -ErrorAction SilentlyContinue
+          echo "=== Hidden imports count ==="
+          if (Test-Path "_hidden_imports.txt") { (Get-Content "_hidden_imports.txt").Count }
 
       - name: Build Windows App
         shell: cmd
@@ -81,29 +79,6 @@ jobs:
             --paths=. ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
-            --collect-all requests ^
-            --collect-all charset_normalizer ^
-            --collect-all chardet ^
-            --collect-all pymongo ^
-            --collect-all mongoengine ^
-            --collect-all dns ^
-            --collect-all certifi ^
-            --collect-all qtawesome ^
-            --collect-all jwt ^
-            --collect-all openpyxl ^
-            --collect-all dateutil ^
-            --hidden-import=PyQt6.sip ^
-            --hidden-import=requests ^
-            --hidden-import=charset_normalizer ^
-            --hidden-import=chardet ^
-            --hidden-import=dns.resolver ^
-            --hidden-import=dns.rdatatype ^
-            --hidden-import=dns.nameserver ^
-            --hidden-import=Crypto ^
-            --hidden-import=Crypto.Cipher ^
-            --hidden-import=config ^
-            --hidden-import=tools ^
-            --hidden-import=tools.link_utils ^
             ${{ steps.hidden.outputs.flags }} ^
             main.py
 
@@ -134,18 +109,16 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools
 
-      - name: Cython pre-compile (code protection)
-        run: |
-          echo "=== Cython: .py -> .so native binary ==="
-          python cython_protect.py
+      - name: Cython pre-compile + scan imports
+        run: python cython_protect.py
 
-      - name: Generate hidden imports
+      - name: Generate hidden imports flags
         id: hidden
         run: |
           HIDDEN_IMPORTS=""
           if [ -f _hidden_imports.txt ]; then
             while IFS= read -r module; do
-              HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
+              [ -n "$module" ] && HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
             done < _hidden_imports.txt
           fi
           echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
@@ -172,8 +145,8 @@ jobs:
           find core gui database -name "*.so" 2>/dev/null || true
           echo "=== Remaining .py files ==="
           find core gui database -name "*.py" 2>/dev/null || true
-          echo "=== config module ==="
-          ls -la config* 2>/dev/null || true
+          echo "=== Hidden imports count ==="
+          wc -l _hidden_imports.txt 2>/dev/null || true
 
       - name: Build macOS Intel App
         run: |
@@ -183,28 +156,6 @@ jobs:
             --paths=. \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
-            --collect-all requests \
-            --collect-all charset_normalizer \
-            --collect-all chardet \
-            --collect-all certifi \
-            --collect-all pymongo \
-            --collect-all mongoengine \
-            --collect-all dns \
-            --collect-all qtawesome \
-            --collect-all jwt \
-            --collect-all openpyxl \
-            --collect-all dateutil \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=charset_normalizer \
-            --hidden-import=chardet \
-            --hidden-import=dns.resolver \
-            --hidden-import=dns.rdatatype \
-            --hidden-import=dns.nameserver \
-            --hidden-import=Crypto \
-            --hidden-import=Crypto.Cipher \
-            --hidden-import=config \
-            --hidden-import=tools \
-            --hidden-import=tools.link_utils \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 
@@ -245,18 +196,16 @@ jobs:
           pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
           pip install pyinstaller cython setuptools
 
-      - name: Cython pre-compile (code protection)
-        run: |
-          echo "=== Cython: .py -> .so native binary ==="
-          python cython_protect.py
+      - name: Cython pre-compile + scan imports
+        run: python cython_protect.py
 
-      - name: Generate hidden imports
+      - name: Generate hidden imports flags
         id: hidden
         run: |
           HIDDEN_IMPORTS=""
           if [ -f _hidden_imports.txt ]; then
             while IFS= read -r module; do
-              HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
+              [ -n "$module" ] && HIDDEN_IMPORTS="$HIDDEN_IMPORTS --hidden-import=$module"
             done < _hidden_imports.txt
           fi
           echo "flags=$HIDDEN_IMPORTS" >> $GITHUB_OUTPUT
@@ -283,8 +232,8 @@ jobs:
           find core gui database -name "*.so" 2>/dev/null || true
           echo "=== Remaining .py files ==="
           find core gui database -name "*.py" 2>/dev/null || true
-          echo "=== config module ==="
-          ls -la config* 2>/dev/null || true
+          echo "=== Hidden imports count ==="
+          wc -l _hidden_imports.txt 2>/dev/null || true
 
       - name: Build macOS ARM App
         run: |
@@ -294,28 +243,6 @@ jobs:
             --paths=. \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
-            --collect-all requests \
-            --collect-all charset_normalizer \
-            --collect-all chardet \
-            --collect-all certifi \
-            --collect-all pymongo \
-            --collect-all mongoengine \
-            --collect-all dns \
-            --collect-all qtawesome \
-            --collect-all jwt \
-            --collect-all openpyxl \
-            --collect-all dateutil \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=charset_normalizer \
-            --hidden-import=chardet \
-            --hidden-import=dns.resolver \
-            --hidden-import=dns.rdatatype \
-            --hidden-import=dns.nameserver \
-            --hidden-import=Crypto \
-            --hidden-import=Crypto.Cipher \
-            --hidden-import=config \
-            --hidden-import=tools \
-            --hidden-import=tools.link_utils \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 
