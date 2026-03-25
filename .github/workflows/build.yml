@@ -102,6 +102,8 @@ jobs:
             --hidden-import=Crypto ^
             --hidden-import=Crypto.Cipher ^
             --hidden-import=config ^
+            --hidden-import=tools ^
+            --hidden-import=tools.link_utils ^
             ${{ steps.hidden.outputs.flags }} ^
             main.py
 
@@ -201,6 +203,8 @@ jobs:
             --hidden-import=Crypto \
             --hidden-import=Crypto.Cipher \
             --hidden-import=config \
+            --hidden-import=tools \
+            --hidden-import=tools.link_utils \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 
@@ -310,6 +314,8 @@ jobs:
             --hidden-import=Crypto \
             --hidden-import=Crypto.Cipher \
             --hidden-import=config \
+            --hidden-import=tools \
+            --hidden-import=tools.link_utils \
             ${{ steps.hidden.outputs.flags }} \
             main.py
 
