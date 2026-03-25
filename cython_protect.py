@@ -11,6 +11,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# 强制设置标准输出为 UTF-8，防止 Windows 下（如 GitHub Actions）打印中文字符报错
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 PROTECTED_DIRS = ["core", "gui", "database"]
 PROTECTED_FILES = ["config.py"]
 SKIP_NAMES = {"__init__.py", "main.py", "setup.py", "build.py",
@@ -50,7 +54,7 @@ setup(
     ),
 )
 """
-    Path("_cython_setup.py").write_text(content)
+    Path("_cython_setup.py").write_text(content, encoding="utf-8")
 
 
 def compile_with_cython(py_files):
@@ -126,7 +130,7 @@ def main():
     print(flags)
 
     # 写入文件供 CI 使用
-    Path("_hidden_imports.txt").write_text("\n".join(hidden))
+    Path("_hidden_imports.txt").write_text("\n".join(hidden), encoding="utf-8")
 
     print("\n开始 Cython 编译...\n")
     compile_with_cython(py_files)
