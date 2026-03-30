@@ -4,51 +4,27 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-
-env:
-  PYTHON_VERSION: "3.9"
-  PYQT6_VERSION: "6.6.1"
-  PYQT6_QT_VERSION: "6.6.1"
-  PYQT6_WEBENGINE_VERSION: "6.6.0"
-  PYQT6_WEBENGINE_QT_VERSION: "6.6.0"
+  workflow_dispatch: # 手动触发
 
 jobs:
-  # ============================================================
-  # Windows: Cython 预编译 + PyInstaller (代码保护)
-  # ============================================================
   build-windows:
     runs-on: windows-latest
-    env:
-      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install chardet charset-normalizer
-          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install pyinstaller cython setuptools pillow
-
-      - name: Cython pre-compile + generate hooks
-        run: python cython_protect.py
-
-      - name: Show generated hook
-        shell: pwsh
-        run: |
-          echo "=== PyInstaller hook file ==="
-          Get-Content _pyinstaller_hooks/hook-main.py
-          echo "=== Compiled .pyd files ==="
-          Get-ChildItem -Recurse -Filter "*.pyd" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          echo "=== Remaining .py files ==="
-          Get-ChildItem -Recurse -Filter "*.py" core, gui, database -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          # 强制指定 Windows 兼容版本
+          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
+          pip install pyinstaller pillow
 
       - name: Convert PNG to ICO
         run: |
@@ -62,12 +38,27 @@ jobs:
       - name: Build Windows App
         shell: cmd
         run: |
+          REM 显式收集关键依赖
           pyinstaller --name="自动表单填写工具-Windows" --windowed --onedir --clean ^
             --icon=app_icon.ico ^
-            --paths=. ^
-            --additional-hooks-dir=_pyinstaller_hooks ^
             --collect-all PyQt6 ^
             --collect-all PyQt6-WebEngine ^
+            --collect-all requests ^
+            --collect-all charset_normalizer ^
+            --collect-all chardet ^
+            --collect-all pymongo ^
+            --collect-all mongoengine ^
+            --collect-all dns ^
+            --collect-all certifi ^
+            --hidden-import=PyQt6.sip ^
+            --hidden-import=requests ^
+            --hidden-import=charset_normalizer ^
+            --hidden-import=chardet ^
+            --hidden-import=dns.resolver ^
+            --hidden-import=dns.rdatatype ^
+            --hidden-import=dns.nameserver ^
+            --hidden-import=Crypto ^
+            --hidden-import=Crypto.Cipher ^
             main.py
 
       - name: Upload Windows Build
@@ -77,9 +68,6 @@ jobs:
           path: dist/自动表单填写工具-Windows/
           retention-days: 3
 
-  # ============================================================
-  # macOS Intel: Cython 预编译 + PyInstaller (代码保护)
-  # ============================================================
   build-macos-intel:
     runs-on: macos-15
     steps:
@@ -88,26 +76,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install pyinstaller cython setuptools
-
-      - name: Cython pre-compile + generate hooks
-        run: python cython_protect.py
-
-      - name: Show generated hook
-        run: |
-          echo "=== PyInstaller hook file ==="
-          cat _pyinstaller_hooks/hook-main.py
-          echo "=== Compiled .so files ==="
-          find core gui database -name "*.so" 2>/dev/null || true
-          echo "=== Remaining .py files ==="
-          find core gui database -name "*.py" 2>/dev/null || true
+          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
+          pip install pyinstaller
 
       - name: Create ICNS icon
         run: |
@@ -130,10 +106,23 @@ jobs:
           pyinstaller --name="自动表单填写工具-Intel" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
-            --paths=. \
-            --additional-hooks-dir=_pyinstaller_hooks \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
+            --collect-all requests \
+            --collect-all charset_normalizer \
+            --collect-all chardet \
+            --collect-all certifi \
+            --collect-all pymongo \
+            --collect-all mongoengine \
+            --collect-all dns \
+            --hidden-import=PyQt6.sip \
+            --hidden-import=charset_normalizer \
+            --hidden-import=chardet \
+            --hidden-import=dns.resolver \
+            --hidden-import=dns.rdatatype \
+            --hidden-import=dns.nameserver \
+            --hidden-import=Crypto \
+            --hidden-import=Crypto.Cipher \
             main.py
 
       - name: Create DMG
@@ -153,9 +142,6 @@ jobs:
           path: dist/自动表单填写工具-Intel.dmg
           retention-days: 3
 
-  # ============================================================
-  # macOS ARM: Cython 预编译 + PyInstaller (代码保护)
-  # ============================================================
   build-macos-arm:
     runs-on: macos-14
     steps:
@@ -164,26 +150,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "PyQt6==${{ env.PYQT6_VERSION }}" "PyQt6-Qt6==${{ env.PYQT6_QT_VERSION }}" "PyQt6-WebEngine==${{ env.PYQT6_WEBENGINE_VERSION }}" "PyQt6-WebEngine-Qt6==${{ env.PYQT6_WEBENGINE_QT_VERSION }}" --force-reinstall
-          pip install pyinstaller cython setuptools
-
-      - name: Cython pre-compile + generate hooks
-        run: python cython_protect.py
-
-      - name: Show generated hook
-        run: |
-          echo "=== PyInstaller hook file ==="
-          cat _pyinstaller_hooks/hook-main.py
-          echo "=== Compiled .so files ==="
-          find core gui database -name "*.so" 2>/dev/null || true
-          echo "=== Remaining .py files ==="
-          find core gui database -name "*.py" 2>/dev/null || true
+          pip install "PyQt6==6.6.1" "PyQt6-Qt6==6.6.1" "PyQt6-WebEngine==6.6.0" "PyQt6-WebEngine-Qt6==6.6.0" --force-reinstall
+          pip install pyinstaller
 
       - name: Create ICNS icon
         run: |
@@ -206,10 +180,23 @@ jobs:
           pyinstaller --name="自动表单填写工具-AppleSilicon" --windowed --onedir --clean \
             --icon=app_icon.icns \
             --osx-bundle-identifier=com.autofill.app \
-            --paths=. \
-            --additional-hooks-dir=_pyinstaller_hooks \
             --collect-all PyQt6 \
             --collect-all PyQt6-WebEngine \
+            --collect-all requests \
+            --collect-all charset_normalizer \
+            --collect-all chardet \
+            --collect-all certifi \
+            --collect-all pymongo \
+            --collect-all mongoengine \
+            --collect-all dns \
+            --hidden-import=PyQt6.sip \
+            --hidden-import=charset_normalizer \
+            --hidden-import=chardet \
+            --hidden-import=dns.resolver \
+            --hidden-import=dns.rdatatype \
+            --hidden-import=dns.nameserver \
+            --hidden-import=Crypto \
+            --hidden-import=Crypto.Cipher \
             main.py
 
       - name: Create DMG
