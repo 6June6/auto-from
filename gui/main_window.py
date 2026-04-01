@@ -5990,8 +5990,10 @@ class MainWindow(QMainWindow):
         """安全清理旧的 dashboard 线程，确保原生线程完全终止"""
         if hasattr(self, '_dashboard_worker') and self._dashboard_worker:
             try:
-                self._dashboard_worker.finished.disconnect()
-                self._dashboard_worker.error.disconnect()
+                import sip
+                if not sip.isdeleted(self._dashboard_worker):
+                    self._dashboard_worker.finished.disconnect()
+                    self._dashboard_worker.error.disconnect()
             except Exception:
                 pass
             self._dashboard_worker = None
@@ -5999,10 +6001,15 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
             thread = self._dashboard_thread
             self._dashboard_thread = None
-            if thread.isRunning():
-                thread.quit()
-            # wait() 确保原生线程完全退出，已终止时立即返回
-            thread.wait(5000)
+            try:
+                import sip
+                if not sip.isdeleted(thread):
+                    if thread.isRunning():
+                        thread.quit()
+                    # wait() 确保原生线程完全退出，已终止时立即返回
+                    thread.wait(5000)
+            except Exception:
+                pass
 
     def refresh_dashboard(self):
         """刷新数据看板（统计面板 + 记录列表），由定时器周期调用
@@ -6012,8 +6019,13 @@ class MainWindow(QMainWindow):
         """
         self.update_statistics()
         
-        if hasattr(self, '_dashboard_thread') and self._dashboard_thread and self._dashboard_thread.isRunning():
-            return
+        if hasattr(self, '_dashboard_thread') and self._dashboard_thread:
+            try:
+                import sip
+                if not sip.isdeleted(self._dashboard_thread) and self._dashboard_thread.isRunning():
+                    return
+            except Exception:
+                pass
         
         self._cleanup_dashboard_thread()
 
@@ -6027,6 +6039,7 @@ class MainWindow(QMainWindow):
         worker.error.connect(lambda e: print(f"刷新记录列表失败: {e}"))
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
+        thread.finished.connect(self._on_dashboard_thread_finished)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
 
@@ -6034,6 +6047,11 @@ class MainWindow(QMainWindow):
         self._dashboard_worker = worker
         self._dashboard_thread.start()
     
+    def _on_dashboard_thread_finished(self):
+        """Dashboard 线程结束时清空引用，防止访问已销毁的 C++ 对象"""
+        self._dashboard_worker = None
+        self._dashboard_thread = None
+
     def _on_dashboard_records_loaded(self, records_data):
         """后台加载完成后在主线程更新 UI"""
         try:

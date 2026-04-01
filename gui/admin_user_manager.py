@@ -245,11 +245,8 @@ class UserEditDialog(QDialog):
         row1.addLayout(self._create_field("密码", self.password_input, "用户登录凭证"))
         
         self.role_combo = QComboBox()
-        self.role_combo.blockSignals(True)
-        self.role_combo.model().blockSignals(True)
         self.role_combo.addItems(['user', 'admin'])
-        self.role_combo.model().blockSignals(False)
-        self.role_combo.blockSignals(False)
+        self.role_combo.setCurrentIndex(0)
         if self.user: self.role_combo.setCurrentText(self.user.role)
         row1.addLayout(self._create_field("角色", self.role_combo, "admin拥有所有权限"))
         
