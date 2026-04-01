@@ -6029,7 +6029,7 @@ class MainWindow(QMainWindow):
         
         self._cleanup_dashboard_thread()
 
-        thread = QThread()
+        thread = QThread(self)
         worker = RecordsLoaderWorker(
             self.db_manager, 20, 1, self.current_user
         )
@@ -6049,8 +6049,10 @@ class MainWindow(QMainWindow):
     
     def _on_dashboard_thread_finished(self):
         """Dashboard 线程结束时清空引用，防止访问已销毁的 C++ 对象"""
-        self._dashboard_worker = None
-        self._dashboard_thread = None
+        sender = self.sender()
+        if hasattr(self, '_dashboard_thread') and sender == self._dashboard_thread:
+            self._dashboard_worker = None
+            self._dashboard_thread = None
 
     def _on_dashboard_records_loaded(self, records_data):
         """后台加载完成后在主线程更新 UI"""
