@@ -6089,23 +6089,30 @@ class MainWindow(QMainWindow):
         # 获取当前用户的名片
         cards = self.db_manager.get_all_cards(user=self.current_user)
         
-        # 如果没有名片，显示空状态
-        if not cards:
-            empty_widget = self.create_empty_state(
-                icon="fa5s.address-card",
-                title="暂无名片",
-                subtitle="点击上方「添加名片」按钮创建您的第一张名片",
-                color="#007AFF"
-            )
-            self.cards_container_layout.addWidget(empty_widget)
-            self.cards_container_layout.addStretch()
-            return
-        
         # 按分类分组
         cards_by_category = defaultdict(list)
         for card in cards:
             category = card.category if hasattr(card, 'category') and card.category else "默认分类"
             cards_by_category[category].append(card)
+            
+        # 添加数据库中存在的分类（即使没有名片）
+        if self.current_user:
+            from database.models import Category
+            for category_obj in Category.objects(user=self.current_user).order_by('order', 'name'):
+                if category_obj.name not in cards_by_category:
+                    cards_by_category[category_obj.name] = []
+        
+        # 如果没有名片且没有分类，显示空状态
+        if not cards_by_category:
+            empty_widget = self.create_empty_state(
+                icon="fa5s.address-card",
+                title="暂无名片",
+                subtitle="点击上方「新增分类」或「添加名片」开始",
+                color="#007AFF"
+            )
+            self.cards_container_layout.addWidget(empty_widget)
+            self.cards_container_layout.addStretch()
+            return
         
         # 为每个分类创建可折叠组件
         collapsed_categories = self._get_collapsed_categories()
